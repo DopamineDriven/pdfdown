@@ -26,7 +26,10 @@ pub fn extract_text_per_page(buffer: Buffer) -> Result<Vec<PageText>> {
 
   for &page_num in pages.keys() {
     let text = doc.extract_text(&[page_num]).unwrap_or_default();
-    results.push(PageText { page: page_num, text });
+    results.push(PageText {
+      page: page_num,
+      text,
+    });
   }
 
   Ok(results)
@@ -111,17 +114,13 @@ fn collect_page_images(doc: &Document, page_id: ObjectId, page_num: u32) -> Vec<
     };
 
     // Only process Image XObjects
-    let subtype = stream
-      .dict
-      .get(b"Subtype")
-      .ok()
-      .and_then(|v| {
-        if let Object::Name(n) = v {
-          Some(n.as_slice())
-        } else {
-          None
-        }
-      });
+    let subtype = stream.dict.get(b"Subtype").ok().and_then(|v| {
+      if let Object::Name(n) = v {
+        Some(n.as_slice())
+      } else {
+        None
+      }
+    });
 
     if subtype != Some(b"Image") {
       continue;
@@ -170,10 +169,7 @@ fn collect_page_images(doc: &Document, page_id: ObjectId, page_num: u32) -> Vec<
   images
 }
 
-fn get_page_xobjects(
-  doc: &Document,
-  page_id: ObjectId,
-) -> Option<lopdf::Dictionary> {
+fn get_page_xobjects(doc: &Document, page_id: ObjectId) -> Option<lopdf::Dictionary> {
   let page_dict = doc.get_dictionary(page_id).ok()?;
 
   // Resources may be a direct dict or a reference
