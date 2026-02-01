@@ -1,87 +1,157 @@
-# `@napi-rs/package-template`
+# `@d0paminedriven/pdfdown`
 
-![https://github.com/napi-rs/package-template/actions](https://github.com/napi-rs/package-template/workflows/CI/badge.svg)
+![CI](https://github.com/DopamineDriven/pdfdown/workflows/CI/badge.svg)
 
-> Template project for writing node packages with napi-rs.
+Rust-powered PDF extraction for Node.js via [napi-rs](https://napi.rs). Extracts per-page text, images (as PNG), and metadata from PDF buffers.
 
-# Usage
-
-1. Click **Use this template**.
-2. **Clone** your project.
-3. Run `yarn install` to install dependencies.
-4. Run `yarn napi rename -n [@your-scope/package-name] -b [binary-name]` command under the project folder to rename your package.
-
-## Install this test package
+## Install
 
 ```bash
-yarn add @napi-rs/package-template
+npm install @d0paminedriven/pdfdown
+# or
+yarn add @d0paminedriven/pdfdown
+# or
+pnpm add @d0paminedriven/pdfdown
 ```
 
-## Ability
+## API
 
-### Build
+```typescript
+export declare function extractTextPerPage(buffer: Buffer): Array<PageText>
+export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>
+export declare function pdfMetadata(buffer: Buffer): PdfMeta
 
-After `yarn build/npm run build` command, you can see `package-template.[darwin|win32|linux].node` file in project root. This is the native addon built from [lib.rs](./src/lib.rs).
+export interface PageText {
+  page: number
+  text: string
+}
 
-### Test
+export interface PageImage {
+  page: number
+  imageIndex: number
+  width: number
+  height: number
+  data: Buffer // PNG-encoded bytes
+  colorSpace: string
+  bitsPerComponent: number
+  filter: string
+}
 
-With [ava](https://github.com/avajs/ava), run `yarn test/npm run test` to testing native addon. You can also switch to another testing framework if you want.
-
-### CI
-
-With GitHub Actions, each commit and pull request will be built and tested automatically in [`node@20`, `@node22`] x [`macOS`, `Linux`, `Windows`] matrix. You will never be afraid of the native addon broken in these platforms.
-
-### Release
-
-Release native package is very difficult in old days. Native packages may ask developers who use it to install `build toolchain` like `gcc/llvm`, `node-gyp` or something more.
-
-With `GitHub actions`, we can easily prebuild a `binary` for major platforms. And with `N-API`, we should never be afraid of **ABI Compatible**.
-
-The other problem is how to deliver prebuild `binary` to users. Downloading it in `postinstall` script is a common way that most packages do it right now. The problem with this solution is it introduced many other packages to download binary that has not been used by `runtime codes`. The other problem is some users may not easily download the binary from `GitHub/CDN` if they are behind a private network (But in most cases, they have a private NPM mirror).
-
-In this package, we choose a better way to solve this problem. We release different `npm packages` for different platforms. And add it to `optionalDependencies` before releasing the `Major` package to npm.
-
-`NPM` will choose which native package should download from `registry` automatically. You can see [npm](./npm) dir for details. And you can also run `yarn add @napi-rs/package-template` to see how it works.
-
-## Develop requirements
-
-- Install the latest `Rust`
-- Install `Node.js@10+` which fully supported `Node-API`
-- Install `yarn@1.x`
-
-## Test in local
-
-- yarn
-- yarn build
-- yarn test
-
-And you will see:
-
-```bash
-$ ava --verbose
-
-  ✔ sync function from native code
-  ✔ sleep function from native code (201ms)
-  ─
-
-  2 tests passed
-✨  Done in 1.12s.
+export interface PdfMeta {
+  pageCount: number
+  version: string
+  isLinearized: boolean
+}
 ```
 
-## Release package
+## Usage
 
-Ensure you have set your **NPM_TOKEN** in the `GitHub` project setting.
+### Extract text per page
 
-In `Settings -> Secrets`, add **NPM_TOKEN** into it.
+```typescript
+import { readFileSync } from "fs";
+import { extractTextPerPage } from "@d0paminedriven/pdfdown";
 
-When you want to release the package:
+const pdf = readFileSync("document.pdf");
+const pages = extractTextPerPage(pdf);
 
-```bash
-npm version [<newversion> | major | minor | patch | premajor | preminor | prepatch | prerelease [--preid=<prerelease-id>] | from-git]
-
-git push
+for (const { page, text } of pages) {
+  console.log(`Page ${page}: ${text.slice(0, 100)}...`);
+}
 ```
 
-GitHub actions will do the rest job for you.
+### Extract images as PNG
 
-> WARN: Don't run `npm publish` manually.
+```typescript
+import { readFileSync } from "fs";
+import { extractImagesPerPage } from "@d0paminedriven/pdfdown";
+
+const pdf = readFileSync("document.pdf");
+const images = extractImagesPerPage(pdf);
+
+for (const img of images) {
+  // Base64 data URL for embedding or API consumption
+  const dataUrl = `data:image/png;base64,${img.data.toString("base64")}`;
+  console.log(`Page ${img.page} image ${img.imageIndex}: ${img.width}x${img.height} ${img.colorSpace}`);
+}
+```
+
+### Get PDF metadata
+
+```typescript
+import { readFileSync } from "fs";
+import { pdfMetadata } from "@d0paminedriven/pdfdown";
+
+const pdf = readFileSync("document.pdf");
+const meta = pdfMetadata(pdf);
+
+console.log(`v${meta.version}, ${meta.pageCount} pages, linearized: ${meta.isLinearized}`);
+```
+
+### Combined: text + images + annotations for embeddings
+
+```typescript
+import { readFileSync } from "fs";
+import { extractTextPerPage, extractImagesPerPage } from "@d0paminedriven/pdfdown";
+
+const pdf = readFileSync("document.pdf");
+
+const text = extractTextPerPage(pdf);
+const images = extractImagesPerPage(pdf);
+
+// Group images by page
+const imagesByPage = new Map<number, typeof images>();
+for (const img of images) {
+  const arr = imagesByPage.get(img.page) ?? [];
+  arr.push(img);
+  imagesByPage.set(img.page, arr);
+}
+
+// Build per-page payloads for multimodal embeddings
+for (const { page, text: pageText } of text) {
+  const pageImages = imagesByPage.get(page) ?? [];
+  const payload = {
+    page,
+    text: pageText,
+    images: pageImages.map((img) => ({
+      dataUrl: `data:image/png;base64,${img.data.toString("base64")}`,
+      width: img.width,
+      height: img.height,
+    })),
+  };
+  // Send payload to Voyage AI, pgvector, etc.
+}
+```
+
+## Supported formats
+
+| Filter | Description | Handling |
+|--------|-------------|----------|
+| DCTDecode | JPEG-compressed images | Decoded and re-encoded as PNG |
+| FlateDecode | Zlib-compressed raw pixels | Decompressed, reconstructed as PNG |
+| None | Uncompressed raw pixels | Reconstructed as PNG |
+
+| ColorSpace | Channels |
+|------------|----------|
+| DeviceRGB | 3 |
+| DeviceGray | 1 |
+| DeviceCMYK | 4 (converted to RGB) |
+| ICCBased | Inferred from /N parameter |
+
+8-bit and 16-bit BitsPerComponent are both supported (16-bit downscaled to 8-bit for PNG output).
+
+## How it works
+
+Built with [lopdf](https://github.com/J-F-Liu/lopdf) (pure Rust PDF parser) and [image](https://github.com/image-rs/image) (PNG/JPEG encoding). Compiled to a native Node.js addon via [napi-rs](https://napi.rs) with prebuilt binaries for:
+
+- macOS (x64, ARM64)
+- Windows (x64, ia32, ARM64)
+- Linux glibc (x64, ARM64, ARMv7)
+- Linux musl (x64, ARM64)
+- FreeBSD (x64)
+- Android (ARM64, ARMv7)
+- WASI
+
+## License
+
+MIT
