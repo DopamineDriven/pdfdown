@@ -255,20 +255,17 @@ fn get_referenced_xobject_names(doc: &Document, page_id: ObjectId) -> HashSet<Ve
   for stream_id in stream_ids {
     if let Ok(Object::Stream(s)) = doc.get_object(stream_id) {
       let mut s = s.clone();
-      if s.decompress().is_ok() {
-        all_bytes.extend_from_slice(&s.content);
-      } else {
-        all_bytes.extend_from_slice(&s.content);
-      }
+      let _ = s.decompress();
+      all_bytes.extend_from_slice(&s.content);
     }
   }
 
   if let Ok(content) = lopdf::content::Content::decode(&all_bytes) {
     for op in &content.operations {
-      if op.operator == "Do" {
-        if let Some(Object::Name(name)) = op.operands.first() {
-          names.insert(name.clone());
-        }
+      if op.operator == "Do"
+        && let Some(Object::Name(name)) = op.operands.first()
+      {
+        names.insert(name.clone());
       }
     }
   }
