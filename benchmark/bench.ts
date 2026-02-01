@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-
 import { Bench } from 'tinybench'
 
 import {
@@ -12,11 +9,12 @@ import {
   pdfMetadataAsync,
 } from '../index.js'
 
-const PDF_PATH = resolve(
-  '/home/dopaminedriven/personal/d0paminedriven/packages/metadata/src/test/__benchmark__/Candy-Flipping-Claudtullus-Pt-I.pdf',
-)
+const PDF_URL =
+  'https://assets.aicoalesce.com/upload/nrr6h4r4480f6kviycyo1zhf/1767335919790-Candy-Flipping-Claudtullus-Part-I.pdf'
 
-const pdf = readFileSync(PDF_PATH)
+const res = await fetch(PDF_URL)
+if (!res.ok) throw new Error(`Failed to fetch PDF: ${res.status} ${res.statusText}`)
+const pdf = Buffer.from(await res.arrayBuffer())
 
 const b = new Bench()
 
