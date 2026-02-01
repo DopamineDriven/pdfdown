@@ -2,7 +2,11 @@
 /* eslint-disable */
 export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>
 
+export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array<PageImage>>
+
 export declare function extractTextPerPage(buffer: Buffer): Array<PageText>
+
+export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<PageText>>
 
 export interface PageImage {
   page: number
@@ -30,4 +34,4 @@ export interface PdfMeta {
 
 export declare function pdfMetadata(buffer: Buffer): PdfMeta
 
-export declare function plus100(input: number): number
+export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>

@@ -1,6 +1,7 @@
 #![deny(clippy::all)]
 
 use napi::bindgen_prelude::*;
+use napi::{Env, Task};
 use napi_derive::napi;
 
 use image::{DynamicImage, ImageBuffer, ImageFormat};
@@ -532,9 +533,141 @@ fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
   rgb
 }
 
-// ── Legacy ───────────────────────────────────────────────────────
+// ── Shared helper ────────────────────────────────────────────────
+
+fn load_doc(buf: &[u8]) -> Result<Document> {
+  Document::load_mem(buf).map_err(|e| Error::from_reason(format!("Failed to load PDF: {e}")))
+}
+
+// ── Async variants (libuv thread pool via AsyncTask) ─────────────
+
+pub struct ExtractTextTask(Vec<u8>);
 
 #[napi]
-pub fn plus_100(input: u32) -> u32 {
-  input + 100
+impl Task for ExtractTextTask {
+  type Output = Vec<PageText>;
+  type JsValue = Vec<PageText>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.0)?;
+    let pages = doc.get_pages();
+    let mut results = Vec::with_capacity(pages.len());
+    for &page_num in pages.keys() {
+      let text = doc.extract_text(&[page_num]).unwrap_or_default();
+      results.push(PageText {
+        page: page_num,
+        text,
+      });
+    }
+    Ok(results)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+pub fn extract_text_per_page_async(buffer: Buffer) -> AsyncTask<ExtractTextTask> {
+  AsyncTask::new(ExtractTextTask(buffer.to_vec()))
+}
+
+/// Internal image result used in worker threads where napi `Buffer` is unavailable.
+pub struct PageImageData {
+  page: u32,
+  image_index: u32,
+  width: u32,
+  height: u32,
+  data: Vec<u8>,
+  color_space: String,
+  bits_per_component: u32,
+  filter: String,
+  xobject_name: String,
+  object_id: String,
+}
+
+impl From<PageImageData> for PageImage {
+  fn from(d: PageImageData) -> Self {
+    PageImage {
+      page: d.page,
+      image_index: d.image_index,
+      width: d.width,
+      height: d.height,
+      data: d.data.into(),
+      color_space: d.color_space,
+      bits_per_component: d.bits_per_component,
+      filter: d.filter,
+      xobject_name: d.xobject_name,
+      object_id: d.object_id,
+    }
+  }
+}
+
+pub struct ExtractImagesTask(Vec<u8>);
+
+#[napi]
+impl Task for ExtractImagesTask {
+  type Output = Vec<PageImageData>;
+  type JsValue = Vec<PageImage>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.0)?;
+    let pages = doc.get_pages();
+    let mut results = Vec::new();
+    for (&page_num, &page_id) in &pages {
+      for img in collect_page_images(&doc, page_id, page_num) {
+        results.push(PageImageData {
+          page: img.page,
+          image_index: img.image_index,
+          width: img.width,
+          height: img.height,
+          data: img.data.to_vec(),
+          color_space: img.color_space,
+          bits_per_component: img.bits_per_component,
+          filter: img.filter,
+          xobject_name: img.xobject_name,
+          object_id: img.object_id,
+        });
+      }
+    }
+    Ok(results)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output.into_iter().map(PageImage::from).collect())
+  }
+}
+
+#[napi]
+pub fn extract_images_per_page_async(buffer: Buffer) -> AsyncTask<ExtractImagesTask> {
+  AsyncTask::new(ExtractImagesTask(buffer.to_vec()))
+}
+
+pub struct PdfMetaTask(Vec<u8>);
+
+#[napi]
+impl Task for PdfMetaTask {
+  type Output = PdfMeta;
+  type JsValue = PdfMeta;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.0)?;
+    let page_count = doc.get_pages().len() as u32;
+    let version = doc.version.clone();
+    let is_linearized = doc.trailer.get(b"Linearized").is_ok();
+    Ok(PdfMeta {
+      page_count,
+      version,
+      is_linearized,
+    })
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+pub fn pdf_metadata_async(buffer: Buffer) -> AsyncTask<PdfMetaTask> {
+  AsyncTask::new(PdfMetaTask(buffer.to_vec()))
 }

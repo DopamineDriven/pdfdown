@@ -57,6 +57,8 @@ const {
 })
 export default __napiModule.exports
 export const extractImagesPerPage = __napiModule.exports.extractImagesPerPage
+export const extractImagesPerPageAsync = __napiModule.exports.extractImagesPerPageAsync
 export const extractTextPerPage = __napiModule.exports.extractTextPerPage
+export const extractTextPerPageAsync = __napiModule.exports.extractTextPerPageAsync
 export const pdfMetadata = __napiModule.exports.pdfMetadata
-export const plus100 = __napiModule.exports.plus100
+export const pdfMetadataAsync = __napiModule.exports.pdfMetadataAsync

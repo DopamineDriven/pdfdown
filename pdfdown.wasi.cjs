@@ -109,6 +109,8 @@ const { instance: __napiInstance, module: __wasiModule, napiModule: __napiModule
 })
 module.exports = __napiModule.exports
 module.exports.extractImagesPerPage = __napiModule.exports.extractImagesPerPage
+module.exports.extractImagesPerPageAsync = __napiModule.exports.extractImagesPerPageAsync
 module.exports.extractTextPerPage = __napiModule.exports.extractTextPerPage
+module.exports.extractTextPerPageAsync = __napiModule.exports.extractTextPerPageAsync
 module.exports.pdfMetadata = __napiModule.exports.pdfMetadata
-module.exports.plus100 = __napiModule.exports.plus100
+module.exports.pdfMetadataAsync = __napiModule.exports.pdfMetadataAsync
