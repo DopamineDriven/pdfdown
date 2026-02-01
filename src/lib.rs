@@ -671,3 +671,80 @@ impl Task for PdfMetaTask {
 pub fn pdf_metadata_async(buffer: Buffer) -> AsyncTask<PdfMetaTask> {
   AsyncTask::new(PdfMetaTask(buffer.to_vec()))
 }
+
+// ── Class-based API (parse once, call many) ─────────────────────
+
+#[napi]
+pub struct PdfDown {
+  doc: Document,
+  raw: Vec<u8>,
+}
+
+#[napi]
+impl PdfDown {
+  #[napi(constructor)]
+  pub fn new(buffer: Buffer) -> Result<Self> {
+    let raw = buffer.to_vec();
+    let doc = Document::load_mem(&raw)
+      .map_err(|e| Error::from_reason(format!("Failed to load PDF: {e}")))?;
+    Ok(PdfDown { doc, raw })
+  }
+
+  /// Sync: extract text per page (reuses the already-parsed document)
+  #[napi]
+  pub fn text_per_page(&self) -> Result<Vec<PageText>> {
+    let pages = self.doc.get_pages();
+    let mut results = Vec::with_capacity(pages.len());
+    for &page_num in pages.keys() {
+      let text = self.doc.extract_text(&[page_num]).unwrap_or_default();
+      results.push(PageText {
+        page: page_num,
+        text,
+      });
+    }
+    Ok(results)
+  }
+
+  /// Sync: extract images per page (reuses the already-parsed document)
+  #[napi]
+  pub fn images_per_page(&self) -> Result<Vec<PageImage>> {
+    let pages = self.doc.get_pages();
+    let mut results = Vec::new();
+    for (&page_num, &page_id) in &pages {
+      let page_images = collect_page_images(&self.doc, page_id, page_num);
+      results.extend(page_images);
+    }
+    Ok(results)
+  }
+
+  /// Sync: get PDF metadata (reuses the already-parsed document)
+  #[napi]
+  pub fn metadata(&self) -> PdfMeta {
+    let page_count = self.doc.get_pages().len() as u32;
+    let version = self.doc.version.clone();
+    let is_linearized = self.doc.trailer.get(b"Linearized").is_ok();
+    PdfMeta {
+      page_count,
+      version,
+      is_linearized,
+    }
+  }
+
+  /// Async: extract text per page on the libuv thread pool
+  #[napi]
+  pub fn text_per_page_async(&self) -> AsyncTask<ExtractTextTask> {
+    AsyncTask::new(ExtractTextTask(self.raw.clone()))
+  }
+
+  /// Async: extract images per page on the libuv thread pool
+  #[napi]
+  pub fn images_per_page_async(&self) -> AsyncTask<ExtractImagesTask> {
+    AsyncTask::new(ExtractImagesTask(self.raw.clone()))
+  }
+
+  /// Async: get PDF metadata on the libuv thread pool
+  #[napi]
+  pub fn metadata_async(&self) -> AsyncTask<PdfMetaTask> {
+    AsyncTask::new(PdfMetaTask(self.raw.clone()))
+  }
+}

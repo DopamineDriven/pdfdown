@@ -1,6 +1,6 @@
 import test from 'ava'
 
-import { extractImagesPerPage, extractImagesPerPageAsync } from '../index'
+import { extractImagesPerPage, extractImagesPerPageAsync, PdfDown } from '../index'
 
 const EXPECTED_IMAGE_COUNT = 13
 const EXPECTED_PAGES = [2, 4, 8, 24, 25, 35, 47, 62, 63, 64, 71]
@@ -30,6 +30,36 @@ test('extractImagesPerPage (sync) — returns 13 images from Candy Flipping Clau
 test('extractImagesPerPageAsync — returns 13 images from Candy Flipping Claudtullus Pt I', async (t) => {
   const buf = pdf
   const images = await extractImagesPerPageAsync(buf)
+
+  t.is(images.length, EXPECTED_IMAGE_COUNT, `expected ${EXPECTED_IMAGE_COUNT} images, got ${images.length}`)
+
+  const pages = [...new Set(images.map((img) => img.page))].sort((a, b) => a - b)
+  t.deepEqual(pages, EXPECTED_PAGES, `expected pages ${EXPECTED_PAGES}, got ${pages}`)
+
+  for (const img of images) {
+    const header = img.data.subarray(0, 4)
+    t.deepEqual([...header], PNG_MAGIC, `image on page ${img.page} (index ${img.imageIndex}) is not a valid PNG`)
+  }
+})
+
+const pdfDown = new PdfDown(pdf)
+
+test('PdfDown.imagesPerPage (sync method) — returns 13 images from Candy Flipping Claudtullus Pt I', async (t) => {
+  const images = pdfDown.imagesPerPage()
+
+  t.is(images.length, EXPECTED_IMAGE_COUNT, `expected ${EXPECTED_IMAGE_COUNT} images, got ${images.length}`)
+
+  const pages = [...new Set(images.map((img) => img.page))].sort((a, b) => a - b)
+  t.deepEqual(pages, EXPECTED_PAGES, `expected pages ${EXPECTED_PAGES}, got ${pages}`)
+
+  for (const img of images) {
+    const header = img.data.subarray(0, 4)
+    t.deepEqual([...header], PNG_MAGIC, `image on page ${img.page} (index ${img.imageIndex}) is not a valid PNG`)
+  }
+})
+
+test('PdfDown.imagesPerPageAsync (async method) — returns 13 images from Candy Flipping Claudtullus Pt I', async (t) => {
+  const images = await pdfDown.imagesPerPageAsync()
 
   t.is(images.length, EXPECTED_IMAGE_COUNT, `expected ${EXPECTED_IMAGE_COUNT} images, got ${images.length}`)
 
