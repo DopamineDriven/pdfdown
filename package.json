@@ -5,7 +5,7 @@
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/napi-rs/package-template.git"
+    "url": "https://github.com/DopamineDriven/pdfdown"
   },
   "license": "MIT",
   "browser": "browser.js",
