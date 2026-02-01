@@ -1,0 +1,22 @@
+
+[package]
+edition = "2024"
+
+name = "pdfdown"
+version = "0.1.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3.0.0", features = ["napi6"] }
+napi-derive = "3.0.0"
+lopdf = "0.39"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+strip = "symbols"
