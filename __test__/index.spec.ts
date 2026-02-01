@@ -1,23 +1,19 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-
 import test from 'ava'
 
 import { extractImagesPerPage, extractImagesPerPageAsync } from '../index'
 
-const PDF_PATH = resolve(
-  '/home/dopaminedriven/personal/d0paminedriven/packages/metadata/src/test/__benchmark__/Candy-Flipping-Claudtullus-Pt-I.pdf',
-)
 const EXPECTED_IMAGE_COUNT = 13
 const EXPECTED_PAGES = [2, 4, 8, 24, 25, 35, 47, 62, 63, 64, 71]
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47]
 
-function loadPdf(): Buffer {
-  return readFileSync(PDF_PATH)
-}
+const PDF_URL =
+  'https://assets.aicoalesce.com/upload/nrr6h4r4480f6kviycyo1zhf/1767335919790-Candy-Flipping-Claudtullus-Part-I.pdf'
 
-test('extractImagesPerPage (sync) — returns 13 images from Candy Flipping Claudtullus Pt I', (t) => {
-  const buf = loadPdf()
+const res = await fetch(PDF_URL)
+if (!res.ok) throw new Error(`Failed to fetch PDF: ${res.status} ${res.statusText}`)
+const pdf = Buffer.from(await res.arrayBuffer())
+test('extractImagesPerPage (sync) — returns 13 images from Candy Flipping Claudtullus Pt I', async (t) => {
+  const buf = pdf
   const images = extractImagesPerPage(buf)
 
   t.is(images.length, EXPECTED_IMAGE_COUNT, `expected ${EXPECTED_IMAGE_COUNT} images, got ${images.length}`)
@@ -32,7 +28,7 @@ test('extractImagesPerPage (sync) — returns 13 images from Candy Flipping Clau
 })
 
 test('extractImagesPerPageAsync — returns 13 images from Candy Flipping Claudtullus Pt I', async (t) => {
-  const buf = loadPdf()
+  const buf = pdf
   const images = await extractImagesPerPageAsync(buf)
 
   t.is(images.length, EXPECTED_IMAGE_COUNT, `expected ${EXPECTED_IMAGE_COUNT} images, got ${images.length}`)
