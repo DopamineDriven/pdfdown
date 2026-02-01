@@ -1,7 +1,7 @@
 {
   "name": "@d0paminedriven/pdfdown",
-  "version": "0.1.0",
-  "description": "Template project for writing node package with napi-rs",
+  "version": "0.1.1",
+  "description": "Rust powered PDF extraction for Node",
   "main": "index.js",
   "repository": {
     "type": "git",
