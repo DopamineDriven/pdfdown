@@ -3,7 +3,7 @@
 edition = "2024"
 
 name = "pdfdown"
-version = "0.1.0"
+version = "0.2.0"
 
 [lib]
 crate-type = ["cdylib"]
@@ -13,6 +13,7 @@ napi = { version = "3.0.0", features = ["napi6"] }
 napi-derive = "3.0.0"
 lopdf = "0.39"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+hayro-jpeg2000 = { version = "0.3.1", features = ["image"] }
 
 [build-dependencies]
 napi-build = "2"

@@ -13,6 +13,8 @@ export interface PageImage {
   colorSpace: string
   bitsPerComponent: number
   filter: string
+  xobjectName: string
+  objectId: string
 }
 
 export interface PageText {
