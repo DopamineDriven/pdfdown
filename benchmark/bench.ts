@@ -10,7 +10,7 @@ import {
 } from '../index.js'
 
 const PDF_URL =
-  'https://assets.aicoalesce.com/upload/nrr6h4r4480f6kviycyo1zhf/1767335919790-Candy-Flipping-Claudtullus-Part-I.pdf'
+  'https://assets-dev.aicoalesce.com/upload/nrr6h4r4480f6kviycyo1zhf/1765025311330-Candy-Flipping-Claudtullus-Pt-I.pdf'
 
 const res = await fetch(PDF_URL)
 if (!res.ok) throw new Error(`Failed to fetch PDF: ${res.status} ${res.statusText}`)
