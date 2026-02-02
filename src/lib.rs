@@ -8,8 +8,17 @@ use image::{DynamicImage, ImageBuffer, ImageFormat};
 use lopdf::{Document, Object, ObjectId};
 use std::collections::HashSet;
 use std::io::Cursor;
+use std::sync::Arc;
 
-// ── Text extraction ──────────────────────────────────────────────
+// ── Step 1: Compile-time assertion that lopdf::Document is Send + Sync ──
+const _: () = {
+  fn assert_send_sync<T: Send + Sync>() {}
+  fn check() {
+    assert_send_sync::<lopdf::Document>();
+  }
+};
+
+// ── Napi object types (JS boundary) ─────────────────────────────
 
 #[napi(object)]
 pub struct PageText {
@@ -17,53 +26,12 @@ pub struct PageText {
   pub text: String,
 }
 
-#[napi]
-pub fn extract_text_per_page(buffer: Buffer) -> Result<Vec<PageText>> {
-  let bytes: &[u8] = buffer.as_ref();
-  let doc = Document::load_mem(bytes)
-    .map_err(|e| Error::from_reason(format!("Failed to load PDF: {e}")))?;
-
-  let pages = doc.get_pages();
-  let mut results = Vec::with_capacity(pages.len());
-
-  for &page_num in pages.keys() {
-    let text = doc.extract_text(&[page_num]).unwrap_or_default();
-    results.push(PageText {
-      page: page_num,
-      text,
-    });
-  }
-
-  Ok(results)
-}
-
-// ── Metadata ─────────────────────────────────────────────────────
-
 #[napi(object)]
 pub struct PdfMeta {
   pub page_count: u32,
   pub version: String,
   pub is_linearized: bool,
 }
-
-#[napi]
-pub fn pdf_metadata(buffer: Buffer) -> Result<PdfMeta> {
-  let bytes: &[u8] = buffer.as_ref();
-  let doc = Document::load_mem(bytes)
-    .map_err(|e| Error::from_reason(format!("Failed to load PDF: {e}")))?;
-
-  let page_count = doc.get_pages().len() as u32;
-  let version = doc.version.clone();
-  let is_linearized = doc.trailer.get(b"Linearized").is_ok();
-
-  Ok(PdfMeta {
-    page_count,
-    version,
-    is_linearized,
-  })
-}
-
-// ── Image extraction ─────────────────────────────────────────────
 
 #[napi(object)]
 pub struct PageImage {
@@ -79,24 +47,206 @@ pub struct PageImage {
   pub object_id: String,
 }
 
-#[napi]
-pub fn extract_images_per_page(buffer: Buffer) -> Result<Vec<PageImage>> {
-  let bytes: &[u8] = buffer.as_ref();
-  let doc = Document::load_mem(bytes)
-    .map_err(|e| Error::from_reason(format!("Failed to load PDF: {e}")))?;
+#[napi(object)]
+pub struct PageAnnotation {
+  pub page: u32,
+  pub subtype: String,
+  pub rect: Vec<f64>,
+  pub uri: Option<String>,
+  pub dest: Option<String>,
+  pub content: Option<String>,
+}
 
+// ── Step 2: Internal type — no napi types, safe for any thread ──
+
+pub struct RawPageImage {
+  pub page: u32,
+  pub image_index: u32,
+  pub width: u32,
+  pub height: u32,
+  pub data: Vec<u8>,
+  pub color_space: String,
+  pub bits_per_component: u32,
+  pub filter: String,
+  pub xobject_name: String,
+  pub object_id: String,
+}
+
+impl From<RawPageImage> for PageImage {
+  fn from(r: RawPageImage) -> Self {
+    PageImage {
+      page: r.page,
+      image_index: r.image_index,
+      width: r.width,
+      height: r.height,
+      data: r.data.into(),
+      color_space: r.color_space,
+      bits_per_component: r.bits_per_component,
+      filter: r.filter,
+      xobject_name: r.xobject_name,
+      object_id: r.object_id,
+    }
+  }
+}
+
+// ── Shared helpers ──────────────────────────────────────────────
+
+fn load_doc(buf: &[u8]) -> Result<Document> {
+  Document::load_mem(buf).map_err(|e| Error::from_reason(format!("Failed to load PDF: {e}")))
+}
+
+fn extract_text(doc: &Document) -> Result<Vec<PageText>> {
+  let pages = doc.get_pages();
+  let mut results = Vec::with_capacity(pages.len());
+  for &page_num in pages.keys() {
+    let text = doc.extract_text(&[page_num]).unwrap_or_default();
+    results.push(PageText {
+      page: page_num,
+      text,
+    });
+  }
+  Ok(results)
+}
+
+fn extract_metadata(doc: &Document) -> PdfMeta {
+  let page_count = doc.get_pages().len() as u32;
+  let version = doc.version.clone();
+  let is_linearized = doc.trailer.get(b"Linearized").is_ok();
+  PdfMeta {
+    page_count,
+    version,
+    is_linearized,
+  }
+}
+
+fn extract_images_raw(doc: &Document) -> Vec<RawPageImage> {
+  let pages = doc.get_pages();
+  let mut results = Vec::new();
+  for (&page_num, &page_id) in &pages {
+    results.extend(collect_page_images_raw(doc, page_id, page_num));
+  }
+  results
+}
+
+fn extract_annotations(doc: &Document) -> Vec<PageAnnotation> {
   let pages = doc.get_pages();
   let mut results = Vec::new();
 
   for (&page_num, &page_id) in &pages {
-    let page_images = collect_page_images(&doc, page_id, page_num);
-    results.extend(page_images);
+    let annots = match doc.get_page_annotations(page_id) {
+      Ok(a) => a,
+      Err(_) => continue,
+    };
+
+    for annot in annots {
+      let subtype = annot
+        .get(b"Subtype")
+        .ok()
+        .and_then(|v| {
+          if let Object::Name(n) = v {
+            Some(String::from_utf8_lossy(n).to_string())
+          } else {
+            None
+          }
+        })
+        .unwrap_or_default();
+
+      let rect = annot
+        .get(b"Rect")
+        .ok()
+        .and_then(|v| {
+          if let Object::Array(arr) = v {
+            Some(
+              arr
+                .iter()
+                .filter_map(|o| match o {
+                  Object::Real(f) => Some(*f as f64),
+                  Object::Integer(i) => Some(*i as f64),
+                  _ => None,
+                })
+                .collect::<Vec<f64>>(),
+            )
+          } else {
+            None
+          }
+        })
+        .unwrap_or_default();
+
+      // Extract URI from /A action dictionary
+      let uri = annot.get(b"A").ok().and_then(|action| {
+        let action_dict = match action {
+          Object::Dictionary(d) => Some(d),
+          Object::Reference(id) => doc.get_dictionary(*id).ok(),
+          _ => None,
+        }?;
+        let uri_obj = action_dict.get(b"URI").ok()?;
+        match uri_obj {
+          Object::String(bytes, _) => Some(String::from_utf8_lossy(bytes).to_string()),
+          _ => None,
+        }
+      });
+
+      // Extract /Dest (named or direct destination)
+      let dest = annot.get(b"Dest").ok().and_then(|d| match d {
+        Object::String(bytes, _) => Some(String::from_utf8_lossy(bytes).to_string()),
+        Object::Name(n) => Some(String::from_utf8_lossy(n).to_string()),
+        _ => None,
+      });
+
+      // Extract /Contents (tooltip / alt text)
+      let content = annot.get(b"Contents").ok().and_then(|c| match c {
+        Object::String(bytes, _) => Some(String::from_utf8_lossy(bytes).to_string()),
+        _ => None,
+      });
+
+      results.push(PageAnnotation {
+        page: page_num,
+        subtype,
+        rect,
+        uri,
+        dest,
+        content,
+      });
+    }
   }
 
-  Ok(results)
+  results
 }
 
-fn collect_page_images(doc: &Document, page_id: ObjectId, page_num: u32) -> Vec<PageImage> {
+// ── Standalone sync functions ───────────────────────────────────
+
+#[napi]
+pub fn extract_text_per_page(buffer: Buffer) -> Result<Vec<PageText>> {
+  let doc = load_doc(buffer.as_ref())?;
+  extract_text(&doc)
+}
+
+#[napi]
+pub fn pdf_metadata(buffer: Buffer) -> Result<PdfMeta> {
+  let doc = load_doc(buffer.as_ref())?;
+  Ok(extract_metadata(&doc))
+}
+
+#[napi]
+pub fn extract_annotations_per_page(buffer: Buffer) -> Result<Vec<PageAnnotation>> {
+  let doc = load_doc(buffer.as_ref())?;
+  Ok(extract_annotations(&doc))
+}
+
+#[napi]
+pub fn extract_images_per_page(buffer: Buffer) -> Result<Vec<PageImage>> {
+  let doc = load_doc(buffer.as_ref())?;
+  Ok(
+    extract_images_raw(&doc)
+      .into_iter()
+      .map(PageImage::from)
+      .collect(),
+  )
+}
+
+// ── Image extraction internals ──────────────────────────────────
+
+fn collect_page_images_raw(doc: &Document, page_id: ObjectId, page_num: u32) -> Vec<RawPageImage> {
   let mut images = Vec::new();
 
   // Get XObjects from page resources (with parent inheritance)
@@ -150,14 +300,17 @@ fn collect_page_images(doc: &Document, page_id: ObjectId, page_num: u32) -> Vec<
     let color_space = resolve_color_space(&stream.dict, doc);
     let filter = resolve_filter(&stream.dict);
 
-    // Get stream content — for DCT/JPX, preserve raw encoded bytes;
-    // for everything else, let lopdf decompress (e.g. FlateDecode → raw pixels)
-    let content = {
-      let mut s = stream.clone();
-      if s.decompress().is_ok() {
-        s.content
-      } else {
-        stream.content.clone()
+    // Step 4: Skip the full stream clone for DCT/JPX — they're already in their
+    // target encoded format and don't need lopdf decompression.
+    let content = match filter.as_str() {
+      "DCTDecode" | "JPXDecode" => stream.content.clone(),
+      _ => {
+        let mut s = stream.clone();
+        if s.decompress().is_ok() {
+          s.content
+        } else {
+          stream.content.clone()
+        }
       }
     };
 
@@ -180,12 +333,12 @@ fn collect_page_images(doc: &Document, page_id: ObjectId, page_num: u32) -> Vec<
     let xobject_name = String::from_utf8_lossy(name).to_string();
     let object_id_str = format!("{} {} obj", obj_id.0, obj_id.1);
 
-    images.push(PageImage {
+    images.push(RawPageImage {
       page: page_num,
       image_index: img_index,
       width,
       height,
-      data: png_data.into(),
+      data: png_data,
       color_space,
       bits_per_component: bpc,
       filter,
@@ -533,13 +686,7 @@ fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
   rgb
 }
 
-// ── Shared helper ────────────────────────────────────────────────
-
-fn load_doc(buf: &[u8]) -> Result<Document> {
-  Document::load_mem(buf).map_err(|e| Error::from_reason(format!("Failed to load PDF: {e}")))
-}
-
-// ── Async variants (libuv thread pool via AsyncTask) ─────────────
+// ── Standalone async functions (libuv thread pool via AsyncTask) ─
 
 pub struct ExtractTextTask(Vec<u8>);
 
@@ -550,16 +697,7 @@ impl Task for ExtractTextTask {
 
   fn compute(&mut self) -> Result<Self::Output> {
     let doc = load_doc(&self.0)?;
-    let pages = doc.get_pages();
-    let mut results = Vec::with_capacity(pages.len());
-    for &page_num in pages.keys() {
-      let text = doc.extract_text(&[page_num]).unwrap_or_default();
-      results.push(PageText {
-        page: page_num,
-        text,
-      });
-    }
-    Ok(results)
+    extract_text(&doc)
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -572,65 +710,16 @@ pub fn extract_text_per_page_async(buffer: Buffer) -> AsyncTask<ExtractTextTask>
   AsyncTask::new(ExtractTextTask(buffer.to_vec()))
 }
 
-/// Internal image result used in worker threads where napi `Buffer` is unavailable.
-pub struct PageImageData {
-  page: u32,
-  image_index: u32,
-  width: u32,
-  height: u32,
-  data: Vec<u8>,
-  color_space: String,
-  bits_per_component: u32,
-  filter: String,
-  xobject_name: String,
-  object_id: String,
-}
-
-impl From<PageImageData> for PageImage {
-  fn from(d: PageImageData) -> Self {
-    PageImage {
-      page: d.page,
-      image_index: d.image_index,
-      width: d.width,
-      height: d.height,
-      data: d.data.into(),
-      color_space: d.color_space,
-      bits_per_component: d.bits_per_component,
-      filter: d.filter,
-      xobject_name: d.xobject_name,
-      object_id: d.object_id,
-    }
-  }
-}
-
 pub struct ExtractImagesTask(Vec<u8>);
 
 #[napi]
 impl Task for ExtractImagesTask {
-  type Output = Vec<PageImageData>;
+  type Output = Vec<RawPageImage>;
   type JsValue = Vec<PageImage>;
 
   fn compute(&mut self) -> Result<Self::Output> {
     let doc = load_doc(&self.0)?;
-    let pages = doc.get_pages();
-    let mut results = Vec::new();
-    for (&page_num, &page_id) in &pages {
-      for img in collect_page_images(&doc, page_id, page_num) {
-        results.push(PageImageData {
-          page: img.page,
-          image_index: img.image_index,
-          width: img.width,
-          height: img.height,
-          data: img.data.to_vec(),
-          color_space: img.color_space,
-          bits_per_component: img.bits_per_component,
-          filter: img.filter,
-          xobject_name: img.xobject_name,
-          object_id: img.object_id,
-        });
-      }
-    }
-    Ok(results)
+    Ok(extract_images_raw(&doc))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -652,14 +741,24 @@ impl Task for PdfMetaTask {
 
   fn compute(&mut self) -> Result<Self::Output> {
     let doc = load_doc(&self.0)?;
-    let page_count = doc.get_pages().len() as u32;
-    let version = doc.version.clone();
-    let is_linearized = doc.trailer.get(b"Linearized").is_ok();
-    Ok(PdfMeta {
-      page_count,
-      version,
-      is_linearized,
-    })
+    Ok(extract_metadata(&doc))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+pub struct ExtractAnnotationsTask(Vec<u8>);
+
+#[napi]
+impl Task for ExtractAnnotationsTask {
+  type Output = Vec<PageAnnotation>;
+  type JsValue = Vec<PageAnnotation>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.0)?;
+    Ok(extract_annotations(&doc))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -668,83 +767,147 @@ impl Task for PdfMetaTask {
 }
 
 #[napi]
+pub fn extract_annotations_per_page_async(buffer: Buffer) -> AsyncTask<ExtractAnnotationsTask> {
+  AsyncTask::new(ExtractAnnotationsTask(buffer.to_vec()))
+}
+
+#[napi]
 pub fn pdf_metadata_async(buffer: Buffer) -> AsyncTask<PdfMetaTask> {
   AsyncTask::new(PdfMetaTask(buffer.to_vec()))
 }
 
-// ── Class-based API (parse once, call many) ─────────────────────
+// ── Step 3: Class-based API with Arc<Document> ──────────────────
+
+/// Shared-document task types for class async methods.
+/// These use Arc<Document> instead of raw bytes, avoiding re-parsing.
+pub struct SharedExtractTextTask(Arc<Document>);
+
+#[napi]
+impl Task for SharedExtractTextTask {
+  type Output = Vec<PageText>;
+  type JsValue = Vec<PageText>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    extract_text(&self.0)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+pub struct SharedExtractImagesTask(Arc<Document>);
+
+#[napi]
+impl Task for SharedExtractImagesTask {
+  type Output = Vec<RawPageImage>;
+  type JsValue = Vec<PageImage>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(extract_images_raw(&self.0))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output.into_iter().map(PageImage::from).collect())
+  }
+}
+
+pub struct SharedExtractAnnotationsTask(Arc<Document>);
+
+#[napi]
+impl Task for SharedExtractAnnotationsTask {
+  type Output = Vec<PageAnnotation>;
+  type JsValue = Vec<PageAnnotation>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(extract_annotations(&self.0))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+pub struct SharedPdfMetaTask(Arc<Document>);
+
+#[napi]
+impl Task for SharedPdfMetaTask {
+  type Output = PdfMeta;
+  type JsValue = PdfMeta;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(extract_metadata(&self.0))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
 
 #[napi]
 pub struct PdfDown {
-  doc: Document,
-  raw: Vec<u8>,
+  doc: Arc<Document>,
 }
 
 #[napi]
 impl PdfDown {
   #[napi(constructor)]
   pub fn new(buffer: Buffer) -> Result<Self> {
-    let raw = buffer.to_vec();
-    let doc = Document::load_mem(&raw)
+    let doc = Document::load_mem(buffer.as_ref())
       .map_err(|e| Error::from_reason(format!("Failed to load PDF: {e}")))?;
-    Ok(PdfDown { doc, raw })
+    Ok(PdfDown { doc: Arc::new(doc) })
   }
 
   /// Sync: extract text per page (reuses the already-parsed document)
   #[napi]
   pub fn text_per_page(&self) -> Result<Vec<PageText>> {
-    let pages = self.doc.get_pages();
-    let mut results = Vec::with_capacity(pages.len());
-    for &page_num in pages.keys() {
-      let text = self.doc.extract_text(&[page_num]).unwrap_or_default();
-      results.push(PageText {
-        page: page_num,
-        text,
-      });
-    }
-    Ok(results)
+    extract_text(&self.doc)
   }
 
   /// Sync: extract images per page (reuses the already-parsed document)
   #[napi]
   pub fn images_per_page(&self) -> Result<Vec<PageImage>> {
-    let pages = self.doc.get_pages();
-    let mut results = Vec::new();
-    for (&page_num, &page_id) in &pages {
-      let page_images = collect_page_images(&self.doc, page_id, page_num);
-      results.extend(page_images);
-    }
-    Ok(results)
+    Ok(
+      extract_images_raw(&self.doc)
+        .into_iter()
+        .map(PageImage::from)
+        .collect(),
+    )
+  }
+
+  /// Sync: extract annotations per page (reuses the already-parsed document)
+  #[napi]
+  pub fn annotations_per_page(&self) -> Vec<PageAnnotation> {
+    extract_annotations(&self.doc)
   }
 
   /// Sync: get PDF metadata (reuses the already-parsed document)
   #[napi]
   pub fn metadata(&self) -> PdfMeta {
-    let page_count = self.doc.get_pages().len() as u32;
-    let version = self.doc.version.clone();
-    let is_linearized = self.doc.trailer.get(b"Linearized").is_ok();
-    PdfMeta {
-      page_count,
-      version,
-      is_linearized,
-    }
+    extract_metadata(&self.doc)
   }
 
-  /// Async: extract text per page on the libuv thread pool
+  /// Async: extract text per page on the libuv thread pool (shares parsed document via Arc)
   #[napi]
-  pub fn text_per_page_async(&self) -> AsyncTask<ExtractTextTask> {
-    AsyncTask::new(ExtractTextTask(self.raw.clone()))
+  pub fn text_per_page_async(&self) -> AsyncTask<SharedExtractTextTask> {
+    AsyncTask::new(SharedExtractTextTask(Arc::clone(&self.doc)))
   }
 
-  /// Async: extract images per page on the libuv thread pool
+  /// Async: extract images per page on the libuv thread pool (shares parsed document via Arc)
   #[napi]
-  pub fn images_per_page_async(&self) -> AsyncTask<ExtractImagesTask> {
-    AsyncTask::new(ExtractImagesTask(self.raw.clone()))
+  pub fn images_per_page_async(&self) -> AsyncTask<SharedExtractImagesTask> {
+    AsyncTask::new(SharedExtractImagesTask(Arc::clone(&self.doc)))
   }
 
-  /// Async: get PDF metadata on the libuv thread pool
+  /// Async: extract annotations per page on the libuv thread pool (shares parsed document via Arc)
   #[napi]
-  pub fn metadata_async(&self) -> AsyncTask<PdfMetaTask> {
-    AsyncTask::new(PdfMetaTask(self.raw.clone()))
+  pub fn annotations_per_page_async(&self) -> AsyncTask<SharedExtractAnnotationsTask> {
+    AsyncTask::new(SharedExtractAnnotationsTask(Arc::clone(&self.doc)))
+  }
+
+  /// Async: get PDF metadata on the libuv thread pool (shares parsed document via Arc)
+  #[napi]
+  pub fn metadata_async(&self) -> AsyncTask<SharedPdfMetaTask> {
+    AsyncTask::new(SharedPdfMetaTask(Arc::clone(&self.doc)))
   }
 }

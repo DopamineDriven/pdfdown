@@ -6,15 +6,23 @@ export declare class PdfDown {
   textPerPage(): Array<PageText>
   /** Sync: extract images per page (reuses the already-parsed document) */
   imagesPerPage(): Array<PageImage>
+  /** Sync: extract annotations per page (reuses the already-parsed document) */
+  annotationsPerPage(): Array<PageAnnotation>
   /** Sync: get PDF metadata (reuses the already-parsed document) */
   metadata(): PdfMeta
-  /** Async: extract text per page on the libuv thread pool */
+  /** Async: extract text per page on the libuv thread pool (shares parsed document via Arc) */
   textPerPageAsync(): Promise<Array<PageText>>
-  /** Async: extract images per page on the libuv thread pool */
+  /** Async: extract images per page on the libuv thread pool (shares parsed document via Arc) */
   imagesPerPageAsync(): Promise<Array<PageImage>>
-  /** Async: get PDF metadata on the libuv thread pool */
+  /** Async: extract annotations per page on the libuv thread pool (shares parsed document via Arc) */
+  annotationsPerPageAsync(): Promise<Array<PageAnnotation>>
+  /** Async: get PDF metadata on the libuv thread pool (shares parsed document via Arc) */
   metadataAsync(): Promise<PdfMeta>
 }
+
+export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
+
+export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>
 
 export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>
 
@@ -23,6 +31,15 @@ export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array
 export declare function extractTextPerPage(buffer: Buffer): Array<PageText>
 
 export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<PageText>>
+
+export interface PageAnnotation {
+  page: number
+  subtype: string
+  rect: Array<number>
+  uri?: string
+  dest?: string
+  content?: string
+}
 
 export interface PageImage {
   page: number

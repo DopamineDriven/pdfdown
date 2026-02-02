@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/DopamineDriven/pdfdown/workflows/CI/badge.svg)
 
-Rust-powered PDF extraction for Node.js via [napi-rs](https://napi.rs). Extracts per-page text, images (as PNG), and metadata from PDF buffers.
+Rust-powered PDF extraction for Node.js via [napi-rs](https://napi.rs). Extracts per-page text, images (as PNG), annotations (links, destinations), and metadata from PDF buffers.
 
 ## Install
 
@@ -16,22 +16,44 @@ pnpm add @d0paminedriven/pdfdown
 
 ## API
 
-### Synchronous
+### Standalone functions
+
+#### Synchronous
 
 ```typescript
 export declare function extractTextPerPage(buffer: Buffer): Array<PageText>
 export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>
+export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
 export declare function pdfMetadata(buffer: Buffer): PdfMeta
 ```
 
-### Async (libuv thread pool)
+#### Async (libuv thread pool)
 
 Each sync function has an async counterpart that runs on the libuv thread pool, keeping the main thread free.
 
 ```typescript
 export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<PageText>>
 export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array<PageImage>>
+export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>
+```
+
+### `PdfDown` class
+
+Parse once, call many. The constructor parses the PDF document once and reuses it across all sync method calls. Async methods share the parsed document across worker threads via `Arc` (atomic reference counting) with zero re-parsing overhead.
+
+```typescript
+export declare class PdfDown {
+  constructor(buffer: Buffer)
+  textPerPage(): Array<PageText>
+  imagesPerPage(): Array<PageImage>
+  annotationsPerPage(): Array<PageAnnotation>
+  metadata(): PdfMeta
+  textPerPageAsync(): Promise<Array<PageText>>
+  imagesPerPageAsync(): Promise<Array<PageImage>>
+  annotationsPerPageAsync(): Promise<Array<PageAnnotation>>
+  metadataAsync(): Promise<PdfMeta>
+}
 ```
 
 ### Types
@@ -55,6 +77,15 @@ export interface PageImage {
   objectId: string
 }
 
+export interface PageAnnotation {
+  page: number
+  subtype: string // "Link", "Text", "Highlight", etc.
+  rect: Array<number> // [x1, y1, x2, y2] bounding box
+  uri?: string // external link URL
+  dest?: string // internal named destination
+  content?: string // tooltip / alt text
+}
+
 export interface PdfMeta {
   pageCount: number
   version: string
@@ -64,7 +95,9 @@ export interface PdfMeta {
 
 ## Usage
 
-### Extract text per page
+### Standalone functions
+
+#### Extract text per page
 
 ```typescript
 import { readFileSync } from 'fs'
@@ -78,7 +111,7 @@ for (const { page, text } of pages) {
 }
 ```
 
-### Extract text per page (async)
+#### Extract text per page (async)
 
 ```typescript
 import { readFile } from 'fs/promises'
@@ -92,7 +125,7 @@ for (const { page, text } of pages) {
 }
 ```
 
-### Extract images as PNG
+#### Extract images as PNG
 
 ```typescript
 import { readFileSync } from 'fs'
@@ -107,7 +140,7 @@ for (const img of images) {
 }
 ```
 
-### Extract images as PNG (async)
+#### Extract images as PNG (async)
 
 ```typescript
 import { readFile } from 'fs/promises'
@@ -122,7 +155,39 @@ for (const img of images) {
 }
 ```
 
-### Get PDF metadata
+#### Extract annotations
+
+```typescript
+import { readFileSync } from 'fs'
+import { extractAnnotationsPerPage } from '@d0paminedriven/pdfdown'
+
+const pdf = readFileSync('document.pdf')
+const annots = extractAnnotationsPerPage(pdf)
+
+for (const annot of annots) {
+  if (annot.uri) {
+    console.log(`Page ${annot.page}: ${annot.uri}`)
+  }
+  if (annot.dest) {
+    console.log(`Page ${annot.page}: internal link to ${annot.dest}`)
+  }
+}
+```
+
+#### Extract annotations (async)
+
+```typescript
+import { readFile } from 'fs/promises'
+import { extractAnnotationsPerPageAsync } from '@d0paminedriven/pdfdown'
+
+const pdf = await readFile('document.pdf')
+const annots = await extractAnnotationsPerPageAsync(pdf)
+
+const links = annots.filter((a) => a.uri)
+console.log(`Found ${links.length} external links across ${new Set(links.map((a) => a.page)).size} pages`)
+```
+
+#### Get PDF metadata
 
 ```typescript
 import { readFileSync } from 'fs'
@@ -134,7 +199,7 @@ const meta = pdfMetadata(pdf)
 console.log(`v${meta.version}, ${meta.pageCount} pages, linearized: ${meta.isLinearized}`)
 ```
 
-### Get PDF metadata (async)
+#### Get PDF metadata (async)
 
 ```typescript
 import { readFile } from 'fs/promises'
@@ -146,35 +211,62 @@ const meta = await pdfMetadataAsync(pdf)
 console.log(`v${meta.version}, ${meta.pageCount} pages, linearized: ${meta.isLinearized}`)
 ```
 
-### Combined: text + images for multimodal embeddings
+### `PdfDown` class
+
+The class-based API parses the PDF once in the constructor. Sync methods reuse the parsed document directly (zero re-parsing). Async methods share the parsed document across libuv worker threads via `Arc` — no data copying, no re-parsing.
 
 ```typescript
 import { readFile } from 'fs/promises'
-import { extractTextPerPageAsync, extractImagesPerPageAsync } from '@d0paminedriven/pdfdown'
+import { PdfDown } from '@d0paminedriven/pdfdown'
 
-const pdf = await readFile('document.pdf')
+const pdf = new PdfDown(await readFile('document.pdf'))
 
-const [text, images] = await Promise.all([extractTextPerPageAsync(pdf), extractImagesPerPageAsync(pdf)])
+// Sync — reuses the already-parsed document
+const text = pdf.textPerPage()
+const images = pdf.imagesPerPage()
+const annots = pdf.annotationsPerPage()
+const meta = pdf.metadata()
 
-// Group images by page
-const imagesByPage = new Map<number, typeof images>()
-for (const img of images) {
-  const arr = imagesByPage.get(img.page) ?? []
-  arr.push(img)
-  imagesByPage.set(img.page, arr)
-}
+// Async — shares parsed document via Arc across worker threads
+const [asyncText, asyncImages, asyncAnnots] = await Promise.all([
+  pdf.textPerPageAsync(),
+  pdf.imagesPerPageAsync(),
+  pdf.annotationsPerPageAsync(),
+])
+```
+
+### Combined: text + images + links for multimodal embeddings
+
+```typescript
+import { readFile } from 'fs/promises'
+import { PdfDown } from '@d0paminedriven/pdfdown'
+
+const pdf = new PdfDown(await readFile('document.pdf'))
+
+const [text, images, annots] = await Promise.all([
+  pdf.textPerPageAsync(),
+  pdf.imagesPerPageAsync(),
+  pdf.annotationsPerPageAsync(),
+])
+
+// Group images and links by page
+const imagesByPage = Map.groupBy(images, (img) => img.page)
+const linksByPage = Map.groupBy(
+  annots.filter((a) => a.uri),
+  (a) => a.page,
+)
 
 // Build per-page payloads for multimodal embeddings
 for (const { page, text: pageText } of text) {
-  const pageImages = imagesByPage.get(page) ?? []
   const payload = {
     page,
     text: pageText,
-    images: pageImages.map((img) => ({
+    images: (imagesByPage.get(page) ?? []).map((img) => ({
       dataUrl: `data:image/png;base64,${img.data.toString('base64')}`,
       width: img.width,
       height: img.height,
     })),
+    links: (linksByPage.get(page) ?? []).map((a) => a.uri),
   }
   // Send payload to Voyage AI, pgvector, etc.
 }
@@ -185,6 +277,7 @@ for (const { page, text: pageText } of text) {
 | Filter      | Description                | Handling                           |
 | ----------- | -------------------------- | ---------------------------------- |
 | DCTDecode   | JPEG-compressed images     | Decoded and re-encoded as PNG      |
+| JPXDecode   | JPEG 2000 images           | Decoded and re-encoded as PNG      |
 | FlateDecode | Zlib-compressed raw pixels | Decompressed, reconstructed as PNG |
 | None        | Uncompressed raw pixels    | Reconstructed as PNG               |
 
@@ -199,7 +292,7 @@ for (const { page, text: pageText } of text) {
 
 ## How it works
 
-Built with [lopdf](https://github.com/J-F-Liu/lopdf) (pure Rust PDF parser) and [image](https://github.com/image-rs/image) (PNG/JPEG encoding). Compiled to a native Node.js addon via [napi-rs](https://napi.rs) with prebuilt binaries for:
+Built with [lopdf](https://github.com/J-F-Liu/lopdf) (pure Rust PDF parser), [image](https://github.com/image-rs/image) (PNG/JPEG encoding), and [hayro-jpeg2000](https://crates.io/crates/hayro-jpeg2000) (JPEG 2000 decoding). Compiled to a native Node.js addon via [napi-rs](https://napi.rs) with prebuilt binaries for:
 
 - macOS (x64, ARM64)
 - Windows (x64, ia32, ARM64)
