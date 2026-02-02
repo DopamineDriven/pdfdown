@@ -5,15 +5,12 @@ import {
   WASI as __WASI,
 } from '@napi-rs/wasm-runtime'
 
-
-
 const __wasi = new __WASI({
   version: 'preview1',
 })
 
 const __wasmUrl = new URL('./pdfdown.wasm32-wasi.wasm', import.meta.url).href
 const __emnapiContext = __emnapiGetDefaultContext()
-
 
 const __sharedMemory = new WebAssembly.Memory({
   initial: 4000,
@@ -63,5 +60,7 @@ export const extractImagesPerPage = __napiModule.exports.extractImagesPerPage
 export const extractImagesPerPageAsync = __napiModule.exports.extractImagesPerPageAsync
 export const extractTextPerPage = __napiModule.exports.extractTextPerPage
 export const extractTextPerPageAsync = __napiModule.exports.extractTextPerPageAsync
+export const pdfDocument = __napiModule.exports.pdfDocument
+export const pdfDocumentAsync = __napiModule.exports.pdfDocumentAsync
 export const pdfMetadata = __napiModule.exports.pdfMetadata
 export const pdfMetadataAsync = __napiModule.exports.pdfMetadataAsync

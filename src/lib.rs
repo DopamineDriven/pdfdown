@@ -31,6 +31,10 @@ pub struct PdfMeta {
   pub page_count: u32,
   pub version: String,
   pub is_linearized: bool,
+  pub creator: Option<String>,
+  pub producer: Option<String>,
+  pub creation_date: Option<String>,
+  pub modification_date: Option<String>,
 }
 
 #[napi(object)]
@@ -55,6 +59,24 @@ pub struct PageAnnotation {
   pub uri: Option<String>,
   pub dest: Option<String>,
   pub content: Option<String>,
+}
+
+#[napi(object)]
+pub struct PdfDocument {
+  pub version: String,
+  pub is_linearized: bool,
+  pub page_count: u32,
+  pub creator: Option<String>,
+  pub producer: Option<String>,
+  pub creation_date: Option<String>,
+  pub modification_date: Option<String>,
+  pub total_images: u32,
+  pub total_annotations: u32,
+  pub image_pages: Vec<u32>,
+  pub annotation_pages: Vec<u32>,
+  pub text: Vec<PageText>,
+  pub images: Vec<PageImage>,
+  pub annotations: Vec<PageAnnotation>,
 }
 
 // ── Step 2: Internal type — no napi types, safe for any thread ──
@@ -89,6 +111,38 @@ impl From<RawPageImage> for PageImage {
   }
 }
 
+pub struct RawPdfDocument {
+  pub meta: PdfMeta,
+  pub text: Vec<PageText>,
+  pub images: Vec<RawPageImage>,
+  pub annotations: Vec<PageAnnotation>,
+  pub image_pages: Vec<u32>,
+  pub annotation_pages: Vec<u32>,
+}
+
+impl From<RawPdfDocument> for PdfDocument {
+  fn from(r: RawPdfDocument) -> Self {
+    let total_images = r.images.len() as u32;
+    let total_annotations = r.annotations.len() as u32;
+    PdfDocument {
+      version: r.meta.version,
+      is_linearized: r.meta.is_linearized,
+      page_count: r.meta.page_count,
+      creator: r.meta.creator,
+      producer: r.meta.producer,
+      creation_date: r.meta.creation_date,
+      modification_date: r.meta.modification_date,
+      total_images,
+      total_annotations,
+      image_pages: r.image_pages,
+      annotation_pages: r.annotation_pages,
+      text: r.text,
+      images: r.images.into_iter().map(PageImage::from).collect(),
+      annotations: r.annotations,
+    }
+  }
+}
+
 // ── Shared helpers ──────────────────────────────────────────────
 
 fn load_doc(buf: &[u8]) -> Result<Document> {
@@ -108,14 +162,95 @@ fn extract_text(doc: &Document) -> Result<Vec<PageText>> {
   Ok(results)
 }
 
+fn extract_info_string(dict: &lopdf::Dictionary, key: &[u8]) -> Option<String> {
+  match dict.get(key).ok()? {
+    Object::String(bytes, _) => {
+      if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+        // UTF-16 BOM
+        let utf16: Vec<u16> = bytes[2..]
+          .chunks_exact(2)
+          .map(|c| u16::from_be_bytes([c[0], c[1]]))
+          .collect();
+        Some(String::from_utf16_lossy(&utf16))
+      } else {
+        Some(String::from_utf8_lossy(bytes).to_string())
+      }
+    }
+    _ => None,
+  }
+}
+
+/// Convert a PDF date string to ISO 8601.
+/// Input format:  `D:YYYYMMDDHHmmSS+HH'mm'` (D: prefix optional, timezone optional)
+/// Output format: `YYYY-MM-DDTHH:mm:SS+HH:mm` or `…Z`
+fn pdf_date_to_iso8601(raw: &str) -> String {
+  let s = raw.strip_prefix("D:").unwrap_or(raw);
+
+  // Need at least YYYY (4 chars)
+  if s.len() < 4 {
+    return raw.to_string();
+  }
+
+  let yyyy = &s[..4];
+  let mm = s.get(4..6).unwrap_or("01");
+  let dd = s.get(6..8).unwrap_or("01");
+  let hh = s.get(8..10).unwrap_or("00");
+  let min = s.get(10..12).unwrap_or("00");
+  let sec = s.get(12..14).unwrap_or("00");
+
+  let tz_part = &s[14.min(s.len())..];
+  let tz = if tz_part.is_empty() {
+    String::new()
+  } else if tz_part.starts_with('Z') {
+    "Z".to_string()
+  } else {
+    // e.g. +05'30' or -06'00' → +05:30 or -06:00
+    let cleaned = tz_part.replace('\'', "");
+    if cleaned.len() >= 3 {
+      let sign = &cleaned[..1];
+      let tzh = &cleaned[1..3];
+      let tzm = if cleaned.len() >= 5 {
+        &cleaned[3..5]
+      } else {
+        "00"
+      };
+      format!("{sign}{tzh}:{tzm}")
+    } else {
+      String::new()
+    }
+  };
+
+  format!("{yyyy}-{mm}-{dd}T{hh}:{min}:{sec}{tz}")
+}
+
 fn extract_metadata(doc: &Document) -> PdfMeta {
   let page_count = doc.get_pages().len() as u32;
   let version = doc.version.clone();
   let is_linearized = doc.trailer.get(b"Linearized").is_ok();
+
+  let info_dict = doc.trailer.get(b"Info").ok().and_then(|obj| match obj {
+    Object::Reference(id) => doc.get_dictionary(*id).ok(),
+    _ => None,
+  });
+
+  let (creator, producer, creation_date, modification_date) = match info_dict {
+    Some(d) => (
+      extract_info_string(d, b"Creator"),
+      extract_info_string(d, b"Producer"),
+      extract_info_string(d, b"CreationDate").map(|s| pdf_date_to_iso8601(&s)),
+      extract_info_string(d, b"ModDate").map(|s| pdf_date_to_iso8601(&s)),
+    ),
+    None => (None, None, None, None),
+  };
+
   PdfMeta {
     page_count,
     version,
     is_linearized,
+    creator,
+    producer,
+    creation_date,
+    modification_date,
   }
 }
 
@@ -213,6 +348,38 @@ fn extract_annotations(doc: &Document) -> Vec<PageAnnotation> {
   results
 }
 
+fn extract_all(doc: &Document) -> Result<RawPdfDocument> {
+  let meta = extract_metadata(doc);
+  let text = extract_text(doc)?;
+  let images = extract_images_raw(doc);
+  let annotations = extract_annotations(doc);
+
+  let mut image_pages: Vec<u32> = images
+    .iter()
+    .map(|i| i.page)
+    .collect::<HashSet<_>>()
+    .into_iter()
+    .collect();
+  image_pages.sort_unstable();
+
+  let mut annotation_pages: Vec<u32> = annotations
+    .iter()
+    .map(|a| a.page)
+    .collect::<HashSet<_>>()
+    .into_iter()
+    .collect();
+  annotation_pages.sort_unstable();
+
+  Ok(RawPdfDocument {
+    meta,
+    text,
+    images,
+    annotations,
+    image_pages,
+    annotation_pages,
+  })
+}
+
 // ── Standalone sync functions ───────────────────────────────────
 
 #[napi]
@@ -242,6 +409,12 @@ pub fn extract_images_per_page(buffer: Buffer) -> Result<Vec<PageImage>> {
       .map(PageImage::from)
       .collect(),
   )
+}
+
+#[napi]
+pub fn pdf_document(buffer: Buffer) -> Result<PdfDocument> {
+  let doc = load_doc(buffer.as_ref())?;
+  Ok(PdfDocument::from(extract_all(&doc)?))
 }
 
 // ── Image extraction internals ──────────────────────────────────
@@ -776,6 +949,28 @@ pub fn pdf_metadata_async(buffer: Buffer) -> AsyncTask<PdfMetaTask> {
   AsyncTask::new(PdfMetaTask(buffer.to_vec()))
 }
 
+pub struct PdfDocumentTask(Vec<u8>);
+
+#[napi]
+impl Task for PdfDocumentTask {
+  type Output = RawPdfDocument;
+  type JsValue = PdfDocument;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.0)?;
+    extract_all(&doc)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(PdfDocument::from(output))
+  }
+}
+
+#[napi]
+pub fn pdf_document_async(buffer: Buffer) -> AsyncTask<PdfDocumentTask> {
+  AsyncTask::new(PdfDocumentTask(buffer.to_vec()))
+}
+
 // ── Step 3: Class-based API with Arc<Document> ──────────────────
 
 /// Shared-document task types for class async methods.
@@ -844,6 +1039,22 @@ impl Task for SharedPdfMetaTask {
   }
 }
 
+pub struct SharedPdfDocumentTask(Arc<Document>);
+
+#[napi]
+impl Task for SharedPdfDocumentTask {
+  type Output = RawPdfDocument;
+  type JsValue = PdfDocument;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    extract_all(&self.0)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(PdfDocument::from(output))
+  }
+}
+
 #[napi]
 pub struct PdfDown {
   doc: Arc<Document>,
@@ -909,5 +1120,17 @@ impl PdfDown {
   #[napi]
   pub fn metadata_async(&self) -> AsyncTask<SharedPdfMetaTask> {
     AsyncTask::new(SharedPdfMetaTask(Arc::clone(&self.doc)))
+  }
+
+  /// Sync: extract everything from the PDF in one call (reuses the already-parsed document)
+  #[napi]
+  pub fn document(&self) -> Result<PdfDocument> {
+    Ok(PdfDocument::from(extract_all(&self.doc)?))
+  }
+
+  /// Async: extract everything from the PDF on the libuv thread pool (shares parsed document via Arc)
+  #[napi]
+  pub fn document_async(&self) -> AsyncTask<SharedPdfDocumentTask> {
+    AsyncTask::new(SharedPdfDocumentTask(Arc::clone(&self.doc)))
   }
 }

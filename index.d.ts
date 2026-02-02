@@ -18,6 +18,10 @@ export declare class PdfDown {
   annotationsPerPageAsync(): Promise<Array<PageAnnotation>>
   /** Async: get PDF metadata on the libuv thread pool (shares parsed document via Arc) */
   metadataAsync(): Promise<PdfMeta>
+  /** Sync: extract everything from the PDF in one call (reuses the already-parsed document) */
+  document(): PdfDocument
+  /** Async: extract everything from the PDF on the libuv thread pool (shares parsed document via Arc) */
+  documentAsync(): Promise<PdfDocument>
 }
 
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
@@ -59,10 +63,35 @@ export interface PageText {
   text: string
 }
 
+export declare function pdfDocument(buffer: Buffer): PdfDocument
+
+export interface PdfDocument {
+  version: string
+  isLinearized: boolean
+  pageCount: number
+  creator?: string
+  producer?: string
+  creationDate?: string
+  modificationDate?: string
+  totalImages: number
+  totalAnnotations: number
+  imagePages: Array<number>
+  annotationPages: Array<number>
+  text: Array<PageText>
+  images: Array<PageImage>
+  annotations: Array<PageAnnotation>
+}
+
+export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>
+
 export interface PdfMeta {
   pageCount: number
   version: string
   isLinearized: boolean
+  creator?: string
+  producer?: string
+  creationDate?: string
+  modificationDate?: string
 }
 
 export declare function pdfMetadata(buffer: Buffer): PdfMeta
