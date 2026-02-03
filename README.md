@@ -2,7 +2,9 @@
 
 ![CI](https://github.com/DopamineDriven/pdfdown/workflows/CI/badge.svg)
 
-Rust-powered PDF extraction for Node.js via [napi-rs](https://napi.rs). Extracts per-page text, images (as PNG), annotations (links, destinations), and metadata from PDF buffers.
+Rust-powered PDF extraction for Node.js via [napi-rs](https://napi.rs). Extracts per-page text, images (as PNG), annotations (links, destinations), structured text (with header/footer detection), and metadata from PDF buffers. All extraction is parallelized with [rayon](https://github.com/rayon-rs/rayon) for multi-core performance.
+
+An OCR variant is available as [`@d0paminedriven/pdfdown-ocr`](#ocr-variant) for image-only PDF pages.
 
 ## Install
 
@@ -24,7 +26,9 @@ pnpm add @d0paminedriven/pdfdown
 export declare function extractTextPerPage(buffer: Buffer): Array<PageText>
 export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
+export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>
 export declare function pdfMetadata(buffer: Buffer): PdfMeta
+export declare function pdfDocument(buffer: Buffer): PdfDocument
 ```
 
 #### Async (libuv thread pool)
@@ -35,7 +39,9 @@ Each sync function has an async counterpart that runs on the libuv thread pool, 
 export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<PageText>>
 export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array<PageImage>>
 export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>
+export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>
+export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>
 ```
 
 ### `PdfDown` class
@@ -48,11 +54,15 @@ export declare class PdfDown {
   textPerPage(): Array<PageText>
   imagesPerPage(): Array<PageImage>
   annotationsPerPage(): Array<PageAnnotation>
+  structuredText(): Array<StructuredPageText>
   metadata(): PdfMeta
+  document(): PdfDocument
   textPerPageAsync(): Promise<Array<PageText>>
   imagesPerPageAsync(): Promise<Array<PageImage>>
   annotationsPerPageAsync(): Promise<Array<PageAnnotation>>
+  structuredTextAsync(): Promise<Array<StructuredPageText>>
   metadataAsync(): Promise<PdfMeta>
+  documentAsync(): Promise<PdfDocument>
 }
 ```
 
@@ -62,6 +72,13 @@ export declare class PdfDown {
 export interface PageText {
   page: number
   text: string
+}
+
+export interface StructuredPageText {
+  page: number
+  header: string
+  body: string
+  footer: string
 }
 
 export interface PageImage {
@@ -90,6 +107,27 @@ export interface PdfMeta {
   pageCount: number
   version: string
   isLinearized: boolean
+  creator?: string
+  producer?: string
+  creationDate?: string
+  modificationDate?: string
+}
+
+export interface PdfDocument {
+  version: string
+  isLinearized: boolean
+  pageCount: number
+  creator?: string
+  producer?: string
+  creationDate?: string
+  modificationDate?: string
+  totalImages: number
+  totalAnnotations: number
+  imagePages: Array<number>
+  annotationPages: Array<number>
+  text: Array<PageText>
+  images: Array<PageImage>
+  annotations: Array<PageAnnotation>
 }
 ```
 
@@ -123,6 +161,38 @@ const pages = await extractTextPerPageAsync(pdf)
 for (const { page, text } of pages) {
   console.log(`Page ${page}: ${text.slice(0, 100)}...`)
 }
+```
+
+#### Extract structured text with header/footer detection
+
+Splits each page into `header`, `body`, and `footer` sections by detecting repeated lines across pages. Lines that appear at the same position (top or bottom) on >= 60% of pages are classified as headers or footers. Page numbers and other varying digits are normalized during comparison, so "Page 1" and "Page 42" are treated as the same line.
+
+```typescript
+import { readFileSync } from 'fs'
+import { extractStructuredTextPerPage } from '@d0paminedriven/pdfdown'
+
+const pdf = readFileSync('document.pdf')
+const pages = extractStructuredTextPerPage(pdf)
+
+for (const { page, header, body, footer } of pages) {
+  console.log(`Page ${page}:`)
+  if (header) console.log(`  Header: ${header}`)
+  console.log(`  Body: ${body.slice(0, 100)}...`)
+  if (footer) console.log(`  Footer: ${footer}`)
+}
+```
+
+#### Extract structured text (async)
+
+```typescript
+import { readFile } from 'fs/promises'
+import { extractStructuredTextPerPageAsync } from '@d0paminedriven/pdfdown'
+
+const pdf = await readFile('document.pdf')
+const pages = await extractStructuredTextPerPageAsync(pdf)
+
+// Filter out headers/footers for clean text extraction
+const cleanText = pages.map((p) => p.body).join('\n\n')
 ```
 
 #### Extract images as PNG
@@ -225,13 +295,15 @@ const pdf = new PdfDown(await readFile('document.pdf'))
 const text = pdf.textPerPage()
 const images = pdf.imagesPerPage()
 const annots = pdf.annotationsPerPage()
+const structured = pdf.structuredText()
 const meta = pdf.metadata()
 
 // Async — shares parsed document via Arc across worker threads
-const [asyncText, asyncImages, asyncAnnots] = await Promise.all([
+const [asyncText, asyncImages, asyncAnnots, asyncStructured] = await Promise.all([
   pdf.textPerPageAsync(),
   pdf.imagesPerPageAsync(),
   pdf.annotationsPerPageAsync(),
+  pdf.structuredTextAsync(),
 ])
 ```
 
@@ -272,6 +344,130 @@ for (const { page, text: pageText } of text) {
 }
 ```
 
+### Combined: structured text for clean content pipelines
+
+```typescript
+import { readFile } from 'fs/promises'
+import { PdfDown } from '@d0paminedriven/pdfdown'
+
+const pdf = new PdfDown(await readFile('document.pdf'))
+const pages = await pdf.structuredTextAsync()
+
+// Strip headers/footers for clean RAG ingestion
+const chunks = pages.map(({ page, body }) => ({
+  page,
+  content: body.trim(),
+})).filter((c) => c.content.length > 0)
+```
+
+## OCR variant
+
+For PDFs with image-only pages (scanned documents, embedded screenshots), the OCR variant falls back to [Tesseract](https://github.com/tesseract-ocr/tesseract) when native text extraction yields insufficient content.
+
+### Install
+
+```bash
+npm install @d0paminedriven/pdfdown-ocr
+```
+
+**System requirement:** Tesseract 5.x and development libraries must be installed.
+
+```bash
+# Ubuntu/Debian (22.04 ships tesseract 3.x — use the PPA for 5.x)
+sudo add-apt-repository ppa:alex-p/tesseract-ocr5
+sudo apt update
+sudo apt install tesseract-ocr tesseract-ocr-eng libtesseract-dev libleptonica-dev pkg-config build-essential -y
+# Optional: install all language packs
+# sudo apt install tesseract-ocr-all
+
+# macOS
+brew install tesseract
+
+# Arch
+sudo pacman -S tesseract tesseract-data-eng
+```
+
+Verify with `tesseract --version` — you should see 5.x.
+
+### OCR API
+
+> **Use the async API for OCR.** The sync variants (`extractTextWithOcrPerPage`, `textWithOcrPerPage`) block the Node.js event loop for the duration of OCR processing, which can be significant for multi-page scanned documents. Prefer `extractTextWithOcrPerPageAsync` / `textWithOcrPerPageAsync` in production.
+
+#### Standalone functions
+
+```typescript
+export declare function extractTextWithOcrPerPage(
+  buffer: Buffer,
+  opts?: OcrOptions,
+): Array<OcrPageText>
+
+export declare function extractTextWithOcrPerPageAsync(
+  buffer: Buffer,
+  opts?: OcrOptions,
+): Promise<Array<OcrPageText>>
+```
+
+#### `PdfDown` class methods
+
+```typescript
+export declare class PdfDown {
+  // ... all base methods, plus:
+  textWithOcrPerPage(opts?: OcrOptions): Array<OcrPageText>
+  textWithOcrPerPageAsync(opts?: OcrOptions): Promise<Array<OcrPageText>>
+}
+```
+
+#### OCR types
+
+```typescript
+export const enum TextSource {
+  Native = 'Native',
+  Ocr = 'Ocr',
+}
+
+export interface OcrPageText {
+  page: number
+  text: string
+  source: TextSource // indicates whether text came from native extraction or OCR
+}
+
+export interface OcrOptions {
+  lang?: string // Tesseract language code, default "eng"
+  minTextLength?: number // non-whitespace character threshold before falling back to OCR, default 1
+  maxThreads?: number // cap on Rayon threads for OCR parallelism, default 4, clamped to [1, available CPUs]
+}
+```
+
+#### OCR usage
+
+```typescript
+import { readFile } from 'fs/promises'
+import { PdfDown } from '@d0paminedriven/pdfdown-ocr'
+
+const pdf = new PdfDown(await readFile('scanned-document.pdf'))
+
+// Automatically uses native text when available, falls back to OCR for image-only pages
+const pages = await pdf.textWithOcrPerPageAsync({ lang: 'eng', minTextLength: 10 })
+
+for (const { page, text, source } of pages) {
+  console.log(`Page ${page} [${source}]: ${text.slice(0, 100)}...`)
+}
+```
+
+## Parallelism
+
+All extraction functions use [rayon](https://github.com/rayon-rs/rayon) for automatic multi-core parallelism. Per-page text extraction, image decoding, and annotation parsing run concurrently across CPU cores. The `pdfDocument` / `document()` call additionally runs text, image, and annotation extraction concurrently via nested `rayon::join`. This is internal to the native addon — the Node.js API surface is unchanged.
+
+OCR runs on a **dedicated capped thread pool** (default 4 threads, configurable via `maxThreads`) to prevent oversubscription when running inside a libuv worker thread. Non-OCR extraction uses the global rayon pool.
+
+### Tuning Node.js worker threads
+
+Node's libuv thread pool defaults to 4 threads. If you're calling multiple async extraction functions concurrently, you may want to increase it:
+
+```bash
+UV_THREADPOOL_SIZE=8 node app.js
+```
+
 ## Supported formats
 
 | Filter      | Description                | Handling                           |
@@ -292,7 +488,7 @@ for (const { page, text: pageText } of text) {
 
 ## How it works
 
-Built with [lopdf](https://github.com/J-F-Liu/lopdf) (pure Rust PDF parser), [image](https://github.com/image-rs/image) (PNG/JPEG encoding), and [hayro-jpeg2000](https://crates.io/crates/hayro-jpeg2000) (JPEG 2000 decoding). Compiled to a native Node.js addon via [napi-rs](https://napi.rs) with prebuilt binaries for:
+Built with [lopdf](https://github.com/J-F-Liu/lopdf) (pure Rust PDF parser), [image](https://github.com/image-rs/image) (PNG/JPEG encoding), [hayro-jpeg2000](https://crates.io/crates/hayro-jpeg2000) (JPEG 2000 decoding), and [rayon](https://github.com/rayon-rs/rayon) (data parallelism). The OCR variant additionally uses [tesseract-rs](https://crates.io/crates/tesseract-rs) (Tesseract bindings). Compiled to a native Node.js addon via [napi-rs](https://napi.rs) with prebuilt binaries for:
 
 - macOS (x64, ARM64)
 - Windows (x64, ia32, ARM64)

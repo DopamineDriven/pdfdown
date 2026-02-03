@@ -6,6 +6,7 @@ use napi_derive::napi;
 
 use image::{DynamicImage, ImageBuffer, ImageFormat};
 use lopdf::{Document, Object, ObjectId};
+use rayon::prelude::*;
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::sync::Arc;
@@ -24,6 +25,37 @@ const _: () = {
 pub struct PageText {
   pub page: u32,
   pub text: String,
+}
+
+#[napi(object)]
+pub struct StructuredPageText {
+  pub page: u32,
+  pub header: String,
+  pub body: String,
+  pub footer: String,
+}
+
+#[cfg(feature = "ocr")]
+#[napi(string_enum)]
+pub enum TextSource {
+  Native,
+  Ocr,
+}
+
+#[cfg(feature = "ocr")]
+#[napi(object)]
+pub struct OcrPageText {
+  pub page: u32,
+  pub text: String,
+  pub source: TextSource,
+}
+
+#[cfg(feature = "ocr")]
+#[napi(object)]
+pub struct OcrOptions {
+  pub lang: Option<String>,
+  pub min_text_length: Option<u32>,
+  pub max_threads: Option<u32>,
 }
 
 #[napi(object)]
@@ -151,15 +183,135 @@ fn load_doc(buf: &[u8]) -> Result<Document> {
 
 fn extract_text(doc: &Document) -> Result<Vec<PageText>> {
   let pages = doc.get_pages();
-  let mut results = Vec::with_capacity(pages.len());
-  for &page_num in pages.keys() {
-    let text = doc.extract_text(&[page_num]).unwrap_or_default();
-    results.push(PageText {
-      page: page_num,
-      text,
-    });
-  }
+  let page_nums: Vec<u32> = pages.keys().copied().collect();
+  let mut results: Vec<PageText> = page_nums
+    .par_iter()
+    .map(|&page_num| {
+      let text = doc.extract_text(&[page_num]).unwrap_or_default();
+      PageText {
+        page: page_num,
+        text,
+      }
+    })
+    .collect();
+  results.sort_unstable_by_key(|p| p.page);
   Ok(results)
+}
+
+/// Normalize a line for header/footer comparison: trim whitespace and replace
+/// contiguous digit sequences with `<NUM>` so "Page 1" matches "Page 42".
+fn normalize_header_footer_line(line: &str) -> String {
+  let trimmed = line.trim();
+  let mut out = String::with_capacity(trimmed.len());
+  let mut in_digits = false;
+  for ch in trimmed.chars() {
+    if ch.is_ascii_digit() {
+      if !in_digits {
+        out.push_str("<NUM>");
+        in_digits = true;
+      }
+    } else {
+      in_digits = false;
+      out.push(ch);
+    }
+  }
+  out
+}
+
+/// Detect repeated header/footer lines across pages and split each page's text
+/// into header, body, and footer sections.
+fn detect_headers_footers(pages: &[PageText]) -> Vec<StructuredPageText> {
+  // For fewer than 3 pages, no meaningful detection — return everything as body
+  if pages.len() < 3 {
+    return pages
+      .iter()
+      .map(|p| StructuredPageText {
+        page: p.page,
+        header: String::new(),
+        body: p.text.clone(),
+        footer: String::new(),
+      })
+      .collect();
+  }
+
+  let threshold = (pages.len() as f64 * 0.6).ceil() as usize;
+  let max_check = 3usize; // check up to 3 lines from top/bottom
+
+  // Split each page into lines
+  let page_lines: Vec<Vec<&str>> = pages.iter().map(|p| p.text.lines().collect()).collect();
+
+  // Detect header line count: for each position 0..max_check, check if the
+  // normalized line at that position appears on >= threshold pages
+  let mut header_count = 0usize;
+  for pos in 0..max_check {
+    let mut freq = std::collections::HashMap::<String, usize>::new();
+    for lines in &page_lines {
+      if let Some(&line) = lines.get(pos) {
+        let norm = normalize_header_footer_line(line);
+        if !norm.is_empty() {
+          *freq.entry(norm).or_insert(0) += 1;
+        }
+      }
+    }
+    if freq.values().any(|&c| c >= threshold) {
+      header_count = pos + 1;
+    } else {
+      break;
+    }
+  }
+
+  // Detect footer line count (from the bottom)
+  let mut footer_count = 0usize;
+  for pos in 0..max_check {
+    let mut freq = std::collections::HashMap::<String, usize>::new();
+    for lines in &page_lines {
+      if lines.len() > pos {
+        let idx = lines.len() - 1 - pos;
+        // Don't overlap with headers
+        if idx >= header_count {
+          let norm = normalize_header_footer_line(lines[idx]);
+          if !norm.is_empty() {
+            *freq.entry(norm).or_insert(0) += 1;
+          }
+        }
+      }
+    }
+    if freq.values().any(|&c| c >= threshold) {
+      footer_count = pos + 1;
+    } else {
+      break;
+    }
+  }
+
+  pages
+    .iter()
+    .zip(page_lines.iter())
+    .map(|(p, lines)| {
+      let total = lines.len();
+      let h_end = header_count.min(total);
+      let f_start = if footer_count > 0 {
+        total.saturating_sub(footer_count).max(h_end)
+      } else {
+        total
+      };
+
+      let header = lines[..h_end].join("\n");
+      let body = lines[h_end..f_start].join("\n");
+      let footer = lines[f_start..].join("\n");
+
+      StructuredPageText {
+        page: p.page,
+        header,
+        body,
+        footer,
+      }
+    })
+    .collect()
+}
+
+fn extract_structured_text(doc: &Document) -> Result<Vec<StructuredPageText>> {
+  let pages = extract_text(doc)?;
+  Ok(detect_headers_footers(&pages))
 }
 
 fn extract_info_string(dict: &lopdf::Dictionary, key: &[u8]) -> Option<String> {
@@ -256,103 +408,118 @@ fn extract_metadata(doc: &Document) -> PdfMeta {
 
 fn extract_images_raw(doc: &Document) -> Vec<RawPageImage> {
   let pages = doc.get_pages();
+  let page_entries: Vec<(u32, ObjectId)> = pages.iter().map(|(&k, &v)| (k, v)).collect();
+  let mut results: Vec<RawPageImage> = page_entries
+    .par_iter()
+    .flat_map(|&(page_num, page_id)| collect_page_images_raw(doc, page_id, page_num))
+    .collect();
+  results.sort_unstable_by_key(|r| (r.page, r.image_index));
+  results
+}
+
+fn collect_page_annotations(
+  doc: &Document,
+  page_id: ObjectId,
+  page_num: u32,
+) -> Vec<PageAnnotation> {
+  let annots = match doc.get_page_annotations(page_id) {
+    Ok(a) => a,
+    Err(_) => return Vec::new(),
+  };
+
   let mut results = Vec::new();
-  for (&page_num, &page_id) in &pages {
-    results.extend(collect_page_images_raw(doc, page_id, page_num));
+  for annot in annots {
+    let subtype = annot
+      .get(b"Subtype")
+      .ok()
+      .and_then(|v| {
+        if let Object::Name(n) = v {
+          Some(String::from_utf8_lossy(n).to_string())
+        } else {
+          None
+        }
+      })
+      .unwrap_or_default();
+
+    let rect = annot
+      .get(b"Rect")
+      .ok()
+      .and_then(|v| {
+        if let Object::Array(arr) = v {
+          Some(
+            arr
+              .iter()
+              .filter_map(|o| match o {
+                Object::Real(f) => Some(*f as f64),
+                Object::Integer(i) => Some(*i as f64),
+                _ => None,
+              })
+              .collect::<Vec<f64>>(),
+          )
+        } else {
+          None
+        }
+      })
+      .unwrap_or_default();
+
+    // Extract URI from /A action dictionary
+    let uri = annot.get(b"A").ok().and_then(|action| {
+      let action_dict = match action {
+        Object::Dictionary(d) => Some(d),
+        Object::Reference(id) => doc.get_dictionary(*id).ok(),
+        _ => None,
+      }?;
+      let uri_obj = action_dict.get(b"URI").ok()?;
+      match uri_obj {
+        Object::String(bytes, _) => Some(String::from_utf8_lossy(bytes).to_string()),
+        _ => None,
+      }
+    });
+
+    // Extract /Dest (named or direct destination)
+    let dest = annot.get(b"Dest").ok().and_then(|d| match d {
+      Object::String(bytes, _) => Some(String::from_utf8_lossy(bytes).to_string()),
+      Object::Name(n) => Some(String::from_utf8_lossy(n).to_string()),
+      _ => None,
+    });
+
+    // Extract /Contents (tooltip / alt text)
+    let content = annot.get(b"Contents").ok().and_then(|c| match c {
+      Object::String(bytes, _) => Some(String::from_utf8_lossy(bytes).to_string()),
+      _ => None,
+    });
+
+    results.push(PageAnnotation {
+      page: page_num,
+      subtype,
+      rect,
+      uri,
+      dest,
+      content,
+    });
   }
+
   results
 }
 
 fn extract_annotations(doc: &Document) -> Vec<PageAnnotation> {
   let pages = doc.get_pages();
-  let mut results = Vec::new();
-
-  for (&page_num, &page_id) in &pages {
-    let annots = match doc.get_page_annotations(page_id) {
-      Ok(a) => a,
-      Err(_) => continue,
-    };
-
-    for annot in annots {
-      let subtype = annot
-        .get(b"Subtype")
-        .ok()
-        .and_then(|v| {
-          if let Object::Name(n) = v {
-            Some(String::from_utf8_lossy(n).to_string())
-          } else {
-            None
-          }
-        })
-        .unwrap_or_default();
-
-      let rect = annot
-        .get(b"Rect")
-        .ok()
-        .and_then(|v| {
-          if let Object::Array(arr) = v {
-            Some(
-              arr
-                .iter()
-                .filter_map(|o| match o {
-                  Object::Real(f) => Some(*f as f64),
-                  Object::Integer(i) => Some(*i as f64),
-                  _ => None,
-                })
-                .collect::<Vec<f64>>(),
-            )
-          } else {
-            None
-          }
-        })
-        .unwrap_or_default();
-
-      // Extract URI from /A action dictionary
-      let uri = annot.get(b"A").ok().and_then(|action| {
-        let action_dict = match action {
-          Object::Dictionary(d) => Some(d),
-          Object::Reference(id) => doc.get_dictionary(*id).ok(),
-          _ => None,
-        }?;
-        let uri_obj = action_dict.get(b"URI").ok()?;
-        match uri_obj {
-          Object::String(bytes, _) => Some(String::from_utf8_lossy(bytes).to_string()),
-          _ => None,
-        }
-      });
-
-      // Extract /Dest (named or direct destination)
-      let dest = annot.get(b"Dest").ok().and_then(|d| match d {
-        Object::String(bytes, _) => Some(String::from_utf8_lossy(bytes).to_string()),
-        Object::Name(n) => Some(String::from_utf8_lossy(n).to_string()),
-        _ => None,
-      });
-
-      // Extract /Contents (tooltip / alt text)
-      let content = annot.get(b"Contents").ok().and_then(|c| match c {
-        Object::String(bytes, _) => Some(String::from_utf8_lossy(bytes).to_string()),
-        _ => None,
-      });
-
-      results.push(PageAnnotation {
-        page: page_num,
-        subtype,
-        rect,
-        uri,
-        dest,
-        content,
-      });
-    }
-  }
-
+  let page_entries: Vec<(u32, ObjectId)> = pages.iter().map(|(&k, &v)| (k, v)).collect();
+  let mut results: Vec<PageAnnotation> = page_entries
+    .par_iter()
+    .flat_map(|&(page_num, page_id)| collect_page_annotations(doc, page_id, page_num))
+    .collect();
+  results.sort_unstable_by_key(|a| a.page);
   results
 }
 
 fn extract_all(doc: &Document) -> Result<RawPdfDocument> {
   let meta = extract_metadata(doc);
-  let text = extract_text(doc)?;
-  let images = extract_images_raw(doc);
-  let annotations = extract_annotations(doc);
+  let ((text, images), annotations) = rayon::join(
+    || rayon::join(|| extract_text(doc), || extract_images_raw(doc)),
+    || extract_annotations(doc),
+  );
+  let text = text?;
 
   let mut image_pages: Vec<u32> = images
     .iter()
@@ -378,6 +545,180 @@ fn extract_all(doc: &Document) -> Result<RawPdfDocument> {
     image_pages,
     annotation_pages,
   })
+}
+
+// ── OCR fallback (feature-gated) ────────────────────────────────
+
+#[cfg(feature = "ocr")]
+fn normalize_max_threads(v: Option<u32>) -> u32 {
+  let default = 4u32;
+  let max = std::thread::available_parallelism()
+    .map(|n| n.get() as u32)
+    .unwrap_or(default);
+  v.unwrap_or(default).clamp(1, max)
+}
+
+#[cfg(feature = "ocr")]
+fn get_ocr_pool(threads: usize) -> Arc<rayon::ThreadPool> {
+  use std::collections::HashMap;
+  use std::sync::{Mutex, OnceLock};
+
+  static POOLS: OnceLock<Mutex<HashMap<usize, Arc<rayon::ThreadPool>>>> = OnceLock::new();
+  let map = POOLS.get_or_init(|| Mutex::new(HashMap::new()));
+  let mut guard = map.lock().unwrap();
+  Arc::clone(guard.entry(threads).or_insert_with(|| {
+    Arc::new(
+      rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build()
+        .expect("failed to build OCR thread pool"),
+    )
+  }))
+}
+
+/// Decode all image XObjects on a page to DynamicImages (no PNG encoding).
+/// Used by OCR to avoid the PNG encode→decode roundtrip.
+#[cfg(feature = "ocr")]
+fn collect_page_decoded_images(
+  doc: &Document,
+  page_id: ObjectId,
+) -> Vec<DynamicImage> {
+  let mut decoded = Vec::new();
+
+  let xobjects = match get_page_xobjects(doc, page_id) {
+    Some(x) => x,
+    None => return decoded,
+  };
+
+  let referenced_names = get_referenced_xobject_names(doc, page_id);
+
+  for (name, obj_ref) in xobjects.iter() {
+    if !referenced_names.is_empty() && !referenced_names.contains(name) {
+      continue;
+    }
+
+    let obj_id = match obj_ref {
+      Object::Reference(id) => *id,
+      _ => continue,
+    };
+
+    let stream = match doc.get_object(obj_id) {
+      Ok(Object::Stream(s)) => s,
+      _ => continue,
+    };
+
+    let subtype = stream.dict.get(b"Subtype").ok().and_then(|v| {
+      if let Object::Name(n) = v {
+        Some(n.as_slice())
+      } else {
+        None
+      }
+    });
+    if subtype != Some(b"Image") {
+      continue;
+    }
+
+    let width = get_dict_int(&stream.dict, b"Width").unwrap_or(0) as u32;
+    let height = get_dict_int(&stream.dict, b"Height").unwrap_or(0) as u32;
+    let bpc = get_dict_int(&stream.dict, b"BitsPerComponent").unwrap_or(8) as u32;
+    if width == 0 || height == 0 {
+      continue;
+    }
+
+    let color_space = resolve_color_space(&stream.dict, doc);
+    let filter = resolve_filter(&stream.dict);
+
+    let content = match filter.as_str() {
+      "DCTDecode" | "JPXDecode" => stream.content.clone(),
+      _ => {
+        let mut s = stream.clone();
+        if s.decompress().is_ok() {
+          s.content
+        } else {
+          stream.content.clone()
+        }
+      }
+    };
+
+    // Skip SMask for OCR — to_rgb8() drops alpha anyway
+    if let Some(img) = decode_xobject_to_dynamic_image(
+      &content, width, height, bpc, &color_space, &filter, None,
+    ) {
+      decoded.push(img);
+    }
+  }
+
+  decoded
+}
+
+#[cfg(feature = "ocr")]
+fn ocr_page_images(doc: &Document, page_id: ObjectId, lang: &str) -> String {
+  let images = collect_page_decoded_images(doc, page_id);
+  let mut texts = Vec::new();
+
+  for dyn_img in &images {
+    let rgb = dyn_img.to_rgb8();
+    let (w, h) = rgb.dimensions();
+    let pixels = rgb.as_raw();
+
+    let tess = tesseract_rs::TesseractAPI::new();
+    if tess.init("", lang).is_err() {
+      continue;
+    }
+    if tess
+      .set_image(pixels, w as i32, h as i32, 3, (w * 3) as i32)
+      .is_err()
+    {
+      continue;
+    }
+    if let Ok(text) = tess.get_utf8_text() {
+      let trimmed = text.trim();
+      if !trimmed.is_empty() {
+        texts.push(trimmed.to_string());
+      }
+    }
+  }
+
+  texts.join("\n")
+}
+
+#[cfg(feature = "ocr")]
+fn extract_text_with_ocr(
+  doc: &Document,
+  lang: &str,
+  min_len: u32,
+  max_threads: u32,
+) -> Result<Vec<OcrPageText>> {
+  let pages = doc.get_pages();
+  let page_entries: Vec<(u32, ObjectId)> = pages.iter().map(|(&k, &v)| (k, v)).collect();
+
+  let pool = get_ocr_pool(max_threads as usize);
+
+  let mut results: Vec<OcrPageText> = pool.install(|| {
+    page_entries
+      .par_iter()
+      .map(|&(page_num, page_id)| {
+        let native = doc.extract_text(&[page_num]).unwrap_or_default();
+        let non_ws: usize = native.chars().filter(|c| !c.is_whitespace()).count();
+        if non_ws >= min_len as usize {
+          OcrPageText {
+            page: page_num,
+            text: native,
+            source: TextSource::Native,
+          }
+        } else {
+          let ocr_text = ocr_page_images(doc, page_id, lang);
+          OcrPageText {
+            page: page_num,
+            text: ocr_text,
+            source: TextSource::Ocr,
+          }
+        }
+      })
+      .collect()
+  });
+  results.sort_unstable_by_key(|r| r.page);
+  Ok(results)
 }
 
 // ── Standalone sync functions ───────────────────────────────────
@@ -415,6 +756,28 @@ pub fn extract_images_per_page(buffer: Buffer) -> Result<Vec<PageImage>> {
 pub fn pdf_document(buffer: Buffer) -> Result<PdfDocument> {
   let doc = load_doc(buffer.as_ref())?;
   Ok(PdfDocument::from(extract_all(&doc)?))
+}
+
+#[napi]
+pub fn extract_structured_text_per_page(buffer: Buffer) -> Result<Vec<StructuredPageText>> {
+  let doc = load_doc(buffer.as_ref())?;
+  extract_structured_text(&doc)
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+pub fn extract_text_with_ocr_per_page(
+  buffer: Buffer,
+  opts: Option<OcrOptions>,
+) -> Result<Vec<OcrPageText>> {
+  let doc = load_doc(buffer.as_ref())?;
+  let lang = opts
+    .as_ref()
+    .and_then(|o| o.lang.as_deref())
+    .unwrap_or("eng");
+  let min_len = opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1);
+  let max_threads = normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads));
+  extract_text_with_ocr(&doc, lang, min_len, max_threads)
 }
 
 // ── Image extraction internals ──────────────────────────────────
@@ -711,6 +1074,31 @@ fn resolve_filter(dict: &lopdf::Dictionary) -> String {
   }
 }
 
+/// Decode an XObject stream into a DynamicImage (shared by PNG export and OCR).
+fn decode_xobject_to_dynamic_image(
+  content: &[u8],
+  width: u32,
+  height: u32,
+  bpc: u32,
+  color_space: &str,
+  filter: &str,
+  smask: Option<&[u8]>,
+) -> Option<DynamicImage> {
+  let dynamic_img = if filter == "DCTDecode" {
+    image::load_from_memory_with_format(content, ImageFormat::Jpeg).ok()?
+  } else if filter == "JPXDecode" {
+    decode_jpx(content)?
+  } else {
+    decode_raw_pixels(content, width, height, bpc, color_space)?
+  };
+
+  Some(if let Some(mask_data) = smask {
+    apply_smask(dynamic_img, mask_data, width, height)
+  } else {
+    dynamic_img
+  })
+}
+
 fn encode_to_png(
   content: &[u8],
   width: u32,
@@ -720,24 +1108,8 @@ fn encode_to_png(
   filter: &str,
   smask: Option<&[u8]>,
 ) -> Option<Vec<u8>> {
-  let dynamic_img = if filter == "DCTDecode" {
-    // Content is raw JPEG bytes — decode directly
-    image::load_from_memory_with_format(content, ImageFormat::Jpeg).ok()?
-  } else if filter == "JPXDecode" {
-    // Content is JPEG 2000 codestream — decode with hayro
-    decode_jpx(content)?
-  } else {
-    // Content is raw pixel data (already decompressed by lopdf)
-    decode_raw_pixels(content, width, height, bpc, color_space)?
-  };
-
-  // Apply SMask alpha channel if present
-  let final_img = if let Some(mask_data) = smask {
-    apply_smask(dynamic_img, mask_data, width, height)
-  } else {
-    dynamic_img
-  };
-
+  let final_img =
+    decode_xobject_to_dynamic_image(content, width, height, bpc, color_space, filter, smask)?;
   let mut png_buf = Cursor::new(Vec::new());
   final_img.write_to(&mut png_buf, ImageFormat::Png).ok()?;
   Some(png_buf.into_inner())
@@ -971,6 +1343,74 @@ pub fn pdf_document_async(buffer: Buffer) -> AsyncTask<PdfDocumentTask> {
   AsyncTask::new(PdfDocumentTask(buffer.to_vec()))
 }
 
+pub struct ExtractStructuredTextTask(Vec<u8>);
+
+#[napi]
+impl Task for ExtractStructuredTextTask {
+  type Output = Vec<StructuredPageText>;
+  type JsValue = Vec<StructuredPageText>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.0)?;
+    extract_structured_text(&doc)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+pub fn extract_structured_text_per_page_async(
+  buffer: Buffer,
+) -> AsyncTask<ExtractStructuredTextTask> {
+  AsyncTask::new(ExtractStructuredTextTask(buffer.to_vec()))
+}
+
+#[cfg(feature = "ocr")]
+pub struct ExtractTextOcrTask {
+  data: Vec<u8>,
+  lang: String,
+  min_len: u32,
+  max_threads: u32,
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+impl Task for ExtractTextOcrTask {
+  type Output = Vec<OcrPageText>;
+  type JsValue = Vec<OcrPageText>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.data)?;
+    extract_text_with_ocr(&doc, &self.lang, self.min_len, self.max_threads)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+pub fn extract_text_with_ocr_per_page_async(
+  buffer: Buffer,
+  opts: Option<OcrOptions>,
+) -> AsyncTask<ExtractTextOcrTask> {
+  let lang = opts
+    .as_ref()
+    .and_then(|o| o.lang.clone())
+    .unwrap_or_else(|| "eng".to_string());
+  let min_len = opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1);
+  let max_threads = normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads));
+  AsyncTask::new(ExtractTextOcrTask {
+    data: buffer.to_vec(),
+    lang,
+    min_len,
+    max_threads,
+  })
+}
+
 // ── Step 3: Class-based API with Arc<Document> ──────────────────
 
 /// Shared-document task types for class async methods.
@@ -1055,6 +1495,45 @@ impl Task for SharedPdfDocumentTask {
   }
 }
 
+pub struct SharedStructuredTextTask(Arc<Document>);
+
+#[napi]
+impl Task for SharedStructuredTextTask {
+  type Output = Vec<StructuredPageText>;
+  type JsValue = Vec<StructuredPageText>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    extract_structured_text(&self.0)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[cfg(feature = "ocr")]
+pub struct SharedExtractTextOcrTask {
+  doc: Arc<Document>,
+  lang: String,
+  min_len: u32,
+  max_threads: u32,
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+impl Task for SharedExtractTextOcrTask {
+  type Output = Vec<OcrPageText>;
+  type JsValue = Vec<OcrPageText>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    extract_text_with_ocr(&self.doc, &self.lang, self.min_len, self.max_threads)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
 #[napi]
 pub struct PdfDown {
   doc: Arc<Document>,
@@ -1132,5 +1611,53 @@ impl PdfDown {
   #[napi]
   pub fn document_async(&self) -> AsyncTask<SharedPdfDocumentTask> {
     AsyncTask::new(SharedPdfDocumentTask(Arc::clone(&self.doc)))
+  }
+
+  /// Sync: extract structured text with header/footer detection
+  #[napi]
+  pub fn structured_text(&self) -> Result<Vec<StructuredPageText>> {
+    extract_structured_text(&self.doc)
+  }
+
+  /// Async: extract structured text with header/footer detection
+  #[napi]
+  pub fn structured_text_async(&self) -> AsyncTask<SharedStructuredTextTask> {
+    AsyncTask::new(SharedStructuredTextTask(Arc::clone(&self.doc)))
+  }
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+impl PdfDown {
+  /// Sync: extract text with OCR fallback for image-only pages
+  #[napi]
+  pub fn text_with_ocr_per_page(&self, opts: Option<OcrOptions>) -> Result<Vec<OcrPageText>> {
+    let lang = opts
+      .as_ref()
+      .and_then(|o| o.lang.as_deref())
+      .unwrap_or("eng");
+    let min_len = opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1);
+    let max_threads = normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads));
+    extract_text_with_ocr(&self.doc, lang, min_len, max_threads)
+  }
+
+  /// Async: extract text with OCR fallback for image-only pages
+  #[napi]
+  pub fn text_with_ocr_per_page_async(
+    &self,
+    opts: Option<OcrOptions>,
+  ) -> AsyncTask<SharedExtractTextOcrTask> {
+    let lang = opts
+      .as_ref()
+      .and_then(|o| o.lang.clone())
+      .unwrap_or_else(|| "eng".to_string());
+    let min_len = opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1);
+    let max_threads = normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads));
+    AsyncTask::new(SharedExtractTextOcrTask {
+      doc: Arc::clone(&self.doc),
+      lang,
+      min_len,
+      max_threads,
+    })
   }
 }

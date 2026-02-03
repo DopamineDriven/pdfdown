@@ -22,6 +22,10 @@ export declare class PdfDown {
   document(): PdfDocument
   /** Async: extract everything from the PDF on the libuv thread pool (shares parsed document via Arc) */
   documentAsync(): Promise<PdfDocument>
+  /** Sync: extract structured text with header/footer detection */
+  structuredText(): Array<StructuredPageText>
+  /** Async: extract structured text with header/footer detection */
+  structuredTextAsync(): Promise<Array<StructuredPageText>>
 }
 
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
@@ -31,6 +35,10 @@ export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<
 export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>
 
 export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array<PageImage>>
+
+export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>
+
+export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>
 
 export declare function extractTextPerPage(buffer: Buffer): Array<PageText>
 
@@ -97,3 +105,10 @@ export interface PdfMeta {
 export declare function pdfMetadata(buffer: Buffer): PdfMeta
 
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>
+
+export interface StructuredPageText {
+  page: number
+  header: string
+  body: string
+  footer: string
+}

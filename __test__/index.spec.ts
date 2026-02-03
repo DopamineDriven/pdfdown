@@ -5,6 +5,8 @@ import {
   extractAnnotationsPerPageAsync,
   extractImagesPerPage,
   extractImagesPerPageAsync,
+  extractStructuredTextPerPage,
+  extractStructuredTextPerPageAsync,
   pdfDocument,
   pdfDocumentAsync,
   PdfDown,
@@ -303,4 +305,70 @@ test('PdfDown.documentAsync (async method) — matches standalone pdfDocument', 
   t.is(classResult.producer ?? null, standalone.producer ?? null, 'producer should match')
   t.is(classResult.creationDate ?? null, standalone.creationDate ?? null, 'creationDate should match')
   t.is(classResult.modificationDate ?? null, standalone.modificationDate ?? null, 'modificationDate should match')
+})
+
+// ── Structured text (header/footer detection) tests ─────────────────────────
+
+test('extractStructuredTextPerPage (sync) — returns structured text with valid structure', (t) => {
+  const pages = extractStructuredTextPerPage(pdf3)
+
+  t.true(Array.isArray(pages), 'should return an array')
+  t.true(pages.length > 0, 'should have at least one page')
+
+  for (const p of pages) {
+    t.is(typeof p.page, 'number', 'page should be a number')
+    t.is(typeof p.header, 'string', 'header should be a string')
+    t.is(typeof p.body, 'string', 'body should be a string')
+    t.is(typeof p.footer, 'string', 'footer should be a string')
+  }
+
+  // Most pages with text should have non-empty body
+  const pagesWithBody = pages.filter((p) => p.body.length > 0)
+  t.true(pagesWithBody.length > 0, 'at least some pages should have body text')
+
+  t.log(`Pages: ${pages.length}`)
+  t.log(`Pages with headers: ${pages.filter((p) => p.header.length > 0).length}`)
+  t.log(`Pages with footers: ${pages.filter((p) => p.footer.length > 0).length}`)
+})
+
+test('extractStructuredTextPerPageAsync — returns same results as sync', async (t) => {
+  const sync = extractStructuredTextPerPage(pdf3)
+  const async_ = await extractStructuredTextPerPageAsync(pdf3)
+
+  t.is(async_.length, sync.length, 'page count should match')
+
+  for (let i = 0; i < sync.length; i++) {
+    t.is(async_[i].page, sync[i].page, `page number should match at index ${i}`)
+    t.is(async_[i].header, sync[i].header, `header should match at page ${sync[i].page}`)
+    t.is(async_[i].body, sync[i].body, `body should match at page ${sync[i].page}`)
+    t.is(async_[i].footer, sync[i].footer, `footer should match at page ${sync[i].page}`)
+  }
+})
+
+test('PdfDown.structuredText (sync method) — matches standalone function', (t) => {
+  const standalone = extractStructuredTextPerPage(pdf3)
+  const classResult = pdfDown3.structuredText()
+
+  t.is(classResult.length, standalone.length, 'page count should match')
+
+  for (let i = 0; i < standalone.length; i++) {
+    t.is(classResult[i].page, standalone[i].page)
+    t.is(classResult[i].header, standalone[i].header)
+    t.is(classResult[i].body, standalone[i].body)
+    t.is(classResult[i].footer, standalone[i].footer)
+  }
+})
+
+test('PdfDown.structuredTextAsync (async method) — matches standalone function', async (t) => {
+  const standalone = extractStructuredTextPerPage(pdf3)
+  const classResult = await pdfDown3.structuredTextAsync()
+
+  t.is(classResult.length, standalone.length, 'page count should match')
+
+  for (let i = 0; i < standalone.length; i++) {
+    t.is(classResult[i].page, standalone[i].page)
+    t.is(classResult[i].header, standalone[i].header)
+    t.is(classResult[i].body, standalone[i].body)
+    t.is(classResult[i].footer, standalone[i].footer)
+  }
 })
