@@ -140,6 +140,74 @@ jobs:
             ${{ env.APP_NAME }}.*.node
             ${{ env.APP_NAME }}.*.wasm
           if-no-files-found: error
+  build-ocr:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            target: x86_64-apple-darwin
+          - host: macos-latest
+            target: aarch64-apple-darwin
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - host: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    name: OCR - ${{ matrix.settings.target }}
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: yarn
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.settings.target }}
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            ~/.napi-rs
+            .cargo-cache
+            target/
+          key: ocr-${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
+      - name: Install tesseract (Ubuntu 22.04+)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:alex-p/tesseract-ocr5
+          sudo apt-get update
+          sudo apt-get install -y \
+            tesseract-ocr tesseract-ocr-eng \
+            libtesseract-dev libleptonica-dev \
+            pkg-config build-essential
+          tesseract --version
+          tesseract --version | head -n1 | grep -q "tesseract 5"
+      - name: Install tesseract (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install tesseract
+          tesseract --version
+      - name: Install dependencies
+        run: yarn install
+      - name: Build OCR
+        run: yarn build:ocr --target ${{ matrix.settings.target }}
+        shell: bash
+      - name: Upload OCR artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ocr-bindings-${{ matrix.settings.target }}
+          path: ocr/pdfdown_ocr.*.node
+          if-no-files-found: error
   build-freebsd:
     runs-on: ubuntu-latest
     name: Build FreeBSD
@@ -336,6 +404,7 @@ jobs:
     needs:
       - lint
       - build-freebsd
+      - build-ocr
       - test-macOS-windows-binding
       - test-linux-binding
       - test-wasi
@@ -359,7 +428,7 @@ jobs:
       - name: List packages
         run: ls -R ./npm
         shell: bash
-      - name: Publish
+      - name: Publish core
         run: |
           npm config set provenance true
           if git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+$";
@@ -372,6 +441,29 @@ jobs:
             npm publish --tag next --access public
           else
             echo "Not a release, skipping publish"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Sync OCR version
+        run: node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('package.json','utf8'));const p='ocr/package.json';const o=JSON.parse(fs.readFileSync(p,'utf8'));o.version=c.version;fs.writeFileSync(p,JSON.stringify(o,null,2)+'\n');"
+      - name: Create OCR npm dirs
+        run: yarn create-npm-dirs:ocr
+      - name: Move OCR artifacts
+        run: yarn artifacts:ocr
+      - name: List OCR packages
+        run: ls -R ./ocr/npm
+        shell: bash
+      - name: Publish OCR
+        run: |
+          if git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+$";
+          then
+            (cd ocr && npm publish --ignore-scripts --access public)
+          elif git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+";
+          then
+            (cd ocr && npm publish --ignore-scripts --tag next --access public)
+          else
+            echo "Not a release, skipping OCR publish"
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
