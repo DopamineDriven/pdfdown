@@ -579,10 +579,7 @@ fn get_ocr_pool(threads: usize) -> Arc<rayon::ThreadPool> {
 /// Decode all image XObjects on a page to DynamicImages (no PNG encoding).
 /// Used by OCR to avoid the PNG encode→decode roundtrip.
 #[cfg(feature = "ocr")]
-fn collect_page_decoded_images(
-  doc: &Document,
-  page_id: ObjectId,
-) -> Vec<DynamicImage> {
+fn collect_page_decoded_images(doc: &Document, page_id: ObjectId) -> Vec<DynamicImage> {
   let mut decoded = Vec::new();
 
   let xobjects = match get_page_xobjects(doc, page_id) {
@@ -641,9 +638,9 @@ fn collect_page_decoded_images(
     };
 
     // Skip SMask for OCR — to_rgb8() drops alpha anyway
-    if let Some(img) = decode_xobject_to_dynamic_image(
-      &content, width, height, bpc, &color_space, &filter, None,
-    ) {
+    if let Some(img) =
+      decode_xobject_to_dynamic_image(&content, width, height, bpc, &color_space, &filter, None)
+    {
       decoded.push(img);
     }
   }
