@@ -73,13 +73,13 @@ function requireNative() {
   } else if (process.platform === 'android') {
     if (process.arch === 'arm64') {
       try {
-        return require('./pdfdown.android-arm64.node')
+        return require('./pdfdown_ocr.android-arm64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-android-arm64')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-android-arm64/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-android-arm64')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-android-arm64/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -89,13 +89,13 @@ function requireNative() {
       }
     } else if (process.arch === 'arm') {
       try {
-        return require('./pdfdown.android-arm-eabi.node')
+        return require('./pdfdown_ocr.android-arm-eabi.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-android-arm-eabi')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-android-arm-eabi/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-android-arm-eabi')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-android-arm-eabi/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -109,13 +109,13 @@ function requireNative() {
   } else if (process.platform === 'win32') {
     if (process.arch === 'x64') {
       try {
-        return require('./pdfdown.win32-x64-msvc.node')
+        return require('./pdfdown_ocr.win32-x64-msvc.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-win32-x64-msvc')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-win32-x64-msvc/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-win32-x64-msvc')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-win32-x64-msvc/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -125,13 +125,13 @@ function requireNative() {
       }
     } else if (process.arch === 'ia32') {
       try {
-        return require('./pdfdown.win32-ia32-msvc.node')
+        return require('./pdfdown_ocr.win32-ia32-msvc.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-win32-ia32-msvc')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-win32-ia32-msvc/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-win32-ia32-msvc')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-win32-ia32-msvc/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -141,13 +141,13 @@ function requireNative() {
       }
     } else if (process.arch === 'arm64') {
       try {
-        return require('./pdfdown.win32-arm64-msvc.node')
+        return require('./pdfdown_ocr.win32-arm64-msvc.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-win32-arm64-msvc')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-win32-arm64-msvc/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-win32-arm64-msvc')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-win32-arm64-msvc/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -160,13 +160,13 @@ function requireNative() {
     }
   } else if (process.platform === 'darwin') {
     try {
-      return require('./pdfdown.darwin-universal.node')
+      return require('./pdfdown_ocr.darwin-universal.node')
     } catch (e) {
       loadErrors.push(e)
     }
     try {
-      const binding = require('@d0paminedriven/pdfdown-darwin-universal')
-      const bindingPackageVersion = require('@d0paminedriven/pdfdown-darwin-universal/package.json').version
+      const binding = require('@d0paminedriven/pdfdown-ocr-darwin-universal')
+      const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-darwin-universal/package.json').version
       if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
         throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
       }
@@ -176,13 +176,13 @@ function requireNative() {
     }
     if (process.arch === 'x64') {
       try {
-        return require('./pdfdown.darwin-x64.node')
+        return require('./pdfdown_ocr.darwin-x64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-darwin-x64')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-darwin-x64/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-darwin-x64')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-darwin-x64/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -192,13 +192,13 @@ function requireNative() {
       }
     } else if (process.arch === 'arm64') {
       try {
-        return require('./pdfdown.darwin-arm64.node')
+        return require('./pdfdown_ocr.darwin-arm64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-darwin-arm64')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-darwin-arm64/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-darwin-arm64')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-darwin-arm64/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -212,13 +212,13 @@ function requireNative() {
   } else if (process.platform === 'freebsd') {
     if (process.arch === 'x64') {
       try {
-        return require('./pdfdown.freebsd-x64.node')
+        return require('./pdfdown_ocr.freebsd-x64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-freebsd-x64')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-freebsd-x64/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-freebsd-x64')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-freebsd-x64/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -228,13 +228,13 @@ function requireNative() {
       }
     } else if (process.arch === 'arm64') {
       try {
-        return require('./pdfdown.freebsd-arm64.node')
+        return require('./pdfdown_ocr.freebsd-arm64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-freebsd-arm64')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-freebsd-arm64/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-freebsd-arm64')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-freebsd-arm64/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -249,13 +249,13 @@ function requireNative() {
     if (process.arch === 'x64') {
       if (isMusl()) {
         try {
-          return require('./pdfdown.linux-x64-musl.node')
+          return require('./pdfdown_ocr.linux-x64-musl.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@d0paminedriven/pdfdown-linux-x64-musl')
-          const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-x64-musl/package.json').version
+          const binding = require('@d0paminedriven/pdfdown-ocr-linux-x64-musl')
+          const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-x64-musl/package.json').version
           if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -265,13 +265,13 @@ function requireNative() {
         }
       } else {
         try {
-          return require('./pdfdown.linux-x64-gnu.node')
+          return require('./pdfdown_ocr.linux-x64-gnu.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@d0paminedriven/pdfdown-linux-x64-gnu')
-          const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-x64-gnu/package.json').version
+          const binding = require('@d0paminedriven/pdfdown-ocr-linux-x64-gnu')
+          const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-x64-gnu/package.json').version
           if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -283,13 +283,13 @@ function requireNative() {
     } else if (process.arch === 'arm64') {
       if (isMusl()) {
         try {
-          return require('./pdfdown.linux-arm64-musl.node')
+          return require('./pdfdown_ocr.linux-arm64-musl.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@d0paminedriven/pdfdown-linux-arm64-musl')
-          const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-arm64-musl/package.json').version
+          const binding = require('@d0paminedriven/pdfdown-ocr-linux-arm64-musl')
+          const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-arm64-musl/package.json').version
           if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -299,13 +299,13 @@ function requireNative() {
         }
       } else {
         try {
-          return require('./pdfdown.linux-arm64-gnu.node')
+          return require('./pdfdown_ocr.linux-arm64-gnu.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@d0paminedriven/pdfdown-linux-arm64-gnu')
-          const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-arm64-gnu/package.json').version
+          const binding = require('@d0paminedriven/pdfdown-ocr-linux-arm64-gnu')
+          const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-arm64-gnu/package.json').version
           if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -317,13 +317,13 @@ function requireNative() {
     } else if (process.arch === 'arm') {
       if (isMusl()) {
         try {
-          return require('./pdfdown.linux-arm-musleabihf.node')
+          return require('./pdfdown_ocr.linux-arm-musleabihf.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@d0paminedriven/pdfdown-linux-arm-musleabihf')
-          const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-arm-musleabihf/package.json').version
+          const binding = require('@d0paminedriven/pdfdown-ocr-linux-arm-musleabihf')
+          const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-arm-musleabihf/package.json').version
           if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -333,13 +333,13 @@ function requireNative() {
         }
       } else {
         try {
-          return require('./pdfdown.linux-arm-gnueabihf.node')
+          return require('./pdfdown_ocr.linux-arm-gnueabihf.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@d0paminedriven/pdfdown-linux-arm-gnueabihf')
-          const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-arm-gnueabihf/package.json').version
+          const binding = require('@d0paminedriven/pdfdown-ocr-linux-arm-gnueabihf')
+          const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-arm-gnueabihf/package.json').version
           if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -351,13 +351,13 @@ function requireNative() {
     } else if (process.arch === 'loong64') {
       if (isMusl()) {
         try {
-          return require('./pdfdown.linux-loong64-musl.node')
+          return require('./pdfdown_ocr.linux-loong64-musl.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@d0paminedriven/pdfdown-linux-loong64-musl')
-          const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-loong64-musl/package.json').version
+          const binding = require('@d0paminedriven/pdfdown-ocr-linux-loong64-musl')
+          const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-loong64-musl/package.json').version
           if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -367,13 +367,13 @@ function requireNative() {
         }
       } else {
         try {
-          return require('./pdfdown.linux-loong64-gnu.node')
+          return require('./pdfdown_ocr.linux-loong64-gnu.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@d0paminedriven/pdfdown-linux-loong64-gnu')
-          const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-loong64-gnu/package.json').version
+          const binding = require('@d0paminedriven/pdfdown-ocr-linux-loong64-gnu')
+          const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-loong64-gnu/package.json').version
           if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -385,13 +385,13 @@ function requireNative() {
     } else if (process.arch === 'riscv64') {
       if (isMusl()) {
         try {
-          return require('./pdfdown.linux-riscv64-musl.node')
+          return require('./pdfdown_ocr.linux-riscv64-musl.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@d0paminedriven/pdfdown-linux-riscv64-musl')
-          const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-riscv64-musl/package.json').version
+          const binding = require('@d0paminedriven/pdfdown-ocr-linux-riscv64-musl')
+          const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-riscv64-musl/package.json').version
           if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -401,13 +401,13 @@ function requireNative() {
         }
       } else {
         try {
-          return require('./pdfdown.linux-riscv64-gnu.node')
+          return require('./pdfdown_ocr.linux-riscv64-gnu.node')
         } catch (e) {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@d0paminedriven/pdfdown-linux-riscv64-gnu')
-          const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-riscv64-gnu/package.json').version
+          const binding = require('@d0paminedriven/pdfdown-ocr-linux-riscv64-gnu')
+          const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-riscv64-gnu/package.json').version
           if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
             throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
@@ -418,13 +418,13 @@ function requireNative() {
       }
     } else if (process.arch === 'ppc64') {
       try {
-        return require('./pdfdown.linux-ppc64-gnu.node')
+        return require('./pdfdown_ocr.linux-ppc64-gnu.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-linux-ppc64-gnu')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-ppc64-gnu/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-linux-ppc64-gnu')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-ppc64-gnu/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -434,13 +434,13 @@ function requireNative() {
       }
     } else if (process.arch === 's390x') {
       try {
-        return require('./pdfdown.linux-s390x-gnu.node')
+        return require('./pdfdown_ocr.linux-s390x-gnu.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-linux-s390x-gnu')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-s390x-gnu/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-linux-s390x-gnu')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-linux-s390x-gnu/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -454,13 +454,13 @@ function requireNative() {
   } else if (process.platform === 'openharmony') {
     if (process.arch === 'arm64') {
       try {
-        return require('./pdfdown.openharmony-arm64.node')
+        return require('./pdfdown_ocr.openharmony-arm64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-openharmony-arm64')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-openharmony-arm64/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-openharmony-arm64')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-openharmony-arm64/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -470,13 +470,13 @@ function requireNative() {
       }
     } else if (process.arch === 'x64') {
       try {
-        return require('./pdfdown.openharmony-x64.node')
+        return require('./pdfdown_ocr.openharmony-x64.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-openharmony-x64')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-openharmony-x64/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-openharmony-x64')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-openharmony-x64/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -486,13 +486,13 @@ function requireNative() {
       }
     } else if (process.arch === 'arm') {
       try {
-        return require('./pdfdown.openharmony-arm.node')
+        return require('./pdfdown_ocr.openharmony-arm.node')
       } catch (e) {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@d0paminedriven/pdfdown-openharmony-arm')
-        const bindingPackageVersion = require('@d0paminedriven/pdfdown-openharmony-arm/package.json').version
+        const binding = require('@d0paminedriven/pdfdown-ocr-openharmony-arm')
+        const bindingPackageVersion = require('@d0paminedriven/pdfdown-ocr-openharmony-arm/package.json').version
         if (bindingPackageVersion !== '0.9.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           throw new Error(`Native binding package version mismatch, expected 0.9.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
@@ -514,7 +514,7 @@ if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
   let wasiBinding = null
   let wasiBindingError = null
   try {
-    wasiBinding = require('./pdfdown.wasi.cjs')
+    wasiBinding = require('./pdfdown_ocr.wasi.cjs')
     nativeBinding = wasiBinding
   } catch (err) {
     if (process.env.NAPI_RS_FORCE_WASI) {
@@ -523,7 +523,7 @@ if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
   }
   if (!nativeBinding) {
     try {
-      wasiBinding = require('@d0paminedriven/pdfdown-wasm32-wasi')
+      wasiBinding = require('@d0paminedriven/pdfdown-ocr-wasm32-wasi')
       nativeBinding = wasiBinding
     } catch (err) {
       if (process.env.NAPI_RS_FORCE_WASI) {
@@ -566,7 +566,10 @@ module.exports.extractStructuredTextPerPage = nativeBinding.extractStructuredTex
 module.exports.extractStructuredTextPerPageAsync = nativeBinding.extractStructuredTextPerPageAsync
 module.exports.extractTextPerPage = nativeBinding.extractTextPerPage
 module.exports.extractTextPerPageAsync = nativeBinding.extractTextPerPageAsync
+module.exports.extractTextWithOcrPerPage = nativeBinding.extractTextWithOcrPerPage
+module.exports.extractTextWithOcrPerPageAsync = nativeBinding.extractTextWithOcrPerPageAsync
 module.exports.pdfDocument = nativeBinding.pdfDocument
 module.exports.pdfDocumentAsync = nativeBinding.pdfDocumentAsync
 module.exports.pdfMetadata = nativeBinding.pdfMetadata
 module.exports.pdfMetadataAsync = nativeBinding.pdfMetadataAsync
+module.exports.TextSource = nativeBinding.TextSource
