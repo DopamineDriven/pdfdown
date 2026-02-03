@@ -397,6 +397,59 @@ jobs:
         run: yarn test
         env:
           NAPI_RS_FORCE_WASI: 1
+  test-ocr:
+    name: Test OCR - ${{ matrix.settings.target }}
+    needs:
+      - build-ocr
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            target: aarch64-apple-darwin
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - host: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.settings.host }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: yarn
+      - name: Install tesseract (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:alex-p/tesseract-ocr5
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-all
+          TESS_PREFIX=$(tesseract --list-langs 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "TESSDATA_PREFIX=${TESS_PREFIX}" >> $GITHUB_ENV
+          echo "Tesseract data path: ${TESS_PREFIX}"
+      - name: Install tesseract (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install tesseract
+          TESS_PREFIX=$(tesseract --list-langs 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "TESSDATA_PREFIX=${TESS_PREFIX}" >> $GITHUB_ENV
+          echo "Tesseract data path: ${TESS_PREFIX}"
+      - name: Install dependencies
+        run: yarn install
+      - name: Download OCR artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: ocr-bindings-${{ matrix.settings.target }}
+          path: ocr/
+      - name: List OCR bindings
+        run: ls -la ocr/*.node
+        shell: bash
+      - name: Test OCR bindings
+        run: yarn test:ocr
   publish:
     name: Publish
     runs-on: ubuntu-latest
@@ -410,6 +463,7 @@ jobs:
       - test-macOS-windows-binding
       - test-linux-binding
       - test-wasi
+      - test-ocr
     steps:
       - uses: actions/checkout@v6
       - name: Setup node

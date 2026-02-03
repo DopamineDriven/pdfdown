@@ -26,6 +26,10 @@ export declare class PdfDown {
   structuredText(): Array<StructuredPageText>
   /** Async: extract structured text with header/footer detection */
   structuredTextAsync(): Promise<Array<StructuredPageText>>
+  /** Sync: extract text with OCR fallback for image-only pages */
+  textWithOcrPerPage(opts?: OcrOptions | undefined | null): Array<OcrPageText>
+  /** Async: extract text with OCR fallback for image-only pages */
+  textWithOcrPerPageAsync(opts?: OcrOptions | undefined | null): Promise<Array<OcrPageText>>
 }
 
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
@@ -43,6 +47,22 @@ export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promi
 export declare function extractTextPerPage(buffer: Buffer): Array<PageText>
 
 export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<PageText>>
+
+export declare function extractTextWithOcrPerPage(buffer: Buffer, opts?: OcrOptions | undefined | null): Array<OcrPageText>
+
+export declare function extractTextWithOcrPerPageAsync(buffer: Buffer, opts?: OcrOptions | undefined | null): Promise<Array<OcrPageText>>
+
+export interface OcrOptions {
+  lang?: string
+  minTextLength?: number
+  maxThreads?: number
+}
+
+export interface OcrPageText {
+  page: number
+  text: string
+  source: TextSource
+}
 
 export interface PageAnnotation {
   page: number
@@ -112,4 +132,9 @@ export interface StructuredPageText {
   header: string
   body: string
   footer: string
+}
+
+export declare const enum TextSource {
+  Native = 'Native',
+  Ocr = 'Ocr'
 }

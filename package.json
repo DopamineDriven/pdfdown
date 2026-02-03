@@ -1,6 +1,6 @@
 {
   "name": "@d0paminedriven/pdfdown",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Rust powered PDF extraction for Node",
   "main": "index.js",
   "repository": {
@@ -63,6 +63,7 @@
     "lint": "oxlint .",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
+    "test:ocr": "ava --config ocr/ava.config.mjs",
     "preversion": "napi build --platform && git add .",
     "version": "napi version",
     "prepare": "husky"
@@ -97,6 +98,9 @@
     ]
   },
   "ava": {
+    "files": [
+      "__test__/**/*.spec.ts"
+    ],
     "extensions": {
       "ts": "module"
     },

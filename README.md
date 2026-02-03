@@ -4,7 +4,7 @@
 
 Rust-powered PDF extraction for Node.js via [napi-rs](https://napi.rs). Extracts per-page text, images (as PNG), annotations (links, destinations), structured text (with header/footer detection), and metadata from PDF buffers. All extraction is parallelized with [rayon](https://github.com/rayon-rs/rayon) for multi-core performance.
 
-An OCR variant is available as [`@d0paminedriven/pdfdown-ocr`](#ocr-variant) for image-only PDF pages.
+An OCR variant is available as [`@d0paminedriven/pdfdown-ocr`](https://www.npmjs.com/package/@d0paminedriven/pdfdown-ocr) for image-only PDF pages (scanned documents, embedded screenshots). It includes all of the APIs below plus Tesseract-based OCR fallback.
 
 ## Install
 
@@ -360,100 +360,6 @@ const chunks = pages.map(({ page, body }) => ({
 })).filter((c) => c.content.length > 0)
 ```
 
-## OCR variant
-
-For PDFs with image-only pages (scanned documents, embedded screenshots), the OCR variant falls back to [Tesseract](https://github.com/tesseract-ocr/tesseract) when native text extraction yields insufficient content.
-
-### Install
-
-```bash
-npm install @d0paminedriven/pdfdown-ocr
-```
-
-**System requirement:** Tesseract 5.x and development libraries must be installed.
-
-```bash
-# Ubuntu/Debian (22.04 ships tesseract 3.x — use the PPA for 5.x)
-sudo add-apt-repository ppa:alex-p/tesseract-ocr5
-sudo apt update
-sudo apt install tesseract-ocr tesseract-ocr-eng libtesseract-dev libleptonica-dev pkg-config build-essential -y
-# Optional: install all language packs
-# sudo apt install tesseract-ocr-all
-
-# macOS
-brew install tesseract
-
-# Arch
-sudo pacman -S tesseract tesseract-data-eng
-```
-
-Verify with `tesseract --version` — you should see 5.x.
-
-### OCR API
-
-> **Use the async API for OCR.** The sync variants (`extractTextWithOcrPerPage`, `textWithOcrPerPage`) block the Node.js event loop for the duration of OCR processing, which can be significant for multi-page scanned documents. Prefer `extractTextWithOcrPerPageAsync` / `textWithOcrPerPageAsync` in production.
-
-#### Standalone functions
-
-```typescript
-export declare function extractTextWithOcrPerPage(
-  buffer: Buffer,
-  opts?: OcrOptions,
-): Array<OcrPageText>
-
-export declare function extractTextWithOcrPerPageAsync(
-  buffer: Buffer,
-  opts?: OcrOptions,
-): Promise<Array<OcrPageText>>
-```
-
-#### `PdfDown` class methods
-
-```typescript
-export declare class PdfDown {
-  // ... all base methods, plus:
-  textWithOcrPerPage(opts?: OcrOptions): Array<OcrPageText>
-  textWithOcrPerPageAsync(opts?: OcrOptions): Promise<Array<OcrPageText>>
-}
-```
-
-#### OCR types
-
-```typescript
-export const enum TextSource {
-  Native = 'Native',
-  Ocr = 'Ocr',
-}
-
-export interface OcrPageText {
-  page: number
-  text: string
-  source: TextSource // indicates whether text came from native extraction or OCR
-}
-
-export interface OcrOptions {
-  lang?: string // Tesseract language code, default "eng"
-  minTextLength?: number // non-whitespace character threshold before falling back to OCR, default 1
-  maxThreads?: number // cap on Rayon threads for OCR parallelism, default 4, clamped to [1, available CPUs]
-}
-```
-
-#### OCR usage
-
-```typescript
-import { readFile } from 'fs/promises'
-import { PdfDown } from '@d0paminedriven/pdfdown-ocr'
-
-const pdf = new PdfDown(await readFile('scanned-document.pdf'))
-
-// Automatically uses native text when available, falls back to OCR for image-only pages
-const pages = await pdf.textWithOcrPerPageAsync({ lang: 'eng', minTextLength: 10 })
-
-for (const { page, text, source } of pages) {
-  console.log(`Page ${page} [${source}]: ${text.slice(0, 100)}...`)
-}
-```
-
 ## Parallelism
 
 All extraction functions use [rayon](https://github.com/rayon-rs/rayon) for automatic multi-core parallelism. Per-page text extraction, image decoding, and annotation parsing run concurrently across CPU cores. The `pdfDocument` / `document()` call additionally runs text, image, and annotation extraction concurrently via nested `rayon::join`. This is internal to the native addon — the Node.js API surface is unchanged.
@@ -488,7 +394,7 @@ UV_THREADPOOL_SIZE=8 node app.js
 
 ## How it works
 
-Built with [lopdf](https://github.com/J-F-Liu/lopdf) (pure Rust PDF parser), [image](https://github.com/image-rs/image) (PNG/JPEG encoding), [hayro-jpeg2000](https://crates.io/crates/hayro-jpeg2000) (JPEG 2000 decoding), and [rayon](https://github.com/rayon-rs/rayon) (data parallelism). The OCR variant additionally uses [tesseract-rs](https://crates.io/crates/tesseract-rs) (Tesseract bindings). Compiled to a native Node.js addon via [napi-rs](https://napi.rs) with prebuilt binaries for:
+Built with [lopdf](https://github.com/J-F-Liu/lopdf) (pure Rust PDF parser), [image](https://github.com/image-rs/image) (PNG/JPEG encoding), [hayro-jpeg2000](https://crates.io/crates/hayro-jpeg2000) (JPEG 2000 decoding), and [rayon](https://github.com/rayon-rs/rayon) (data parallelism). Compiled to a native Node.js addon via [napi-rs](https://napi.rs) with prebuilt binaries for:
 
 - macOS (x64, ARM64)
 - Windows (x64, ia32, ARM64)

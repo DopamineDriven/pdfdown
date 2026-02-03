@@ -107,6 +107,7 @@ pub struct PdfDocument {
   pub image_pages: Vec<u32>,
   pub annotation_pages: Vec<u32>,
   pub text: Vec<PageText>,
+  pub structured_text: Vec<StructuredPageText>,
   pub images: Vec<PageImage>,
   pub annotations: Vec<PageAnnotation>,
 }
@@ -146,6 +147,7 @@ impl From<RawPageImage> for PageImage {
 pub struct RawPdfDocument {
   pub meta: PdfMeta,
   pub text: Vec<PageText>,
+  pub structured_text: Vec<StructuredPageText>,
   pub images: Vec<RawPageImage>,
   pub annotations: Vec<PageAnnotation>,
   pub image_pages: Vec<u32>,
@@ -169,6 +171,7 @@ impl From<RawPdfDocument> for PdfDocument {
       image_pages: r.image_pages,
       annotation_pages: r.annotation_pages,
       text: r.text,
+      structured_text: r.structured_text,
       images: r.images.into_iter().map(PageImage::from).collect(),
       annotations: r.annotations,
     }
@@ -520,6 +523,7 @@ fn extract_all(doc: &Document) -> Result<RawPdfDocument> {
     || extract_annotations(doc),
   );
   let text = text?;
+  let structured_text = detect_headers_footers(&text);
 
   let mut image_pages: Vec<u32> = images
     .iter()
@@ -540,6 +544,7 @@ fn extract_all(doc: &Document) -> Result<RawPdfDocument> {
   Ok(RawPdfDocument {
     meta,
     text,
+    structured_text,
     images,
     annotations,
     image_pages,
@@ -833,18 +838,18 @@ fn collect_page_images_raw(doc: &Document, page_id: ObjectId, page_num: u32) -> 
     let color_space = resolve_color_space(&stream.dict, doc);
     let filter = resolve_filter(&stream.dict);
 
+    let channels: u32 = match color_space.as_str() {
+      "DeviceRGB" | "ICCBased3" | "CalRGB" => 3,
+      "DeviceGray" | "ICCBased1" | "CalGray" => 1,
+      "DeviceCMYK" | "ICCBased4" => 4,
+      _ => 3,
+    };
+
     // Step 4: Skip the full stream clone for DCT/JPX — they're already in their
     // target encoded format and don't need lopdf decompression.
     let content = match filter.as_str() {
       "DCTDecode" | "JPXDecode" => stream.content.clone(),
-      _ => {
-        let mut s = stream.clone();
-        if s.decompress().is_ok() {
-          s.content
-        } else {
-          stream.content.clone()
-        }
-      }
+      _ => decompress_stream_content(doc, stream, width, height, channels, bpc),
     };
 
     // Check for SMask (alpha channel)
@@ -960,6 +965,217 @@ fn get_referenced_xobject_names(doc: &Document, page_id: ObjectId) -> HashSet<Ve
   names
 }
 
+/// Resolve /DecodeParms from a stream dictionary, following indirect references.
+fn resolve_decode_parms(doc: &Document, dict: &lopdf::Dictionary) -> Option<lopdf::Dictionary> {
+  let dp = dict.get(b"DecodeParms").ok()?;
+  match dp {
+    Object::Dictionary(d) => Some(d.clone()),
+    Object::Reference(id) => match doc.get_object(*id) {
+      Ok(Object::Dictionary(d)) => Some(d.clone()),
+      _ => None,
+    },
+    Object::Array(arr) => {
+      // Filter chain: DecodeParms is an array parallel to Filter array.
+      // Use the first dictionary entry found.
+      for item in arr {
+        match item {
+          Object::Dictionary(d) => return Some(d.clone()),
+          Object::Reference(id) => {
+            if let Ok(Object::Dictionary(d)) = doc.get_object(*id) {
+              return Some(d.clone());
+            }
+          }
+          _ => {}
+        }
+      }
+      None
+    }
+    _ => None,
+  }
+}
+
+/// Apply PNG predictor unfiltering to raw decompressed data.
+/// Each row has a 1-byte filter type prefix followed by `row_bytes` of filtered data.
+/// `bytes_per_pixel` is the number of bytes per pixel (channels * ceil(bpc/8)).
+fn apply_png_predictor(data: &[u8], bytes_per_pixel: usize, row_bytes: usize) -> Option<Vec<u8>> {
+  let src_row_len = row_bytes + 1; // +1 for filter type byte
+  if data.len() % src_row_len != 0 {
+    return None;
+  }
+  let num_rows = data.len() / src_row_len;
+  let mut output = Vec::with_capacity(num_rows * row_bytes);
+  let mut prev_row = vec![0u8; row_bytes];
+
+  for row_idx in 0..num_rows {
+    let row_start = row_idx * src_row_len;
+    let filter_byte = data[row_start];
+    let mut current_row = data[row_start + 1..row_start + src_row_len].to_vec();
+
+    match filter_byte {
+      0 => { /* None */ }
+      1 => {
+        // Sub
+        for i in bytes_per_pixel..row_bytes {
+          current_row[i] = current_row[i].wrapping_add(current_row[i - bytes_per_pixel]);
+        }
+      }
+      2 => {
+        // Up
+        for i in 0..row_bytes {
+          current_row[i] = current_row[i].wrapping_add(prev_row[i]);
+        }
+      }
+      3 => {
+        // Average
+        for i in 0..bytes_per_pixel {
+          current_row[i] = current_row[i].wrapping_add(prev_row[i] / 2);
+        }
+        for i in bytes_per_pixel..row_bytes {
+          current_row[i] = current_row[i].wrapping_add(
+            ((current_row[i - bytes_per_pixel] as u16 + prev_row[i] as u16) / 2) as u8,
+          );
+        }
+      }
+      4 => {
+        // Paeth
+        for i in 0..bytes_per_pixel {
+          current_row[i] = current_row[i].wrapping_add(paeth_predictor(0, prev_row[i], 0));
+        }
+        for i in bytes_per_pixel..row_bytes {
+          current_row[i] = current_row[i].wrapping_add(paeth_predictor(
+            current_row[i - bytes_per_pixel],
+            prev_row[i],
+            prev_row[i - bytes_per_pixel],
+          ));
+        }
+      }
+      _ => return None, // Unknown filter type
+    }
+
+    output.extend_from_slice(&current_row);
+    prev_row = current_row;
+  }
+
+  Some(output)
+}
+
+fn paeth_predictor(a: u8, b: u8, c: u8) -> u8 {
+  let pa = (b as i16 - c as i16).abs();
+  let pb = (a as i16 - c as i16).abs();
+  let pc = (a as i16 + b as i16 - 2 * c as i16).abs();
+  if pa <= pb && pa <= pc {
+    a
+  } else if pb <= pc {
+    b
+  } else {
+    c
+  }
+}
+
+/// Decompress a stream's content with correct predictor handling.
+///
+/// lopdf's built-in `decompress()` attempts PNG predictor unfiltering internally
+/// but produces corrupted output for some streams (e.g. xdvipdfmx/pandoc images).
+/// We bypass it entirely: raw zlib inflate via `flate2`, then apply our own
+/// predictor reversal.
+fn decompress_stream_content(
+  doc: &Document,
+  stream: &lopdf::Stream,
+  width: u32,
+  height: u32,
+  channels: u32,
+  bpc: u32,
+) -> Vec<u8> {
+  let bytes_per_sample = if bpc > 8 { 2u32 } else { 1u32 };
+  let row_bytes = (width * channels * bpc / 8) as usize;
+  let expected = (width * height * channels * bytes_per_sample) as usize;
+  let predicted_len = height as usize * (row_bytes + 1);
+
+  // Check if the stream uses FlateDecode
+  let uses_flate = match stream.dict.get(b"Filter") {
+    Ok(Object::Name(n)) => n == b"FlateDecode",
+    Ok(Object::Array(arr)) => arr
+      .iter()
+      .any(|o| matches!(o, Object::Name(n) if n == b"FlateDecode")),
+    _ => false,
+  };
+
+  // Step 1: Raw inflate — bypass lopdf's decompress to avoid its buggy predictor handling
+  let content = if uses_flate {
+    raw_inflate(&stream.content).unwrap_or_else(|| {
+      // Fallback: let lopdf try (handles edge cases like chained filters)
+      let mut s = stream.clone();
+      if s.decompress().is_ok() {
+        s.content
+      } else {
+        stream.content.clone()
+      }
+    })
+  } else {
+    stream.content.clone()
+  };
+
+  // Step 2: Apply predictor reversal if DecodeParms specifies one
+  if let Some(dp) = resolve_decode_parms(doc, &stream.dict) {
+    let predictor = get_dict_int(&dp, b"Predictor").unwrap_or(1);
+
+    // TIFF Predictor 2: horizontal differencing (same size as raw pixels)
+    if predictor == 2 && content.len() == expected {
+      let bpp = (channels * bpc / 8).max(1) as usize;
+      let mut data = content;
+      apply_tiff_predictor2(&mut data, bpp, row_bytes);
+      return data;
+    }
+
+    // PNG Predictors 10-15: each row has a leading filter type byte
+    if (10..=15).contains(&predictor) && content.len() == predicted_len {
+      let bpp = (channels * bpc / 8).max(1) as usize;
+      if let Some(unfiltered) = apply_png_predictor(&content, bpp, row_bytes) {
+        return unfiltered;
+      }
+    }
+  }
+
+  content
+}
+
+/// Raw zlib inflate without any predictor handling.
+fn raw_inflate(data: &[u8]) -> Option<Vec<u8>> {
+  use std::io::Read;
+  // Try zlib wrapper first (most common in PDF)
+  let mut output = Vec::new();
+  if flate2::read::ZlibDecoder::new(data)
+    .read_to_end(&mut output)
+    .is_ok()
+  {
+    return Some(output);
+  }
+  // Fallback to raw deflate (no zlib header)
+  output.clear();
+  if flate2::read::DeflateDecoder::new(data)
+    .read_to_end(&mut output)
+    .is_ok()
+  {
+    return Some(output);
+  }
+  None
+}
+
+/// Reverse TIFF Predictor 2 (horizontal differencing) in-place.
+/// Each byte after the first `bpp` bytes in each row is a delta from the previous byte.
+fn apply_tiff_predictor2(data: &mut [u8], bpp: usize, row_bytes: usize) {
+  if row_bytes == 0 {
+    return;
+  }
+  let num_rows = data.len() / row_bytes;
+  for row in 0..num_rows {
+    let start = row * row_bytes;
+    for i in (start + bpp)..(start + row_bytes) {
+      data[i] = data[i].wrapping_add(data[i - bpp]);
+    }
+  }
+}
+
 /// Retrieve and decompress the SMask (soft mask / alpha channel) image data if present
 fn get_smask_data(doc: &Document, dict: &lopdf::Dictionary) -> Option<Vec<u8>> {
   let smask_ref = dict.get(b"SMask").ok()?;
@@ -985,12 +1201,18 @@ fn get_smask_data(doc: &Document, dict: &lopdf::Dictionary) -> Option<Vec<u8>> {
     return None;
   }
 
-  let mut s = smask_stream.clone();
-  if s.decompress().is_ok() {
-    Some(s.content)
-  } else {
-    Some(smask_stream.content.clone())
-  }
+  // SMask is always DeviceGray with 1 channel
+  let smask_width = get_dict_int(&smask_stream.dict, b"Width").unwrap_or(0) as u32;
+  let smask_height = get_dict_int(&smask_stream.dict, b"Height").unwrap_or(0) as u32;
+  let smask_bpc = get_dict_int(&smask_stream.dict, b"BitsPerComponent").unwrap_or(8) as u32;
+  Some(decompress_stream_content(
+    doc,
+    smask_stream,
+    smask_width,
+    smask_height,
+    1,
+    smask_bpc,
+  ))
 }
 
 fn resolve_to_dict(doc: &Document, obj: &Object) -> Option<lopdf::Dictionary> {
@@ -1128,8 +1350,8 @@ fn decode_raw_pixels(
   color_space: &str,
 ) -> Option<DynamicImage> {
   let channels: u32 = match color_space {
-    "DeviceRGB" | "ICCBased3" => 3,
-    "DeviceGray" | "ICCBased1" => 1,
+    "DeviceRGB" | "ICCBased3" | "CalRGB" => 3,
+    "DeviceGray" | "ICCBased1" | "CalGray" => 1,
     "DeviceCMYK" | "ICCBased4" => 4,
     _ => 3,
   };
@@ -1154,12 +1376,12 @@ fn decode_raw_pixels(
   };
 
   match color_space {
-    "DeviceRGB" | "ICCBased3" => {
+    "DeviceRGB" | "ICCBased3" | "CalRGB" => {
       let img: ImageBuffer<image::Rgb<u8>, Vec<u8>> =
         ImageBuffer::from_raw(width, height, pixel_data_8bit)?;
       Some(DynamicImage::ImageRgb8(img))
     }
-    "DeviceGray" | "ICCBased1" => {
+    "DeviceGray" | "ICCBased1" | "CalGray" => {
       let img: ImageBuffer<image::Luma<u8>, Vec<u8>> =
         ImageBuffer::from_raw(width, height, pixel_data_8bit)?;
       Some(DynamicImage::ImageLuma8(img))
