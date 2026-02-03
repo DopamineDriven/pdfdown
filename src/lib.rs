@@ -999,7 +999,7 @@ fn resolve_decode_parms(doc: &Document, dict: &lopdf::Dictionary) -> Option<lopd
 /// `bytes_per_pixel` is the number of bytes per pixel (channels * ceil(bpc/8)).
 fn apply_png_predictor(data: &[u8], bytes_per_pixel: usize, row_bytes: usize) -> Option<Vec<u8>> {
   let src_row_len = row_bytes + 1; // +1 for filter type byte
-  if data.len() % src_row_len != 0 {
+  if !data.len().is_multiple_of(src_row_len) {
     return None;
   }
   let num_rows = data.len() / src_row_len;
