@@ -112,6 +112,36 @@ pub struct PdfDocument {
   pub annotations: Vec<PageAnnotation>,
 }
 
+#[cfg(feature = "ocr")]
+#[napi(object)]
+pub struct OcrStructuredPageText {
+  pub page: u32,
+  pub header: String,
+  pub body: String,
+  pub footer: String,
+  pub source: TextSource,
+}
+
+#[cfg(feature = "ocr")]
+#[napi(object)]
+pub struct PdfDocumentOcr {
+  pub version: String,
+  pub is_linearized: bool,
+  pub page_count: u32,
+  pub creator: Option<String>,
+  pub producer: Option<String>,
+  pub creation_date: Option<String>,
+  pub modification_date: Option<String>,
+  pub total_images: u32,
+  pub total_annotations: u32,
+  pub image_pages: Vec<u32>,
+  pub annotation_pages: Vec<u32>,
+  pub text: Vec<OcrPageText>,
+  pub structured_text: Vec<OcrStructuredPageText>,
+  pub images: Vec<PageImage>,
+  pub annotations: Vec<PageAnnotation>,
+}
+
 // ── Step 2: Internal type — no napi types, safe for any thread ──
 
 pub struct RawPageImage {
@@ -159,6 +189,42 @@ impl From<RawPdfDocument> for PdfDocument {
     let total_images = r.images.len() as u32;
     let total_annotations = r.annotations.len() as u32;
     PdfDocument {
+      version: r.meta.version,
+      is_linearized: r.meta.is_linearized,
+      page_count: r.meta.page_count,
+      creator: r.meta.creator,
+      producer: r.meta.producer,
+      creation_date: r.meta.creation_date,
+      modification_date: r.meta.modification_date,
+      total_images,
+      total_annotations,
+      image_pages: r.image_pages,
+      annotation_pages: r.annotation_pages,
+      text: r.text,
+      structured_text: r.structured_text,
+      images: r.images.into_iter().map(PageImage::from).collect(),
+      annotations: r.annotations,
+    }
+  }
+}
+
+#[cfg(feature = "ocr")]
+pub struct RawPdfDocumentOcr {
+  pub meta: PdfMeta,
+  pub text: Vec<OcrPageText>,
+  pub structured_text: Vec<OcrStructuredPageText>,
+  pub images: Vec<RawPageImage>,
+  pub annotations: Vec<PageAnnotation>,
+  pub image_pages: Vec<u32>,
+  pub annotation_pages: Vec<u32>,
+}
+
+#[cfg(feature = "ocr")]
+impl From<RawPdfDocumentOcr> for PdfDocumentOcr {
+  fn from(r: RawPdfDocumentOcr) -> Self {
+    let total_images = r.images.len() as u32;
+    let total_annotations = r.annotations.len() as u32;
+    PdfDocumentOcr {
       version: r.meta.version,
       is_linearized: r.meta.is_linearized,
       page_count: r.meta.page_count,
@@ -653,8 +719,49 @@ fn collect_page_decoded_images(doc: &Document, page_id: ObjectId) -> Vec<Dynamic
   decoded
 }
 
+/// Auto-detect tessdata path, cached for the lifetime of the process.
+/// Checks `TESSDATA_PREFIX` env var first (user override), then falls back to
+/// parsing the output of `tesseract --list-langs` (e.g.
+/// `List of available languages in "/usr/share/tesseract-ocr/5/tessdata/" (161):`).
+/// Returns `None` if neither source yields a path, letting tesseract use its
+/// compiled-in default.
+#[cfg(feature = "ocr")]
+fn get_tessdata_prefix() -> Option<&'static str> {
+  use std::sync::OnceLock;
+  static TESSDATA_PATH: OnceLock<Option<String>> = OnceLock::new();
+
+  TESSDATA_PATH
+    .get_or_init(|| {
+      // User-provided override takes priority
+      if let Ok(path) = std::env::var("TESSDATA_PREFIX") {
+        return Some(path);
+      }
+
+      // Auto-detect from tesseract --list-langs
+      let output = std::process::Command::new("tesseract")
+        .arg("--list-langs")
+        .output()
+        .ok()?;
+
+      // tesseract writes the path header to stderr
+      let stderr = String::from_utf8_lossy(&output.stderr);
+      let text = if stderr.contains('"') {
+        stderr
+      } else {
+        String::from_utf8_lossy(&output.stdout)
+      };
+
+      // Parse: `List of available languages in "/path/to/tessdata/" (N):`
+      let start = text.find('"')?;
+      let end = text[start + 1..].find('"')?;
+      Some(text[start + 1..start + 1 + end].to_string())
+    })
+    .as_deref()
+}
+
 #[cfg(feature = "ocr")]
 fn ocr_page_images(doc: &Document, page_id: ObjectId, lang: &str) -> String {
+  let datapath = get_tessdata_prefix().unwrap_or("");
   let images = collect_page_decoded_images(doc, page_id);
   let mut texts = Vec::new();
 
@@ -664,7 +771,7 @@ fn ocr_page_images(doc: &Document, page_id: ObjectId, lang: &str) -> String {
     let pixels = rgb.as_raw();
 
     let tess = tesseract_rs::TesseractAPI::new();
-    if tess.init("", lang).is_err() {
+    if tess.init(datapath, lang).is_err() {
       continue;
     }
     if tess
@@ -721,6 +828,76 @@ fn extract_text_with_ocr(
   });
   results.sort_unstable_by_key(|r| r.page);
   Ok(results)
+}
+
+#[cfg(feature = "ocr")]
+fn detect_headers_footers_ocr(pages: &[OcrPageText]) -> Vec<OcrStructuredPageText> {
+  // Convert to PageText for header/footer detection
+  let as_page_text: Vec<PageText> = pages
+    .iter()
+    .map(|p| PageText {
+      page: p.page,
+      text: p.text.clone(),
+    })
+    .collect();
+  let structured = detect_headers_footers(&as_page_text);
+  // Zip back with source info
+  structured
+    .into_iter()
+    .zip(pages.iter())
+    .map(|(s, ocr)| OcrStructuredPageText {
+      page: s.page,
+      header: s.header,
+      body: s.body,
+      footer: s.footer,
+      source: match ocr.source {
+        TextSource::Native => TextSource::Native,
+        TextSource::Ocr => TextSource::Ocr,
+      },
+    })
+    .collect()
+}
+
+#[cfg(feature = "ocr")]
+fn extract_all_with_ocr(
+  doc: &Document,
+  lang: &str,
+  min_len: u32,
+  max_threads: u32,
+) -> Result<RawPdfDocumentOcr> {
+  let meta = extract_metadata(doc);
+  let (text, (images, annotations)) = rayon::join(
+    || extract_text_with_ocr(doc, lang, min_len, max_threads),
+    || rayon::join(|| extract_images_raw(doc), || extract_annotations(doc)),
+  );
+  let text = text?;
+  let structured_text = detect_headers_footers_ocr(&text);
+
+  let mut image_pages: Vec<u32> = images
+    .iter()
+    .map(|i| i.page)
+    .collect::<HashSet<_>>()
+    .into_iter()
+    .collect();
+  image_pages.sort_unstable();
+
+  let mut annotation_pages: Vec<u32> = annotations
+    .iter()
+    .map(|a| a.page)
+    .collect::<HashSet<_>>()
+    .into_iter()
+    .collect();
+  annotation_pages.sort_unstable();
+
+  Ok(RawPdfDocumentOcr {
+    meta,
+    text,
+    structured_text,
+    images,
+    annotations,
+    image_pages,
+    annotation_pages,
+  })
 }
 
 // ── Standalone sync functions ───────────────────────────────────
@@ -780,6 +957,24 @@ pub fn extract_text_with_ocr_per_page(
   let min_len = opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1);
   let max_threads = normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads));
   extract_text_with_ocr(&doc, lang, min_len, max_threads)
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+pub fn pdf_document_ocr(buffer: Buffer, opts: Option<OcrOptions>) -> Result<PdfDocumentOcr> {
+  let doc = load_doc(buffer.as_ref())?;
+  let lang = opts
+    .as_ref()
+    .and_then(|o| o.lang.as_deref())
+    .unwrap_or("eng");
+  let min_len = opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1);
+  let max_threads = normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads));
+  Ok(PdfDocumentOcr::from(extract_all_with_ocr(
+    &doc,
+    lang,
+    min_len,
+    max_threads,
+  )?))
 }
 
 // ── Image extraction internals ──────────────────────────────────
@@ -1630,6 +1825,50 @@ pub fn extract_text_with_ocr_per_page_async(
   })
 }
 
+#[cfg(feature = "ocr")]
+pub struct PdfDocumentOcrTask {
+  data: Vec<u8>,
+  lang: String,
+  min_len: u32,
+  max_threads: u32,
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+impl Task for PdfDocumentOcrTask {
+  type Output = RawPdfDocumentOcr;
+  type JsValue = PdfDocumentOcr;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.data)?;
+    extract_all_with_ocr(&doc, &self.lang, self.min_len, self.max_threads)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(PdfDocumentOcr::from(output))
+  }
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+pub fn pdf_document_ocr_async(
+  buffer: Buffer,
+  opts: Option<OcrOptions>,
+) -> AsyncTask<PdfDocumentOcrTask> {
+  let lang = opts
+    .as_ref()
+    .and_then(|o| o.lang.clone())
+    .unwrap_or_else(|| "eng".to_string());
+  let min_len = opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1);
+  let max_threads = normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads));
+  AsyncTask::new(PdfDocumentOcrTask {
+    data: buffer.to_vec(),
+    lang,
+    min_len,
+    max_threads,
+  })
+}
+
 // ── Step 3: Class-based API with Arc<Document> ──────────────────
 
 /// Shared-document task types for class async methods.
@@ -1753,6 +1992,29 @@ impl Task for SharedExtractTextOcrTask {
   }
 }
 
+#[cfg(feature = "ocr")]
+pub struct SharedPdfDocumentOcrTask {
+  doc: Arc<Document>,
+  lang: String,
+  min_len: u32,
+  max_threads: u32,
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+impl Task for SharedPdfDocumentOcrTask {
+  type Output = RawPdfDocumentOcr;
+  type JsValue = PdfDocumentOcr;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    extract_all_with_ocr(&self.doc, &self.lang, self.min_len, self.max_threads)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(PdfDocumentOcr::from(output))
+  }
+}
+
 #[napi]
 pub struct PdfDown {
   doc: Arc<Document>,
@@ -1873,6 +2135,43 @@ impl PdfDown {
     let min_len = opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1);
     let max_threads = normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads));
     AsyncTask::new(SharedExtractTextOcrTask {
+      doc: Arc::clone(&self.doc),
+      lang,
+      min_len,
+      max_threads,
+    })
+  }
+
+  /// Sync: extract everything from the PDF with OCR text fallback
+  #[napi]
+  pub fn document_ocr(&self, opts: Option<OcrOptions>) -> Result<PdfDocumentOcr> {
+    let lang = opts
+      .as_ref()
+      .and_then(|o| o.lang.as_deref())
+      .unwrap_or("eng");
+    let min_len = opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1);
+    let max_threads = normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads));
+    Ok(PdfDocumentOcr::from(extract_all_with_ocr(
+      &self.doc,
+      lang,
+      min_len,
+      max_threads,
+    )?))
+  }
+
+  /// Async: extract everything from the PDF with OCR text fallback
+  #[napi]
+  pub fn document_ocr_async(
+    &self,
+    opts: Option<OcrOptions>,
+  ) -> AsyncTask<SharedPdfDocumentOcrTask> {
+    let lang = opts
+      .as_ref()
+      .and_then(|o| o.lang.clone())
+      .unwrap_or_else(|| "eng".to_string());
+    let min_len = opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1);
+    let max_threads = normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads));
+    AsyncTask::new(SharedPdfDocumentOcrTask {
       doc: Arc::clone(&self.doc),
       lang,
       min_len,

@@ -30,6 +30,10 @@ export declare class PdfDown {
   textWithOcrPerPage(opts?: OcrOptions | undefined | null): Array<OcrPageText>
   /** Async: extract text with OCR fallback for image-only pages */
   textWithOcrPerPageAsync(opts?: OcrOptions | undefined | null): Promise<Array<OcrPageText>>
+  /** Sync: extract everything from the PDF with OCR text fallback */
+  documentOcr(opts?: OcrOptions | undefined | null): PdfDocumentOcr
+  /** Async: extract everything from the PDF with OCR text fallback */
+  documentOcrAsync(opts?: OcrOptions | undefined | null): Promise<PdfDocumentOcr>
 }
 
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
@@ -61,6 +65,14 @@ export interface OcrOptions {
 export interface OcrPageText {
   page: number
   text: string
+  source: TextSource
+}
+
+export interface OcrStructuredPageText {
+  page: number
+  header: string
+  body: string
+  footer: string
   source: TextSource
 }
 
@@ -112,6 +124,28 @@ export interface PdfDocument {
 }
 
 export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>
+
+export declare function pdfDocumentOcr(buffer: Buffer, opts?: OcrOptions | undefined | null): PdfDocumentOcr
+
+export interface PdfDocumentOcr {
+  version: string
+  isLinearized: boolean
+  pageCount: number
+  creator?: string
+  producer?: string
+  creationDate?: string
+  modificationDate?: string
+  totalImages: number
+  totalAnnotations: number
+  imagePages: Array<number>
+  annotationPages: Array<number>
+  text: Array<OcrPageText>
+  structuredText: Array<OcrStructuredPageText>
+  images: Array<PageImage>
+  annotations: Array<PageAnnotation>
+}
+
+export declare function pdfDocumentOcrAsync(buffer: Buffer, opts?: OcrOptions | undefined | null): Promise<PdfDocumentOcr>
 
 export interface PdfMeta {
   pageCount: number
