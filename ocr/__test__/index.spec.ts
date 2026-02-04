@@ -9,6 +9,7 @@ import {
   extractTextPerPage,
   extractImagesPerPage,
   PdfDown,
+  TextSource,
 } from '../index'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -22,8 +23,7 @@ const helloOcr = readFileSync(join(FIXTURES, 'hello-ocr.pdf'))
 const multipageOcr = readFileSync(join(FIXTURES, 'multipage-ocr.pdf'))
 
 // One of the existing test PDFs (has native text)
-const PDF_URL =
-  'https://assets.aicoalesce.com/upload/nrr6h4r4480f6kviycyo1zhf/1767766786190-Lollaclaudplooza-Pt-I.pdf'
+const PDF_URL = 'https://assets.aicoalesce.com/upload/nrr6h4r4480f6kviycyo1zhf/1767766786190-Lollaclaudplooza-Pt-I.pdf'
 
 const fetcher = async (target: string) => await fetch(target)
 const nativeRes = await fetcher(PDF_URL)
@@ -37,7 +37,7 @@ test('extractTextWithOcrPerPage (sync) — extracts text from single-page image-
 
   t.is(pages.length, 1, 'should have exactly 1 page')
   t.is(pages[0].page, 1, 'page number should be 1')
-  t.is(pages[0].source, 'Ocr', 'source should be Ocr for image-only page')
+  t.is(pages[0].source, TextSource.Ocr, 'source should be Ocr for image-only page')
 
   const text = pages[0].text.toLowerCase()
   t.true(text.includes('hello'), `OCR text should contain "hello", got: "${pages[0].text}"`)
@@ -62,7 +62,7 @@ test('extractTextWithOcrPerPage — multi-page image-only PDF returns 3 pages', 
   t.is(pages.length, 3, 'should have 3 pages')
 
   for (const p of pages) {
-    t.is(p.source, 'Ocr', `page ${p.page} should use OCR`)
+    t.is(p.source, TextSource.Ocr, `page ${p.page} should use OCR`)
     t.true(p.text.trim().length > 0, `page ${p.page} should have non-empty OCR text`)
     t.log(`Page ${p.page} [${p.source}]: "${p.text.trim()}"`)
   }
