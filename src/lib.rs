@@ -252,11 +252,13 @@ fn load_doc(buf: &[u8]) -> Result<Document> {
 
 fn extract_text(doc: &Document) -> Result<Vec<PageText>> {
   let pages = doc.get_pages();
+  let page_count_str = pages.len().to_string();
   let page_nums: Vec<u32> = pages.keys().copied().collect();
   let mut results: Vec<PageText> = page_nums
     .par_iter()
     .map(|&page_num| {
-      let text = doc.extract_text(&[page_num]).unwrap_or_default();
+      let raw = doc.extract_text(&[page_num]).unwrap_or_default();
+      let text = strip_footer_artifacts(&raw, &page_count_str);
       PageText {
         page: page_num,
         text,
@@ -285,6 +287,37 @@ fn normalize_header_footer_line(line: &str) -> String {
     }
   }
   out
+}
+
+/// Strip Chromium footer artifacts from extracted text.
+///
+/// Chromium's Skia PDF renderer writes page footers (e.g., `1 / 38`) as 2-3
+/// separate text operations. `lopdf::extract_text` concatenates these in
+/// content-stream order, causing orphaned fragments like ` / \n38\n` to appear
+/// mid-text on every page. This function removes the known pattern: a line
+/// containing just `/` followed by a line containing just the total page count.
+fn strip_footer_artifacts(text: &str, page_count_str: &str) -> String {
+  let lines: Vec<&str> = text.lines().collect();
+  if lines.len() < 2 {
+    return text.to_string();
+  }
+  let mut skip = vec![false; lines.len()];
+  for i in 0..lines.len() - 1 {
+    if lines[i].trim() == "/" && lines[i + 1].trim() == page_count_str {
+      skip[i] = true;
+      skip[i + 1] = true;
+    }
+  }
+  if !skip.iter().any(|&s| s) {
+    return text.to_string();
+  }
+  lines
+    .iter()
+    .zip(skip.iter())
+    .filter(|&(_, &s)| !s)
+    .map(|(&line, _)| line)
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 /// Detect repeated header/footer lines across pages and split each page's text
@@ -799,6 +832,7 @@ fn extract_text_with_ocr(
   max_threads: u32,
 ) -> Result<Vec<OcrPageText>> {
   let pages = doc.get_pages();
+  let page_count_str = pages.len().to_string();
   let page_entries: Vec<(u32, ObjectId)> = pages.iter().map(|(&k, &v)| (k, v)).collect();
 
   let pool = get_ocr_pool(max_threads as usize);
@@ -807,7 +841,8 @@ fn extract_text_with_ocr(
     page_entries
       .par_iter()
       .map(|&(page_num, page_id)| {
-        let native = doc.extract_text(&[page_num]).unwrap_or_default();
+        let raw = doc.extract_text(&[page_num]).unwrap_or_default();
+        let native = strip_footer_artifacts(&raw, &page_count_str);
         let non_ws: usize = native.chars().filter(|c| !c.is_whitespace()).count();
         if non_ws >= min_len as usize {
           OcrPageText {
@@ -2177,5 +2212,93 @@ impl PdfDown {
       min_len,
       max_threads,
     })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn strip_basic_footer_artifact() {
+    let text = "Some content\n/\n38\nMore content";
+    let result = strip_footer_artifacts(text, "38");
+    assert_eq!(result, "Some content\nMore content");
+  }
+
+  #[test]
+  fn strip_footer_artifact_with_whitespace() {
+    let text = "Some content\n  /  \n  38  \nMore content";
+    let result = strip_footer_artifacts(text, "38");
+    assert_eq!(result, "Some content\nMore content");
+  }
+
+  #[test]
+  fn no_match_passthrough() {
+    let text = "Some content\nNo footer here\nMore content";
+    let result = strip_footer_artifacts(text, "38");
+    assert_eq!(result, text);
+  }
+
+  #[test]
+  fn multiple_occurrences() {
+    let text = "Page one\n/\n38\nPage two\n/\n38\nPage three";
+    let result = strip_footer_artifacts(text, "38");
+    assert_eq!(result, "Page one\nPage two\nPage three");
+  }
+
+  #[test]
+  fn at_start_of_text() {
+    let text = "/\n38\nContent after";
+    let result = strip_footer_artifacts(text, "38");
+    assert_eq!(result, "Content after");
+  }
+
+  #[test]
+  fn at_end_of_text() {
+    let text = "Content before\n/\n38";
+    let result = strip_footer_artifacts(text, "38");
+    assert_eq!(result, "Content before");
+  }
+
+  #[test]
+  fn empty_input() {
+    let result = strip_footer_artifacts("", "38");
+    assert_eq!(result, "");
+  }
+
+  #[test]
+  fn single_line_input() {
+    let result = strip_footer_artifacts("just one line", "38");
+    assert_eq!(result, "just one line");
+  }
+
+  #[test]
+  fn consecutive_pairs() {
+    // Two pairs back to back: `/\n38\n/\n38`
+    let text = "start\n/\n38\n/\n38\nend";
+    let result = strip_footer_artifacts(text, "38");
+    assert_eq!(result, "start\nend");
+  }
+
+  #[test]
+  fn slash_not_followed_by_count() {
+    let text = "Some content\n/\n99\nMore content";
+    let result = strip_footer_artifacts(text, "38");
+    assert_eq!(result, text);
+  }
+
+  #[test]
+  fn slash_with_extra_text_not_stripped() {
+    let text = "Some content\n/ extra\n38\nMore content";
+    let result = strip_footer_artifacts(text, "38");
+    assert_eq!(result, text);
+  }
+
+  #[test]
+  fn count_with_extra_text_not_stripped() {
+    let text = "Some content\n/\n38 pages\nMore content";
+    let result = strip_footer_artifacts(text, "38");
+    assert_eq!(result, text);
   }
 }
