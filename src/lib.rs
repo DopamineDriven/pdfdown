@@ -527,11 +527,7 @@ fn parse_page_box(obj: &Object) -> Option<[f64; 4]> {
 
 /// Walk the page tree to find an inheritable page box (e.g., /MediaBox, /CropBox).
 /// Resolves indirect references — some PDFs store the box array via `Object::Reference`.
-fn get_inherited_page_box(
-  doc: &Document,
-  page_id: ObjectId,
-  key: &[u8],
-) -> Option<[f64; 4]> {
+fn get_inherited_page_box(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64; 4]> {
   let mut current_id = Some(page_id);
   while let Some(id) = current_id {
     let dict = doc.get_dictionary(id).ok()?;
@@ -586,7 +582,8 @@ fn extract_page_boxes(
 
   // Maintain insertion order via Vec + HashMap index
   let mut groups: Vec<PageBoxGroup> = Vec::new();
-  let mut key_to_idx: std::collections::HashMap<PageBoxKey, usize> = std::collections::HashMap::new();
+  let mut key_to_idx: std::collections::HashMap<PageBoxKey, usize> =
+    std::collections::HashMap::new();
 
   for (page_num, page_id) in page_entries {
     let (box_type, rect) = if let Some(rect) = get_inherited_page_box(doc, page_id, b"CropBox") {
