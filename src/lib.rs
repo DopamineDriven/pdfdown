@@ -67,6 +67,31 @@ pub struct PdfMeta {
   pub producer: Option<String>,
   pub creation_date: Option<String>,
   pub modification_date: Option<String>,
+  pub page_boxes: Vec<PageBox>,
+}
+
+#[napi(string_enum)]
+pub enum BoxType {
+  CropBox,
+  MediaBox,
+  Unknown,
+}
+
+#[napi(object)]
+pub struct PageBox {
+  /// Number of pages that share these dimensions.
+  pub page_count: u32,
+  pub left: f64,
+  pub bottom: f64,
+  pub right: f64,
+  pub top: f64,
+  pub width: f64,
+  pub height: f64,
+  pub box_type: BoxType,
+  /// Present only on non-dominant boxes — lists the specific pages with these
+  /// dimensions. `None` on the first (most frequent) entry means "all pages
+  /// not listed in any other entry's `pages` array."
+  pub pages: Option<Vec<u32>>,
 }
 
 #[napi(object)]
@@ -102,6 +127,7 @@ pub struct PdfDocument {
   pub producer: Option<String>,
   pub creation_date: Option<String>,
   pub modification_date: Option<String>,
+  pub page_boxes: Vec<PageBox>,
   pub total_images: u32,
   pub total_annotations: u32,
   pub image_pages: Vec<u32>,
@@ -132,6 +158,7 @@ pub struct PdfDocumentOcr {
   pub producer: Option<String>,
   pub creation_date: Option<String>,
   pub modification_date: Option<String>,
+  pub page_boxes: Vec<PageBox>,
   pub total_images: u32,
   pub total_annotations: u32,
   pub image_pages: Vec<u32>,
@@ -196,6 +223,7 @@ impl From<RawPdfDocument> for PdfDocument {
       producer: r.meta.producer,
       creation_date: r.meta.creation_date,
       modification_date: r.meta.modification_date,
+      page_boxes: r.meta.page_boxes,
       total_images,
       total_annotations,
       image_pages: r.image_pages,
@@ -232,6 +260,7 @@ impl From<RawPdfDocumentOcr> for PdfDocumentOcr {
       producer: r.meta.producer,
       creation_date: r.meta.creation_date,
       modification_date: r.meta.modification_date,
+      page_boxes: r.meta.page_boxes,
       total_images,
       total_annotations,
       image_pages: r.image_pages,
@@ -477,8 +506,172 @@ fn pdf_date_to_iso8601(raw: &str) -> String {
   format!("{yyyy}-{mm}-{dd}T{hh}:{min}:{sec}{tz}")
 }
 
+fn parse_page_box(obj: &Object) -> Option<[f64; 4]> {
+  let arr = match obj {
+    Object::Array(a) => a,
+    _ => return None,
+  };
+  if arr.len() < 4 {
+    return None;
+  }
+  let mut out = [0.0f64; 4];
+  for (idx, slot) in out.iter_mut().enumerate().take(4) {
+    *slot = match arr[idx] {
+      Object::Integer(v) => v as f64,
+      Object::Real(v) => v as f64,
+      _ => return None,
+    };
+  }
+  Some(out)
+}
+
+/// Walk the page tree to find an inheritable page box (e.g., /MediaBox, /CropBox).
+/// Resolves indirect references — some PDFs store the box array via `Object::Reference`.
+fn get_inherited_page_box(
+  doc: &Document,
+  page_id: ObjectId,
+  key: &[u8],
+) -> Option<[f64; 4]> {
+  let mut current_id = Some(page_id);
+  while let Some(id) = current_id {
+    let dict = doc.get_dictionary(id).ok()?;
+    if let Ok(obj) = dict.get(key) {
+      // Resolve indirect reference if the box value is stored as one
+      let resolved = match obj {
+        Object::Reference(ref_id) => doc.get_object(*ref_id).ok().cloned(),
+        other => Some(other.clone()),
+      };
+      if let Some(ref val) = resolved {
+        if let Some(rect) = parse_page_box(val) {
+          return Some(rect);
+        }
+      }
+    }
+    // Walk up to /Parent
+    current_id = dict.get(b"Parent").ok().and_then(|p| match p {
+      Object::Reference(ref_id) => Some(*ref_id),
+      _ => None,
+    });
+  }
+  None
+}
+
+/// Key type for grouping page boxes by geometry.
+/// Uses `to_bits()` so NaN/negative-zero edge cases hash correctly.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct PageBoxKey {
+  left: u64,
+  bottom: u64,
+  right: u64,
+  top: u64,
+  box_type: u8, // 0=CropBox, 1=MediaBox, 2=Unknown
+}
+
+/// Intermediate representation before we decide which group is dominant.
+struct PageBoxGroup {
+  left: f64,
+  bottom: f64,
+  right: f64,
+  top: f64,
+  box_type: BoxType,
+  page_nums: Vec<u32>,
+}
+
+fn extract_page_boxes(
+  doc: &Document,
+  pages: &std::collections::BTreeMap<u32, ObjectId>,
+) -> Vec<PageBox> {
+  let mut page_entries: Vec<(u32, ObjectId)> = pages.iter().map(|(&k, &v)| (k, v)).collect();
+  page_entries.sort_unstable_by_key(|(page, _)| *page);
+
+  // Maintain insertion order via Vec + HashMap index
+  let mut groups: Vec<PageBoxGroup> = Vec::new();
+  let mut key_to_idx: std::collections::HashMap<PageBoxKey, usize> = std::collections::HashMap::new();
+
+  for (page_num, page_id) in page_entries {
+    let (box_type, rect) = if let Some(rect) = get_inherited_page_box(doc, page_id, b"CropBox") {
+      (BoxType::CropBox, rect)
+    } else if let Some(rect) = get_inherited_page_box(doc, page_id, b"MediaBox") {
+      (BoxType::MediaBox, rect)
+    } else {
+      (BoxType::Unknown, [0.0, 0.0, 0.0, 0.0])
+    };
+
+    let (left, right) = if rect[0] <= rect[2] {
+      (rect[0], rect[2])
+    } else {
+      (rect[2], rect[0])
+    };
+    let (bottom, top) = if rect[1] <= rect[3] {
+      (rect[1], rect[3])
+    } else {
+      (rect[3], rect[1])
+    };
+
+    let key = PageBoxKey {
+      left: left.to_bits(),
+      bottom: bottom.to_bits(),
+      right: right.to_bits(),
+      top: top.to_bits(),
+      box_type: match box_type {
+        BoxType::CropBox => 0,
+        BoxType::MediaBox => 1,
+        BoxType::Unknown => 2,
+      },
+    };
+
+    if let Some(&idx) = key_to_idx.get(&key) {
+      groups[idx].page_nums.push(page_num);
+    } else {
+      let idx = groups.len();
+      key_to_idx.insert(key, idx);
+      groups.push(PageBoxGroup {
+        left,
+        bottom,
+        right,
+        top,
+        box_type,
+        page_nums: vec![page_num],
+      });
+    }
+  }
+
+  // Find the dominant group (most pages)
+  let dominant_idx = groups
+    .iter()
+    .enumerate()
+    .max_by_key(|(_, g)| g.page_nums.len())
+    .map(|(i, _)| i)
+    .unwrap_or(0);
+
+  groups
+    .into_iter()
+    .enumerate()
+    .map(|(i, g)| {
+      let count = g.page_nums.len() as u32;
+      let pages = if i == dominant_idx {
+        None
+      } else {
+        Some(g.page_nums)
+      };
+      PageBox {
+        page_count: count,
+        left: g.left,
+        bottom: g.bottom,
+        right: g.right,
+        top: g.top,
+        width: g.right - g.left,
+        height: g.top - g.bottom,
+        box_type: g.box_type,
+        pages,
+      }
+    })
+    .collect()
+}
+
 fn extract_metadata(doc: &Document) -> PdfMeta {
-  let page_count = doc.get_pages().len() as u32;
+  let pages = doc.get_pages();
+  let page_count = pages.len() as u32;
   let version = doc.version.clone();
   let is_linearized = doc.trailer.get(b"Linearized").is_ok();
 
@@ -497,6 +690,8 @@ fn extract_metadata(doc: &Document) -> PdfMeta {
     None => (None, None, None, None),
   };
 
+  let page_boxes = extract_page_boxes(doc, &pages);
+
   PdfMeta {
     page_count,
     version,
@@ -505,6 +700,7 @@ fn extract_metadata(doc: &Document) -> PdfMeta {
     producer,
     creation_date,
     modification_date,
+    page_boxes,
   }
 }
 
@@ -2300,5 +2496,79 @@ mod tests {
     let text = "Some content\n/\n38 pages\nMore content";
     let result = strip_footer_artifacts(text, "38");
     assert_eq!(result, text);
+  }
+
+  // ── parse_page_box tests ──────────────────────────────────────
+
+  #[test]
+  fn parse_page_box_valid_integers() {
+    let obj = Object::Array(vec![
+      Object::Integer(0),
+      Object::Integer(0),
+      Object::Integer(612),
+      Object::Integer(792),
+    ]);
+    let result = parse_page_box(&obj);
+    assert_eq!(result, Some([0.0, 0.0, 612.0, 792.0]));
+  }
+
+  #[test]
+  fn parse_page_box_valid_reals() {
+    let obj = Object::Array(vec![
+      Object::Real(0.0),
+      Object::Real(0.0),
+      Object::Real(595.0),
+      Object::Real(842.0),
+    ]);
+    let result = parse_page_box(&obj);
+    assert_eq!(result, Some([0.0, 0.0, 595.0, 842.0]));
+  }
+
+  #[test]
+  fn parse_page_box_mixed_types() {
+    let obj = Object::Array(vec![
+      Object::Integer(0),
+      Object::Real(0.5),
+      Object::Integer(612),
+      Object::Real(792.0),
+    ]);
+    let result = parse_page_box(&obj);
+    assert_eq!(result, Some([0.0, 0.5, 612.0, 792.0]));
+  }
+
+  #[test]
+  fn parse_page_box_too_short() {
+    let obj = Object::Array(vec![Object::Integer(0), Object::Integer(0)]);
+    assert_eq!(parse_page_box(&obj), None);
+  }
+
+  #[test]
+  fn parse_page_box_non_numeric() {
+    let obj = Object::Array(vec![
+      Object::Integer(0),
+      Object::Integer(0),
+      Object::Name(b"bad".to_vec()),
+      Object::Integer(792),
+    ]);
+    assert_eq!(parse_page_box(&obj), None);
+  }
+
+  #[test]
+  fn parse_page_box_not_array() {
+    let obj = Object::Integer(42);
+    assert_eq!(parse_page_box(&obj), None);
+  }
+
+  #[test]
+  fn parse_page_box_extra_elements_ignored() {
+    let obj = Object::Array(vec![
+      Object::Integer(0),
+      Object::Integer(0),
+      Object::Integer(612),
+      Object::Integer(792),
+      Object::Integer(999),
+    ]);
+    // Only first 4 used
+    assert_eq!(parse_page_box(&obj), Some([0.0, 0.0, 612.0, 792.0]));
   }
 }

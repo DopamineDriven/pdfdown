@@ -36,6 +36,12 @@ export declare class PdfDown {
   documentOcrAsync(opts?: OcrOptions | undefined | null): Promise<PdfDocumentOcr>
 }
 
+export declare const enum BoxType {
+  CropBox = 'CropBox',
+  MediaBox = 'MediaBox',
+  Unknown = 'Unknown'
+}
+
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
 
 export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>
@@ -85,6 +91,24 @@ export interface PageAnnotation {
   content?: string
 }
 
+export interface PageBox {
+  /** Number of pages that share these dimensions. */
+  pageCount: number
+  left: number
+  bottom: number
+  right: number
+  top: number
+  width: number
+  height: number
+  boxType: BoxType
+  /**
+   * Present only on non-dominant boxes — lists the specific pages with these
+   * dimensions. `None` on the first (most frequent) entry means "all pages
+   * not listed in any other entry's `pages` array."
+   */
+  pages?: Array<number>
+}
+
 export interface PageImage {
   page: number
   imageIndex: number
@@ -113,6 +137,7 @@ export interface PdfDocument {
   producer?: string
   creationDate?: string
   modificationDate?: string
+  pageBoxes: Array<PageBox>
   totalImages: number
   totalAnnotations: number
   imagePages: Array<number>
@@ -135,6 +160,7 @@ export interface PdfDocumentOcr {
   producer?: string
   creationDate?: string
   modificationDate?: string
+  pageBoxes: Array<PageBox>
   totalImages: number
   totalAnnotations: number
   imagePages: Array<number>
@@ -155,6 +181,7 @@ export interface PdfMeta {
   producer?: string
   creationDate?: string
   modificationDate?: string
+  pageBoxes: Array<PageBox>
 }
 
 export declare function pdfMetadata(buffer: Buffer): PdfMeta

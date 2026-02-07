@@ -103,6 +103,24 @@ export interface PageAnnotation {
   content?: string // tooltip / alt text
 }
 
+export const enum BoxType {
+  CropBox = 'CropBox',
+  MediaBox = 'MediaBox',
+  Unknown = 'Unknown',
+}
+
+export interface PageBox {
+  pageCount: number // number of pages with these dimensions
+  left: number
+  bottom: number
+  right: number
+  top: number
+  width: number
+  height: number
+  boxType: BoxType
+  pages?: Array<number> // only present on non-dominant entries
+}
+
 export interface PdfMeta {
   pageCount: number
   version: string
@@ -111,6 +129,7 @@ export interface PdfMeta {
   producer?: string
   creationDate?: string
   modificationDate?: string
+  pageBoxes: Array<PageBox>
 }
 
 export interface PdfDocument {
@@ -121,11 +140,13 @@ export interface PdfDocument {
   producer?: string
   creationDate?: string
   modificationDate?: string
+  pageBoxes: Array<PageBox>
   totalImages: number
   totalAnnotations: number
   imagePages: Array<number>
   annotationPages: Array<number>
   text: Array<PageText>
+  structuredText: Array<StructuredPageText>
   images: Array<PageImage>
   annotations: Array<PageAnnotation>
 }
@@ -279,6 +300,27 @@ const pdf = await readFile('document.pdf')
 const meta = await pdfMetadataAsync(pdf)
 
 console.log(`v${meta.version}, ${meta.pageCount} pages, linearized: ${meta.isLinearized}`)
+```
+
+#### Page bounding boxes
+
+`pageBoxes` on `PdfMeta` and `PdfDocument` returns deduplicated page dimensions. Uniform PDFs (all pages the same size) return a single entry. Mixed-size PDFs return one entry per distinct geometry — the dominant (most frequent) entry has `pages` absent, while non-dominant entries list their specific page numbers.
+
+```typescript
+import { readFileSync } from 'fs'
+import { pdfMetadata } from '@d0paminedriven/pdfdown'
+
+const meta = pdfMetadata(readFileSync('document.pdf'))
+
+if (meta.pageBoxes.length === 1) {
+  const box = meta.pageBoxes[0]
+  console.log(`Uniform: ${box.width}x${box.height} ${box.boxType} (${box.pageCount} pages)`)
+} else {
+  for (const box of meta.pageBoxes) {
+    const scope = box.pages ? `pages ${box.pages.join(', ')}` : 'all other pages'
+    console.log(`${box.width}x${box.height} ${box.boxType} — ${scope}`)
+  }
+}
 ```
 
 ### `PdfDown` class
