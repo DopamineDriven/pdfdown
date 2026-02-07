@@ -537,10 +537,10 @@ fn get_inherited_page_box(doc: &Document, page_id: ObjectId, key: &[u8]) -> Opti
         Object::Reference(ref_id) => doc.get_object(*ref_id).ok().cloned(),
         other => Some(other.clone()),
       };
-      if let Some(ref val) = resolved {
-        if let Some(rect) = parse_page_box(val) {
-          return Some(rect);
-        }
+      if let Some(ref val) = resolved
+        && let Some(rect) = parse_page_box(val)
+      {
+        return Some(rect);
       }
     }
     // Walk up to /Parent
