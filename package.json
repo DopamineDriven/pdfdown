@@ -61,6 +61,7 @@
     "format:toml": "taplo format",
     "format:rs": "cargo fmt",
     "lint": "oxlint .",
+    "lint:rs": "cargo fmt -- --check && cargo clippy --all-features -- -D warnings",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
     "test:ocr": "ava --config ocr/ava.config.mjs",
