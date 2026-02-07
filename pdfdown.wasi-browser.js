@@ -57,6 +57,7 @@ const {
 })
 export default __napiModule.exports
 export const PdfDown = __napiModule.exports.PdfDown
+export const BoxType = __napiModule.exports.BoxType
 export const extractAnnotationsPerPage = __napiModule.exports.extractAnnotationsPerPage
 export const extractAnnotationsPerPageAsync = __napiModule.exports.extractAnnotationsPerPageAsync
 export const extractImagesPerPage = __napiModule.exports.extractImagesPerPage

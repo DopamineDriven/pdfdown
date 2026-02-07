@@ -109,6 +109,7 @@ const { instance: __napiInstance, module: __wasiModule, napiModule: __napiModule
 })
 module.exports = __napiModule.exports
 module.exports.PdfDown = __napiModule.exports.PdfDown
+module.exports.BoxType = __napiModule.exports.BoxType
 module.exports.extractAnnotationsPerPage = __napiModule.exports.extractAnnotationsPerPage
 module.exports.extractAnnotationsPerPageAsync = __napiModule.exports.extractAnnotationsPerPageAsync
 module.exports.extractImagesPerPage = __napiModule.exports.extractImagesPerPage
