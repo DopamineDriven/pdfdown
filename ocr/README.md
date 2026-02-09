@@ -13,7 +13,7 @@ npm install @d0paminedriven/pdfdown-ocr
 ### Tesseract setup
 
 ```bash
-# Ubuntu/Debian (22.04 ships tesseract 3.x -- use the PPA for 5.x)
+# Ubuntu/Debian (22.04 ships pre v5 > -- use the PPA for 5.x)
 sudo add-apt-repository ppa:alex-p/tesseract-ocr5
 sudo apt update
 sudo apt install tesseract-ocr tesseract-ocr-eng -y

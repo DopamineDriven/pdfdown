@@ -1,6 +1,6 @@
 {
   "name": "@d0paminedriven/pdfdown",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "Rust powered PDF extraction for Node",
   "main": "index.js",
   "repository": {
