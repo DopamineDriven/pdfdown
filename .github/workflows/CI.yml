@@ -153,12 +153,12 @@ jobs:
           - host: macos-latest
             target: aarch64-apple-darwin
             build: yarn build:ocr --target aarch64-apple-darwin
-          - host: ubuntu-latest
+          - host: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            build: yarn build:ocr --target x86_64-unknown-linux-gnu --use-napi-cross
-          - host: ubuntu-24.04-arm
+            build: yarn build:ocr --target x86_64-unknown-linux-gnu
+          - host: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
-            build: yarn build:ocr --target aarch64-unknown-linux-gnu --use-napi-cross
+            build: yarn build:ocr --target aarch64-unknown-linux-gnu
     name: OCR - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
