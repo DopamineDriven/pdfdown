@@ -3,7 +3,7 @@
 edition = "2024"
 
 name    = "pdfdown"
-version = "0.9.6"
+version = "0.9.7"
 
 [lib]
 crate-type = ["cdylib"]
