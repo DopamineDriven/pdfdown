@@ -213,7 +213,7 @@ jobs:
           elif [ "$ARCH" = "aarch64" ]; then
             PDFIUM_ARCH="linux-arm64"
           fi
-          curl -L "https://github.com/nicksrandall/pdfium-lib/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
+          curl -L "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
           mkdir -p /tmp/pdfium
           tar xzf pdfium.tgz -C /tmp/pdfium
           echo "PDFIUM_LIBRARY_PATH=/tmp/pdfium/lib/libpdfium.so" >> $GITHUB_ENV
@@ -226,7 +226,7 @@ jobs:
           elif [ "$ARCH" = "arm64" ]; then
             PDFIUM_ARCH="mac-arm64"
           fi
-          curl -L "https://github.com/nicksrandall/pdfium-lib/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
+          curl -L "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
           mkdir -p /tmp/pdfium
           tar xzf pdfium.tgz -C /tmp/pdfium
           echo "PDFIUM_LIBRARY_PATH=/tmp/pdfium/lib/libpdfium.dylib" >> $GITHUB_ENV
@@ -483,7 +483,7 @@ jobs:
           elif [ "$ARCH" = "aarch64" ]; then
             PDFIUM_ARCH="linux-arm64"
           fi
-          curl -L "https://github.com/nicksrandall/pdfium-lib/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
+          curl -L "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
           mkdir -p /tmp/pdfium
           tar xzf pdfium.tgz -C /tmp/pdfium
           echo "PDFIUM_LIBRARY_PATH=/tmp/pdfium/lib/libpdfium.so" >> $GITHUB_ENV
@@ -496,7 +496,7 @@ jobs:
           elif [ "$ARCH" = "arm64" ]; then
             PDFIUM_ARCH="mac-arm64"
           fi
-          curl -L "https://github.com/nicksrandall/pdfium-lib/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
+          curl -L "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
           mkdir -p /tmp/pdfium
           tar xzf pdfium.tgz -C /tmp/pdfium
           echo "PDFIUM_LIBRARY_PATH=/tmp/pdfium/lib/libpdfium.dylib" >> $GITHUB_ENV
