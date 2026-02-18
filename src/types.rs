@@ -17,11 +17,19 @@ pub struct StructuredPageText {
   pub footer: String,
 }
 
-#[cfg(feature = "ocr")]
+#[cfg(all(feature = "ocr", not(feature = "render")))]
 #[napi(string_enum)]
 pub enum TextSource {
   Native,
   Ocr,
+}
+
+#[cfg(all(feature = "ocr", feature = "render"))]
+#[napi(string_enum)]
+pub enum TextSource {
+  Native,
+  Ocr,
+  Rendered,
 }
 
 #[cfg(feature = "ocr")]
@@ -32,12 +40,76 @@ pub struct OcrPageText {
   pub source: TextSource,
 }
 
-#[cfg(feature = "ocr")]
+#[cfg(all(feature = "ocr", not(feature = "render")))]
 #[napi(object)]
 pub struct OcrOptions {
   pub lang: Option<String>,
   pub min_text_length: Option<u32>,
   pub max_threads: Option<u32>,
+}
+
+#[cfg(all(feature = "ocr", feature = "render"))]
+#[napi(object)]
+pub struct OcrOptions {
+  pub lang: Option<String>,
+  pub min_text_length: Option<u32>,
+  pub max_threads: Option<u32>,
+  pub render: Option<RenderMode>,
+  pub render_dpi: Option<u32>,
+  pub pdfium_path: Option<String>,
+}
+
+#[cfg(feature = "render")]
+#[napi(string_enum)]
+pub enum RenderMode {
+  Auto,
+  Never,
+  Always,
+}
+
+#[cfg(feature = "render")]
+#[napi(object)]
+pub struct RenderedPage {
+  pub page: u32,
+  pub width: u32,
+  pub height: u32,
+  pub dpi: u32,
+  pub data: Buffer,
+}
+
+#[cfg(feature = "render")]
+pub struct RawRenderedPage {
+  pub page: u32,
+  pub width: u32,
+  pub height: u32,
+  pub dpi: u32,
+  pub data: Vec<u8>,
+}
+
+#[cfg(feature = "render")]
+impl From<RawRenderedPage> for RenderedPage {
+  fn from(r: RawRenderedPage) -> Self {
+    RenderedPage {
+      page: r.page,
+      width: r.width,
+      height: r.height,
+      dpi: r.dpi,
+      data: r.data.into(),
+    }
+  }
+}
+
+#[cfg(feature = "render")]
+#[napi(object)]
+pub struct RenderOptions {
+  pub dpi: Option<u32>,
+  pub mode: Option<RenderMode>,
+}
+
+#[napi(object)]
+pub struct Capabilities {
+  pub ocr: bool,
+  pub render: bool,
 }
 
 #[napi(object)]

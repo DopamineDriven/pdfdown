@@ -5,3 +5,6 @@ pub(crate) mod text;
 
 #[cfg(feature = "ocr")]
 pub(crate) mod ocr;
+
+#[cfg(feature = "render")]
+pub(crate) mod render;

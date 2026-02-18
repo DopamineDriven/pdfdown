@@ -110,6 +110,7 @@ const { instance: __napiInstance, module: __wasiModule, napiModule: __napiModule
 module.exports = __napiModule.exports
 module.exports.PdfDown = __napiModule.exports.PdfDown
 module.exports.BoxType = __napiModule.exports.BoxType
+module.exports.capabilities = __napiModule.exports.capabilities
 module.exports.extractAnnotationsPerPage = __napiModule.exports.extractAnnotationsPerPage
 module.exports.extractAnnotationsPerPageAsync = __napiModule.exports.extractAnnotationsPerPageAsync
 module.exports.extractImagesPerPage = __napiModule.exports.extractImagesPerPage
@@ -122,3 +123,5 @@ module.exports.pdfDocument = __napiModule.exports.pdfDocument
 module.exports.pdfDocumentAsync = __napiModule.exports.pdfDocumentAsync
 module.exports.pdfMetadata = __napiModule.exports.pdfMetadata
 module.exports.pdfMetadataAsync = __napiModule.exports.pdfMetadataAsync
+module.exports.RenderMode = __napiModule.exports.RenderMode
+module.exports.renderPagesAsync = __napiModule.exports.renderPagesAsync

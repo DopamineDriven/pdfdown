@@ -230,7 +230,7 @@ for (const img of images) {
   console.log(`Page ${img.page} image ${img.imageIndex}: ${img.width}x${img.height} ${img.colorSpace}`)
 }
 ```
-
+ 
 #### Extract images as PNG (async)
 
 ```typescript

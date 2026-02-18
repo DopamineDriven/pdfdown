@@ -3,7 +3,7 @@
 edition = "2024"
 
 name    = "pdfdown"
-version = "0.9.7"
+version = "0.9.8"
 
 [lib]
 crate-type = ["cdylib"]
@@ -20,10 +20,17 @@ napi = { version = "3.0.0", features = ["napi6"] }
 napi-derive = "3.0.0"
 rayon = "1.11"
 tesseract-rs = { version = "0.1", optional = true }
+pdfium-render = { version = "0.8", optional = true, default-features = false, features = [
+  "pdfium_latest",
+  "image_025",
+  "thread_safe",
+  "sync",
+] }
 
 [features]
 default = []
 ocr = ["tesseract-rs"]
+render = ["pdfium-render"]
 
 [build-dependencies]
 napi-build = "2"
