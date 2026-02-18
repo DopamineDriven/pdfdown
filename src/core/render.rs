@@ -13,8 +13,14 @@ pub(crate) const RENDER_MODE_AUTO: u8 = 0;
 pub(crate) const RENDER_MODE_NEVER: u8 = 1;
 pub(crate) const RENDER_MODE_ALWAYS: u8 = 2;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn try_bind_pdfium_at(path: &str) -> Option<Pdfium> {
   Pdfium::bind_to_library(path).ok().map(Pdfium::new)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn try_bind_pdfium_at(_path: &str) -> Option<Pdfium> {
+  None
 }
 
 fn init_pdfium() -> Result<Pdfium, String> {
