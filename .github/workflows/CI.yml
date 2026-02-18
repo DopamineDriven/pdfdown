@@ -22,10 +22,6 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-permissions:
-  contents: read
-  actions: read
-  packages: read
 jobs:
   
   lint:
@@ -326,6 +322,14 @@ jobs:
       - name: Install dependencies
         run: yarn install
       - name: Download artifacts
+        id: download_artifacts
+        uses: actions/download-artifact@v7
+        continue-on-error: ${{ matrix.settings.target == 'aarch64-pc-windows-msvc' }}
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: .
+      - name: Retry download artifacts (Windows ARM only)
+        if: ${{ matrix.settings.target == 'aarch64-pc-windows-msvc' && steps.download_artifacts.outcome == 'failure' }}
         uses: actions/download-artifact@v7
         with:
           name: bindings-${{ matrix.settings.target }}
@@ -524,7 +528,6 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      actions: read
     needs:
       - lint
       - build-freebsd
