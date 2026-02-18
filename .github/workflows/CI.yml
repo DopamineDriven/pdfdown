@@ -4,7 +4,7 @@ env:
   APP_NAME: pdfdown
   MACOSX_DEPLOYMENT_TARGET: '10.13'
   CARGO_INCREMENTAL: '1'
-'on':
+on:
   push:
     branches:
       - main
@@ -23,6 +23,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -203,6 +204,32 @@ jobs:
           brew update
           brew install tesseract
           tesseract --version
+      - name: Download PDFium (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+            PDFIUM_ARCH="linux-x64"
+          elif [ "$ARCH" = "aarch64" ]; then
+            PDFIUM_ARCH="linux-arm64"
+          fi
+          curl -L "https://github.com/nicksrandall/pdfium-lib/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
+          mkdir -p /tmp/pdfium
+          tar xzf pdfium.tgz -C /tmp/pdfium
+          echo "PDFIUM_LIBRARY_PATH=/tmp/pdfium/lib/libpdfium.so" >> $GITHUB_ENV
+      - name: Download PDFium (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+            PDFIUM_ARCH="mac-x64"
+          elif [ "$ARCH" = "arm64" ]; then
+            PDFIUM_ARCH="mac-arm64"
+          fi
+          curl -L "https://github.com/nicksrandall/pdfium-lib/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
+          mkdir -p /tmp/pdfium
+          tar xzf pdfium.tgz -C /tmp/pdfium
+          echo "PDFIUM_LIBRARY_PATH=/tmp/pdfium/lib/libpdfium.dylib" >> $GITHUB_ENV
       - name: Install dependencies
         run: yarn install
       - name: Build OCR
@@ -447,6 +474,32 @@ jobs:
           TESS_PREFIX=$(tesseract --list-langs 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "TESSDATA_PREFIX=${TESS_PREFIX}" >> $GITHUB_ENV
           echo "Tesseract data path: ${TESS_PREFIX}"
+      - name: Download PDFium (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+            PDFIUM_ARCH="linux-x64"
+          elif [ "$ARCH" = "aarch64" ]; then
+            PDFIUM_ARCH="linux-arm64"
+          fi
+          curl -L "https://github.com/nicksrandall/pdfium-lib/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
+          mkdir -p /tmp/pdfium
+          tar xzf pdfium.tgz -C /tmp/pdfium
+          echo "PDFIUM_LIBRARY_PATH=/tmp/pdfium/lib/libpdfium.so" >> $GITHUB_ENV
+      - name: Download PDFium (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then
+            PDFIUM_ARCH="mac-x64"
+          elif [ "$ARCH" = "arm64" ]; then
+            PDFIUM_ARCH="mac-arm64"
+          fi
+          curl -L "https://github.com/nicksrandall/pdfium-lib/releases/latest/download/pdfium-${PDFIUM_ARCH}.tgz" -o pdfium.tgz
+          mkdir -p /tmp/pdfium
+          tar xzf pdfium.tgz -C /tmp/pdfium
+          echo "PDFIUM_LIBRARY_PATH=/tmp/pdfium/lib/libpdfium.dylib" >> $GITHUB_ENV
       - name: Install dependencies
         run: yarn install
       - name: Download OCR artifact

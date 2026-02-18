@@ -2,36 +2,32 @@
 /* eslint-disable */
 export declare class PdfDown {
   constructor(buffer: Buffer)
-  /** Sync: extract text per page (reuses the already-parsed document) */
   textPerPage(): Array<PageText>
-  /** Sync: extract images per page (reuses the already-parsed document) */
   imagesPerPage(): Array<PageImage>
-  /** Sync: extract annotations per page (reuses the already-parsed document) */
   annotationsPerPage(): Array<PageAnnotation>
-  /** Sync: get PDF metadata (reuses the already-parsed document) */
   metadata(): PdfMeta
-  /** Async: extract text per page on the libuv thread pool (shares parsed document via Arc) */
   textPerPageAsync(): Promise<Array<PageText>>
-  /** Async: extract images per page on the libuv thread pool (shares parsed document via Arc) */
   imagesPerPageAsync(): Promise<Array<PageImage>>
-  /** Async: extract annotations per page on the libuv thread pool (shares parsed document via Arc) */
   annotationsPerPageAsync(): Promise<Array<PageAnnotation>>
-  /** Async: get PDF metadata on the libuv thread pool (shares parsed document via Arc) */
   metadataAsync(): Promise<PdfMeta>
-  /** Sync: extract everything from the PDF in one call (reuses the already-parsed document) */
   document(): PdfDocument
-  /** Async: extract everything from the PDF on the libuv thread pool (shares parsed document via Arc) */
   documentAsync(): Promise<PdfDocument>
-  /** Sync: extract structured text with header/footer detection */
   structuredText(): Array<StructuredPageText>
-  /** Async: extract structured text with header/footer detection */
   structuredTextAsync(): Promise<Array<StructuredPageText>>
+  renderPagesAsync(opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>
 }
 
 export declare const enum BoxType {
   CropBox = 'CropBox',
   MediaBox = 'MediaBox',
   Unknown = 'Unknown'
+}
+
+export declare function capabilities(): Capabilities
+
+export interface Capabilities {
+  ocr: boolean
+  render: boolean
 }
 
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
@@ -132,6 +128,27 @@ export interface PdfMeta {
 export declare function pdfMetadata(buffer: Buffer): PdfMeta
 
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>
+
+export interface RenderedPage {
+  page: number
+  width: number
+  height: number
+  dpi: number
+  data: Buffer
+}
+
+export declare const enum RenderMode {
+  Auto = 'Auto',
+  Never = 'Never',
+  Always = 'Always'
+}
+
+export interface RenderOptions {
+  dpi?: number
+  mode?: RenderMode
+}
+
+export declare function renderPagesAsync(buffer: Buffer, opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>
 
 export interface StructuredPageText {
   page: number

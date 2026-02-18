@@ -17,8 +17,8 @@ pub(crate) fn extract_images_raw(doc: &Document) -> Vec<RawPageImage> {
 }
 
 /// Decode all image XObjects on a page to DynamicImages (no PNG encoding).
-/// Used by OCR to avoid the PNG encode→decode roundtrip.
-#[cfg(feature = "ocr")]
+/// Used by OCR to avoid the PNG encode→decode roundtrip and by render for empty page detection.
+#[cfg(any(feature = "ocr", feature = "render"))]
 pub(crate) fn collect_page_decoded_images(doc: &Document, page_id: ObjectId) -> Vec<DynamicImage> {
   let mut decoded = Vec::new();
 
@@ -217,19 +217,16 @@ fn get_inherited_resources(doc: &Document, page_id: ObjectId) -> Option<lopdf::D
   None
 }
 
-/// Parse the page content stream to find XObject names referenced by `Do` operators.
-/// This filters out XObjects that are defined in Resources but never actually painted.
-fn get_referenced_xobject_names(doc: &Document, page_id: ObjectId) -> HashSet<Vec<u8>> {
-  let mut names = HashSet::new();
-
+/// Extract raw content bytes from a page's content stream(s).
+fn get_page_content_bytes(doc: &Document, page_id: ObjectId) -> Vec<u8> {
   let page_dict = match doc.get_dictionary(page_id) {
     Ok(d) => d,
-    Err(_) => return names,
+    Err(_) => return Vec::new(),
   };
 
   let contents = match page_dict.get(b"Contents") {
     Ok(c) => c,
-    Err(_) => return names,
+    Err(_) => return Vec::new(),
   };
 
   let stream_ids: Vec<ObjectId> = match contents {
@@ -244,7 +241,7 @@ fn get_referenced_xobject_names(doc: &Document, page_id: ObjectId) -> HashSet<Ve
         }
       })
       .collect(),
-    _ => return names,
+    _ => return Vec::new(),
   };
 
   let mut all_bytes = Vec::new();
@@ -255,8 +252,12 @@ fn get_referenced_xobject_names(doc: &Document, page_id: ObjectId) -> HashSet<Ve
       all_bytes.extend_from_slice(&s.content);
     }
   }
+  all_bytes
+}
 
-  if let Ok(content) = lopdf::content::Content::decode(&all_bytes) {
+/// Scan content bytes for `Do` operators and collect XObject names.
+fn collect_do_names(content_bytes: &[u8], names: &mut HashSet<Vec<u8>>) {
+  if let Ok(content) = lopdf::content::Content::decode(content_bytes) {
     for op in &content.operations {
       if op.operator == "Do"
         && let Some(Object::Name(name)) = op.operands.first()
@@ -265,8 +266,127 @@ fn get_referenced_xobject_names(doc: &Document, page_id: ObjectId) -> HashSet<Ve
       }
     }
   }
+}
+
+/// Parse the page content stream to find XObject names referenced by `Do` operators.
+/// This filters out XObjects that are defined in Resources but never actually painted.
+/// Also recurses one level into Form XObjects to find nested image references.
+fn get_referenced_xobject_names(doc: &Document, page_id: ObjectId) -> HashSet<Vec<u8>> {
+  let mut names = HashSet::new();
+
+  let content_bytes = get_page_content_bytes(doc, page_id);
+  if content_bytes.is_empty() {
+    return names;
+  }
+
+  collect_do_names(&content_bytes, &mut names);
+
+  // One-level recursion: check if any referenced XObjects are Form XObjects
+  // and scan their content streams for additional Do operators
+  if names.is_empty() {
+    return names;
+  }
+
+  let xobjects = match get_page_xobjects(doc, page_id) {
+    Some(x) => x,
+    None => return names,
+  };
+
+  let initial_names: Vec<Vec<u8>> = names.iter().cloned().collect();
+  for name in &initial_names {
+    let obj_ref = match xobjects.get(name.as_slice()) {
+      Ok(r) => r,
+      Err(_) => continue,
+    };
+    let obj_id = match obj_ref {
+      Object::Reference(id) => *id,
+      _ => continue,
+    };
+    let stream = match doc.get_object(obj_id) {
+      Ok(Object::Stream(s)) => s,
+      _ => continue,
+    };
+    let subtype = stream.dict.get(b"Subtype").ok().and_then(|v| {
+      if let Object::Name(n) = v {
+        Some(n.as_slice())
+      } else {
+        None
+      }
+    });
+    if subtype != Some(b"Form") {
+      continue;
+    }
+    // Decompress and scan the Form XObject's content stream
+    let mut form_stream = stream.clone();
+    let _ = form_stream.decompress();
+    collect_do_names(&form_stream.content, &mut names);
+  }
 
   names
+}
+
+/// Check if any referenced XObject on the page has `/Subtype /Form`.
+#[cfg(all(feature = "ocr", feature = "render"))]
+pub(crate) fn page_has_form_xobjects(doc: &Document, page_id: ObjectId) -> bool {
+  let xobjects = match get_page_xobjects(doc, page_id) {
+    Some(x) => x,
+    None => return false,
+  };
+
+  let referenced_names = get_referenced_xobject_names(doc, page_id);
+
+  for (name, obj_ref) in xobjects.iter() {
+    if !referenced_names.is_empty() && !referenced_names.contains(name) {
+      continue;
+    }
+    let obj_id = match obj_ref {
+      Object::Reference(id) => *id,
+      _ => continue,
+    };
+    let stream = match doc.get_object(obj_id) {
+      Ok(Object::Stream(s)) => s,
+      _ => continue,
+    };
+    let subtype = stream.dict.get(b"Subtype").ok().and_then(|v| {
+      if let Object::Name(n) = v {
+        Some(n.as_slice())
+      } else {
+        None
+      }
+    });
+    if subtype == Some(b"Form") {
+      return true;
+    }
+  }
+  false
+}
+
+/// Check if the page content stream contains vector drawing operators.
+/// Returns true if the count of path operators exceeds a threshold (> 10).
+#[cfg(all(feature = "ocr", feature = "render"))]
+pub(crate) fn page_has_vector_content(doc: &Document, page_id: ObjectId) -> bool {
+  let content_bytes = get_page_content_bytes(doc, page_id);
+  if content_bytes.is_empty() {
+    return false;
+  }
+
+  let content = match lopdf::content::Content::decode(&content_bytes) {
+    Ok(c) => c,
+    Err(_) => return false,
+  };
+
+  let path_ops: &[&str] = &[
+    "m", "l", "c", "v", "y", "h", "re", "S", "s", "f", "F", "f*", "B", "B*", "b", "b*", "n", "W",
+    "W*",
+  ];
+
+  let count = content
+    .operations
+    .iter()
+    .filter(|op| path_ops.contains(&op.operator.as_str()))
+    .count();
+
+  count > 10
 }
 
 /// Resolve /DecodeParms from a stream dictionary, following indirect references.

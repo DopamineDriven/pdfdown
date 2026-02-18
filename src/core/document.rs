@@ -147,13 +147,26 @@ pub(crate) fn extract_all(doc: &Document) -> Result<RawPdfDocument> {
 #[cfg(feature = "ocr")]
 pub(crate) fn extract_all_with_ocr(
   doc: &Document,
+  pdf_bytes: &[u8],
   lang: &str,
   min_len: u32,
   max_threads: u32,
+  render_dpi: u32,
+  render_mode: u8,
 ) -> Result<RawPdfDocumentOcr> {
   let meta = extract_metadata(doc);
   let (text, (images, annotations)) = rayon::join(
-    || extract_text_with_ocr(doc, lang, min_len, max_threads),
+    || {
+      extract_text_with_ocr(
+        doc,
+        pdf_bytes,
+        lang,
+        min_len,
+        max_threads,
+        render_dpi,
+        render_mode,
+      )
+    },
     || rayon::join(|| extract_images_raw(doc), || extract_annotations(doc)),
   );
   let text = text?;

@@ -58,6 +58,7 @@ const {
 export default __napiModule.exports
 export const PdfDown = __napiModule.exports.PdfDown
 export const BoxType = __napiModule.exports.BoxType
+export const capabilities = __napiModule.exports.capabilities
 export const extractAnnotationsPerPage = __napiModule.exports.extractAnnotationsPerPage
 export const extractAnnotationsPerPageAsync = __napiModule.exports.extractAnnotationsPerPageAsync
 export const extractImagesPerPage = __napiModule.exports.extractImagesPerPage
@@ -70,3 +71,5 @@ export const pdfDocument = __napiModule.exports.pdfDocument
 export const pdfDocumentAsync = __napiModule.exports.pdfDocumentAsync
 export const pdfMetadata = __napiModule.exports.pdfMetadata
 export const pdfMetadataAsync = __napiModule.exports.pdfMetadataAsync
+export const RenderMode = __napiModule.exports.RenderMode
+export const renderPagesAsync = __napiModule.exports.renderPagesAsync

@@ -1,6 +1,6 @@
 {
   "name": "@d0paminedriven/pdfdown",
-  "version": "0.9.7",
+  "version": "0.9.8",
   "description": "Rust powered PDF extraction for Node",
   "main": "index.js",
   "repository": {
@@ -52,9 +52,9 @@
     "artifacts": "napi artifacts",
     "artifacts:ocr": "napi artifacts --package-json-path ocr/package.json --npm-dir ocr/npm",
     "bench": "node --import @oxc-node/core/register benchmark/bench.ts",
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
-    "build:ocr": "napi build --platform --release --features ocr --package-json-path ocr/package.json --output-dir ocr",
+    "build": "napi build --platform --release --features render",
+    "build:debug": "napi build --platform --features render",
+    "build:ocr": "napi build --platform --release --features ocr,render --package-json-path ocr/package.json --output-dir ocr",
     "create-npm-dirs:ocr": "napi create-npm-dirs --package-json-path ocr/package.json --npm-dir ocr/npm",
     "format": "run-p format:prettier format:rs format:toml",
     "format:prettier": "prettier . -w",
