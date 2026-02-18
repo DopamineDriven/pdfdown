@@ -34,6 +34,10 @@ render = ["pdfium-render"]
 
 [build-dependencies]
 napi-build = "2"
+# Pin to the last known-good release for Linux OCR CI.
+# native-tls 0.2.17 introduces Protocol::Tlsv13 but misses match arms
+# in the OpenSSL fallback path, breaking Linux builds in CI.
+native-tls = "=0.2.14"
 
 [profile.release]
 lto   = true
