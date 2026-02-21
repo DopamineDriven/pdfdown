@@ -17,11 +17,9 @@ export declare class PdfDown {
   renderPagesAsync(opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>
 }
 
-export declare const enum BoxType {
-  CropBox = 'CropBox',
-  MediaBox = 'MediaBox',
-  Unknown = 'Unknown'
-}
+export type BoxType =  'CropBox'|
+'MediaBox'|
+'Unknown';
 
 export declare function capabilities(): Capabilities
 
@@ -137,11 +135,9 @@ export interface RenderedPage {
   data: Buffer
 }
 
-export declare const enum RenderMode {
-  Auto = 'Auto',
-  Never = 'Never',
-  Always = 'Always'
-}
+export type RenderMode =  'Auto'|
+'Never'|
+'Always';
 
 export interface RenderOptions {
   dpi?: number

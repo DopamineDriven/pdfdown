@@ -9,9 +9,7 @@ import {
   extractTextPerPage,
   extractImagesPerPage,
   PdfDown,
-  TextSource,
   capabilities,
-  RenderMode,
 } from '../index'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -39,7 +37,7 @@ test('extractTextWithOcrPerPage (sync) — extracts text from single-page image-
 
   t.is(pages.length, 1, 'should have exactly 1 page')
   t.is(pages[0].page, 1, 'page number should be 1')
-  t.is(pages[0].source, TextSource.Ocr, 'source should be Ocr for image-only page')
+  t.is(pages[0].source, 'Ocr', 'source should be Ocr for image-only page')
 
   const text = pages[0].text.toLowerCase()
   t.true(text.includes('hello'), `OCR text should contain "hello", got: "${pages[0].text}"`)
@@ -64,7 +62,7 @@ test('extractTextWithOcrPerPage — multi-page image-only PDF returns 3 pages', 
   t.is(pages.length, 3, 'should have 3 pages')
 
   for (const p of pages) {
-    t.is(p.source, TextSource.Ocr, `page ${p.page} should use OCR`)
+    t.is(p.source, 'Ocr', `page ${p.page} should use OCR`)
     t.true(p.text.trim().length > 0, `page ${p.page} should have non-empty OCR text`)
     t.log(`Page ${p.page} [${p.source}]: "${p.text.trim()}"`)
   }
@@ -82,12 +80,12 @@ test('extractTextWithOcrPerPage — native text PDF uses Native source', (t) => 
 
   t.true(pages.length > 0, 'should have pages')
 
-  const nativePages = pages.filter((p) => p.source === TextSource.Native)
+  const nativePages = pages.filter((p) => p.source === 'Native')
   t.true(nativePages.length > 0, 'at least some pages should use native extraction')
 
   t.log(`Total pages: ${pages.length}`)
   t.log(`Native: ${nativePages.length}`)
-  t.log(`OCR: ${pages.filter((p) => p.source === TextSource.Ocr).length}`)
+  t.log(`OCR: ${pages.filter((p) => p.source === 'Ocr').length}`)
 })
 
 test('extractTextWithOcrPerPageAsync — native text PDF matches sync', async (t) => {
@@ -106,20 +104,20 @@ test('extractTextWithOcrPerPageAsync — native text PDF matches sync', async (t
 
 test('extractTextWithOcrPerPage — high minTextLength forces OCR on native pages', (t) => {
   // Set absurdly high threshold so even pages with native text fall back to OCR
-  const pages = extractTextWithOcrPerPage(nativePdf, {render: RenderMode.Auto, minTextLength: 999999 })
+  const pages = extractTextWithOcrPerPage(nativePdf, {render: 'Auto', minTextLength: 999999 })
 
   // Pages with images should now be OCR'd
-  const ocrPages = pages.filter((p) => p.source === TextSource.Ocr)
-  const nativePages = pages.filter((p) => p.source === TextSource.Native)
+  const ocrPages = pages.filter((p) => p.source === 'Ocr')
+  const nativePages = pages.filter((p) => p.source === 'Native')
 
-  const renderedPages = pages.filter((p) => p.source === TextSource.Rendered)
+  const renderedPages = pages.filter((p) => p.source === 'Rendered')
   t.log(`With minTextLength=999999: OCR=${ocrPages.length}, Native=${nativePages.length}, Rendered=${renderedPages.length}`)
 
   for (const p of pages) {
     t.is(typeof p.page, 'number', 'page should be a number')
     t.is(typeof p.text, 'string', 'text should be a string')
     t.true(
-      p.source === TextSource.Native || p.source === TextSource.Ocr || p.source === TextSource.Rendered,
+      p.source === 'Native' || p.source === 'Ocr' || p.source === 'Rendered',
       `source should be a valid TextSource, got: ${p.source}`,
     )
   }
@@ -221,13 +219,13 @@ if (caps.render) {
     const pdf = new PdfDown(chemPdf)
 
     const [allPages, autoOnly, lowDpi, highDpi, autoOcr, neverOcr, alwaysOcr] = await Promise.all([
-      pdf.renderPagesAsync({ mode: RenderMode.Always }),
-      pdf.renderPagesAsync({ mode: RenderMode.Auto }),
-      pdf.renderPagesAsync({ mode: RenderMode.Auto, dpi: 72 }),
-      pdf.renderPagesAsync({ mode: RenderMode.Auto, dpi: 300 }),
-      pdf.textWithOcrPerPageAsync({ render: RenderMode.Auto }),
-      pdf.textWithOcrPerPageAsync({ render: RenderMode.Never }),
-      pdf.textWithOcrPerPageAsync({ render: RenderMode.Always }),
+      pdf.renderPagesAsync({ mode: 'Always' }),
+      pdf.renderPagesAsync({ mode: 'Auto' }),
+      pdf.renderPagesAsync({ mode: 'Auto', dpi: 72 }),
+      pdf.renderPagesAsync({ mode: 'Auto', dpi: 300 }),
+      pdf.textWithOcrPerPageAsync({ render: 'Auto' }),
+      pdf.textWithOcrPerPageAsync({ render: 'Never' }),
+      pdf.textWithOcrPerPageAsync({ render: 'Always' }),
     ])
 
     // renderPagesAsync: all pages (Always mode)
@@ -249,14 +247,14 @@ if (caps.render) {
 
     // OCR cascade: Auto
     t.is(autoOcr.length, 21)
-    t.true(autoOcr.filter((p) => p.source === TextSource.Rendered).length > 0)
-    t.true(autoOcr.filter((p) => p.source === TextSource.Native).length > 0)
+    t.true(autoOcr.filter((p) => p.source === 'Rendered').length > 0)
+    t.true(autoOcr.filter((p) => p.source === 'Native').length > 0)
 
     // OCR cascade: Never
-    t.is(neverOcr.filter((p) => p.source === TextSource.Rendered).length, 0)
+    t.is(neverOcr.filter((p) => p.source === 'Rendered').length, 0)
 
     // OCR cascade: Always
-    t.is(alwaysOcr.filter((p) => p.source === TextSource.Rendered).length, alwaysOcr.length)
+    t.is(alwaysOcr.filter((p) => p.source === 'Rendered').length, alwaysOcr.length)
   })
 } else {
   test('render tests skipped — PDFium not available', (t) => {
