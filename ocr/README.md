@@ -62,50 +62,47 @@ This package exports everything from `@d0paminedriven/pdfdown` (text, images, an
 export declare function extractTextWithOcrPerPage(
   buffer: Buffer,
   opts?: OcrOptions,
-): Array<OcrPageText>
+): Array<OcrPageText>;
 
 export declare function extractTextWithOcrPerPageAsync(
   buffer: Buffer,
   opts?: OcrOptions,
-): Promise<Array<OcrPageText>>
+): Promise<Array<OcrPageText>>;
 
 // Full document extraction with OCR text fallback
-export declare function pdfDocumentOcr(
-  buffer: Buffer,
-  opts?: OcrOptions,
-): PdfDocumentOcr
+export declare function pdfDocumentOcr(buffer: Buffer, opts?: OcrOptions): PdfDocumentOcr;
 
 export declare function pdfDocumentOcrAsync(
   buffer: Buffer,
   opts?: OcrOptions,
-): Promise<PdfDocumentOcr>
+): Promise<PdfDocumentOcr>;
 ```
 
 ### `PdfDown` class (includes OCR methods)
 
 ```typescript
 export declare class PdfDown {
-  constructor(buffer: Buffer)
+  constructor(buffer: Buffer);
 
   // ── Base methods ──
-  textPerPage(): Array<PageText>
-  textPerPageAsync(): Promise<Array<PageText>>
-  imagesPerPage(): Array<PageImage>
-  imagesPerPageAsync(): Promise<Array<PageImage>>
-  annotationsPerPage(): Array<PageAnnotation>
-  annotationsPerPageAsync(): Promise<Array<PageAnnotation>>
-  structuredText(): Array<StructuredPageText>
-  structuredTextAsync(): Promise<Array<StructuredPageText>>
-  metadata(): PdfMeta
-  metadataAsync(): Promise<PdfMeta>
-  document(): PdfDocument
-  documentAsync(): Promise<PdfDocument>
+  textPerPage(): Array<PageText>;
+  textPerPageAsync(): Promise<Array<PageText>>;
+  imagesPerPage(): Array<PageImage>;
+  imagesPerPageAsync(): Promise<Array<PageImage>>;
+  annotationsPerPage(): Array<PageAnnotation>;
+  annotationsPerPageAsync(): Promise<Array<PageAnnotation>>;
+  structuredText(): Array<StructuredPageText>;
+  structuredTextAsync(): Promise<Array<StructuredPageText>>;
+  metadata(): PdfMeta;
+  metadataAsync(): Promise<PdfMeta>;
+  document(): PdfDocument;
+  documentAsync(): Promise<PdfDocument>;
 
   // ── OCR methods ──
-  textWithOcrPerPage(opts?: OcrOptions): Array<OcrPageText>
-  textWithOcrPerPageAsync(opts?: OcrOptions): Promise<Array<OcrPageText>>
-  documentOcr(opts?: OcrOptions): PdfDocumentOcr
-  documentOcrAsync(opts?: OcrOptions): Promise<PdfDocumentOcr>
+  textWithOcrPerPage(opts?: OcrOptions): Array<OcrPageText>;
+  textWithOcrPerPageAsync(opts?: OcrOptions): Promise<Array<OcrPageText>>;
+  documentOcr(opts?: OcrOptions): PdfDocumentOcr;
+  documentOcrAsync(opts?: OcrOptions): Promise<PdfDocumentOcr>;
 }
 ```
 
@@ -113,46 +110,46 @@ export declare class PdfDown {
 
 ```typescript
 export const enum TextSource {
-  Native = 'Native',
-  Ocr = 'Ocr',
+  Native = "Native",
+  Ocr = "Ocr",
 }
 
 export interface OcrPageText {
-  page: number
-  text: string
-  source: TextSource
+  page: number;
+  text: string;
+  source: TextSource;
 }
 
 export interface OcrStructuredPageText {
-  page: number
-  header: string
-  body: string
-  footer: string
-  source: TextSource
+  page: number;
+  header: string;
+  body: string;
+  footer: string;
+  source: TextSource;
 }
 
 export interface OcrOptions {
-  lang?: string        // Tesseract language code, default "eng"
-  minTextLength?: number // non-whitespace char threshold before OCR fallback, default 1
-  maxThreads?: number  // cap on Rayon threads for OCR parallelism, default 4, clamped to [1, available CPUs]
+  lang?: string; // Tesseract language code, default "eng"
+  minTextLength?: number; // non-whitespace char threshold before OCR fallback, default 1
+  maxThreads?: number; // cap on Rayon threads for OCR parallelism, default 4, clamped to [1, available CPUs]
 }
 
 export interface PdfDocumentOcr {
-  version: string
-  isLinearized: boolean
-  pageCount: number
-  creator?: string
-  producer?: string
-  creationDate?: string
-  modificationDate?: string
-  totalImages: number
-  totalAnnotations: number
-  imagePages: Array<number>
-  annotationPages: Array<number>
-  text: Array<OcrPageText>
-  structuredText: Array<OcrStructuredPageText>
-  images: Array<PageImage>
-  annotations: Array<PageAnnotation>
+  version: string;
+  isLinearized: boolean;
+  pageCount: number;
+  creator?: string;
+  producer?: string;
+  creationDate?: string;
+  modificationDate?: string;
+  totalImages: number;
+  totalAnnotations: number;
+  imagePages: Array<number>;
+  annotationPages: Array<number>;
+  text: Array<OcrPageText>;
+  structuredText: Array<OcrStructuredPageText>;
+  images: Array<PageImage>;
+  annotations: Array<PageAnnotation>;
 }
 ```
 
@@ -163,41 +160,41 @@ export interface PdfDocumentOcr {
 ### Standalone
 
 ```typescript
-import { readFile } from 'fs/promises'
-import { extractTextWithOcrPerPageAsync } from '@d0paminedriven/pdfdown-ocr'
+import { readFile } from "fs/promises";
+import { extractTextWithOcrPerPageAsync } from "@d0paminedriven/pdfdown-ocr";
 
-const pdf = await readFile('scanned-document.pdf')
-const pages = await extractTextWithOcrPerPageAsync(pdf, { lang: 'eng', minTextLength: 10 })
+const pdf = await readFile("scanned-document.pdf");
+const pages = await extractTextWithOcrPerPageAsync(pdf, { lang: "eng", minTextLength: 10 });
 
 for (const { page, text, source } of pages) {
-  console.log(`Page ${page} [${source}]: ${text.slice(0, 100)}...`)
+  console.log(`Page ${page} [${source}]: ${text.slice(0, 100)}...`);
 }
 ```
 
 ### Class-based (parse once, extract many)
 
 ```typescript
-import { readFile } from 'fs/promises'
-import { PdfDown } from '@d0paminedriven/pdfdown-ocr'
+import { readFile } from "fs/promises";
+import { PdfDown } from "@d0paminedriven/pdfdown-ocr";
 
-const pdf = new PdfDown(await readFile('scanned-document.pdf'))
+const pdf = new PdfDown(await readFile("scanned-document.pdf"));
 
 // OCR text extraction
-const pages = await pdf.textWithOcrPerPageAsync({ lang: 'eng', minTextLength: 10 })
+const pages = await pdf.textWithOcrPerPageAsync({ lang: "eng", minTextLength: 10 });
 
 // All base methods work too
-const images = await pdf.imagesPerPageAsync()
-const meta = pdf.metadata()
+const images = await pdf.imagesPerPageAsync();
+const meta = pdf.metadata();
 ```
 
 ### Extract everything with OCR in one call
 
 ```typescript
-import { readFile } from 'fs/promises'
-import { PdfDown } from '@d0paminedriven/pdfdown-ocr'
+import { readFile } from "fs/promises";
+import { PdfDown } from "@d0paminedriven/pdfdown-ocr";
 
-const pdf = new PdfDown(await readFile('scanned-document.pdf'))
-const result = await pdf.documentOcrAsync({ minTextLength: 10 })
+const pdf = new PdfDown(await readFile("scanned-document.pdf"));
+const result = await pdf.documentOcrAsync({ minTextLength: 10 });
 
 // result.text         — OcrPageText[] (page, text, source per page)
 // result.structuredText — OcrStructuredPageText[] (header/body/footer + source per page)
@@ -209,24 +206,24 @@ const result = await pdf.documentOcrAsync({ minTextLength: 10 })
 ### Combined: OCR text + images for multimodal pipelines
 
 ```typescript
-import { readFile } from 'fs/promises'
-import { PdfDown } from '@d0paminedriven/pdfdown-ocr'
+import { readFile } from "fs/promises";
+import { PdfDown } from "@d0paminedriven/pdfdown-ocr";
 
-const pdf = new PdfDown(await readFile('scanned-document.pdf'))
+const pdf = new PdfDown(await readFile("scanned-document.pdf"));
 
 const [ocrText, images] = await Promise.all([
   pdf.textWithOcrPerPageAsync({ minTextLength: 10 }),
   pdf.imagesPerPageAsync(),
-])
+]);
 
-const imagesByPage = Map.groupBy(images, (img) => img.page)
+const imagesByPage = Map.groupBy(images, (img) => img.page);
 
 for (const { page, text, source } of ocrText) {
   const pageImages = (imagesByPage.get(page) ?? []).map((img) => ({
-    dataUrl: `data:image/png;base64,${img.data.toString('base64')}`,
+    dataUrl: `data:image/png;base64,${img.data.toString("base64")}`,
     width: img.width,
     height: img.height,
-  }))
+  }));
   // Send { page, text, source, images: pageImages } to your embedding pipeline
 }
 ```
@@ -235,9 +232,9 @@ for (const { page, text, source } of ocrText) {
 
 Both methods extract everything from a PDF in a single call. The difference is how text is extracted:
 
-| Method | Text extraction | Return type | Use when |
-|--------|----------------|-------------|----------|
-| `document()` / `documentAsync()` | Native PDF text only | `PdfDocument` | PDF has selectable text |
+| Method                                 | Text extraction          | Return type      | Use when                                 |
+| -------------------------------------- | ------------------------ | ---------------- | ---------------------------------------- |
+| `document()` / `documentAsync()`       | Native PDF text only     | `PdfDocument`    | PDF has selectable text                  |
 | `documentOcr()` / `documentOcrAsync()` | Native with OCR fallback | `PdfDocumentOcr` | PDF may contain scanned/image-only pages |
 
 `PdfDocumentOcr` uses `OcrPageText` (with `source: 'Native' | 'Ocr'`) and `OcrStructuredPageText` (with header/body/footer split plus source) instead of the base `PageText` and `StructuredPageText` types. Images, annotations, and metadata are identical in both.
@@ -256,8 +253,12 @@ Both methods extract everything from a PDF in a single call. The difference is h
 
 Prebuilt binaries are provided for:
 
-- macOS (x64, ARM64)
+- macOS (ARM64)
 - Linux glibc (x64, ARM64)
+
+Intel macOS is not built: the OCR package links the system Tesseract, and Homebrew no longer
+ships Intel bottles, so there is no supported way to obtain the library on that platform.
+The base `@d0paminedriven/pdfdown` package still ships an Intel macOS binary.
 
 ## Relationship to `@d0paminedriven/pdfdown`
 
