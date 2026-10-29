@@ -1,6 +1,6 @@
 {
   "name": "@d0paminedriven/pdfdown",
-  "version": "0.1.0",
+  "version": "0.10.0",
   "description": "Rust powered PDF extraction for Node",
   "keywords": [
     "N-API",
