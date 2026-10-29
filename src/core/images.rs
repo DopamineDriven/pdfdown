@@ -66,7 +66,7 @@ pub(crate) fn collect_page_decoded_images(doc: &Document, page_id: ObjectId) -> 
     let filter = resolve_filter(&stream.dict);
 
     let content = match filter.as_str() {
-      "DCTDecode" | "JPXDecode" => stream.content.clone(),
+      "DCTDecode" | "JPXDecode" => image_codec_payload(stream),
       _ => {
         let mut s = stream.clone();
         if s.decompress().is_ok() {
@@ -152,7 +152,7 @@ fn collect_page_images_raw(doc: &Document, page_id: ObjectId, page_num: u32) -> 
     // Step 4: Skip the full stream clone for DCT/JPX — they're already in their
     // target encoded format and don't need lopdf decompression.
     let content = match filter.as_str() {
-      "DCTDecode" | "JPXDecode" => stream.content.clone(),
+      "DCTDecode" | "JPXDecode" => image_codec_payload(stream),
       _ => decompress_stream_content(doc, stream, width, height, channels, bpc),
     };
 
@@ -328,6 +328,21 @@ fn get_referenced_xobject_names(doc: &Document, page_id: ObjectId) -> HashSet<Ve
 /// Check if any referenced XObject on the page has `/Subtype /Form`.
 #[cfg(all(feature = "ocr", feature = "render"))]
 pub(crate) fn page_has_form_xobjects(doc: &Document, page_id: ObjectId) -> bool {
+  page_has_xobject_subtype(doc, page_id, b"Form")
+}
+
+/// Check if any referenced XObject on the page has `/Subtype /Image`.
+///
+/// Used by the OCR cascade: when tier 2 (decode embedded images) produced nothing but the
+/// page does paint image XObjects, the images exist in a form we could not decode (JBIG2,
+/// CCITT, an unhandled filter chain, ...) and rasterizing the page is the only way to read them.
+#[cfg(all(feature = "ocr", feature = "render"))]
+pub(crate) fn page_has_image_xobjects(doc: &Document, page_id: ObjectId) -> bool {
+  page_has_xobject_subtype(doc, page_id, b"Image")
+}
+
+#[cfg(all(feature = "ocr", feature = "render"))]
+fn page_has_xobject_subtype(doc: &Document, page_id: ObjectId, wanted: &[u8]) -> bool {
   let xobjects = match get_page_xobjects(doc, page_id) {
     Some(x) => x,
     None => return false,
@@ -354,7 +369,7 @@ pub(crate) fn page_has_form_xobjects(doc: &Document, page_id: ObjectId) -> bool 
         None
       }
     });
-    if subtype == Some(b"Form") {
+    if subtype == Some(wanted) {
       return true;
     }
   }
@@ -717,6 +732,33 @@ fn resolve_filter(dict: &lopdf::Dictionary) -> String {
   }
 }
 
+/// Bytes to hand to the JPEG / JPEG 2000 decoder for a DCTDecode or JPXDecode image.
+///
+/// `/Filter` may be a chain such as `[ /ASCII85Decode /DCTDecode ]` (ReportLab, older
+/// Ghostscript, fax and mail gateways). The codec is always the innermost (last) entry;
+/// everything before it is a transport encoding that must be undone first, otherwise the
+/// codec is fed ASCII text and the image is silently dropped. lopdf applies a filter chain
+/// in order, so build a temporary stream whose `/Filter` holds only the outer filters and
+/// let it decode those. A bare `/Filter /DCTDecode` returns the content untouched.
+fn image_codec_payload(stream: &lopdf::Stream) -> Vec<u8> {
+  let outer: Vec<Object> = match stream.dict.get(b"Filter") {
+    Ok(Object::Array(arr)) if arr.len() > 1 => arr[..arr.len() - 1].to_vec(),
+    _ => return stream.content.clone(),
+  };
+  let outer_len = outer.len();
+  let mut dict = lopdf::Dictionary::new();
+  dict.set("Filter", Object::Array(outer));
+  // DecodeParms is parallel to Filter when both are arrays; keep only the outer entries.
+  if let Ok(Object::Array(parms)) = stream.dict.get(b"DecodeParms") {
+    let keep = parms.len().min(outer_len);
+    dict.set("DecodeParms", Object::Array(parms[..keep].to_vec()));
+  }
+  let transport = lopdf::Stream::new(dict, stream.content.clone());
+  transport
+    .decompressed_content()
+    .unwrap_or_else(|_| stream.content.clone())
+}
+
 /// Decode an XObject stream into a DynamicImage (shared by PNG export and OCR).
 fn decode_xobject_to_dynamic_image(
   content: &[u8],
@@ -791,9 +833,10 @@ fn decode_raw_pixels(
 
   // Downscale 16-bit to 8-bit if needed
   let pixel_data_8bit: Vec<u8> = if bytes_per_sample == 2 {
-    pixel_data
-      .chunks_exact(2)
-      .map(|pair| (u16::from_be_bytes([pair[0], pair[1]]) >> 8) as u8)
+    let (pairs, _) = pixel_data.as_chunks::<2>();
+    pairs
+      .iter()
+      .map(|pair| (u16::from_be_bytes(*pair) >> 8) as u8)
       .collect()
   } else {
     pixel_data.to_vec()

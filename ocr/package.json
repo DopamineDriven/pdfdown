@@ -2,18 +2,25 @@
   "name": "@d0paminedriven/pdfdown-ocr",
   "version": "0.9.9",
   "description": "Rust powered PDF extraction for Node with OCR fallback (requires system tesseract).",
-  "main": "index.js",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/DopamineDriven/pdfdown"
   },
-  "license": "MIT",
   "files": [
     "index.d.ts",
     "index.js",
     "README.md"
   ],
-  "os": ["darwin", "linux"],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "main": "index.js",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "napi": {
     "binaryName": "pdfdown_ocr",
     "targets": [
@@ -24,10 +31,6 @@
     ]
   },
   "engines": {
-    "node": ">= 12.22.0 < 13 || >= 14.17.0 < 15 || >= 15.12.0 < 16 || >= 16.0.0"
-  },
-  "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
+    "node": ">= 22.14.0 < 23 || >= 23.6.0"
   }
 }

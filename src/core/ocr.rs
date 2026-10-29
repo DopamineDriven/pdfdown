@@ -8,7 +8,9 @@ use rayon::prelude::*;
 use std::sync::Arc;
 
 #[cfg(all(feature = "ocr", feature = "render"))]
-use crate::core::images::{page_has_form_xobjects, page_has_vector_content};
+use crate::core::images::{
+  page_has_form_xobjects, page_has_image_xobjects, page_has_vector_content,
+};
 #[cfg(all(feature = "ocr", feature = "render"))]
 use crate::core::render;
 
@@ -117,12 +119,14 @@ fn ocr_page_images(doc: &Document, page_id: ObjectId, lang: &str) -> String {
 pub(crate) use crate::core::render::{RENDER_MODE_ALWAYS, RENDER_MODE_NEVER};
 
 // When the render feature is off, define the constants locally (they're still
-// accepted as parameters but silently ignored).
+// accepted as parameters but silently ignored, so only AUTO is ever read).
 #[cfg(not(feature = "render"))]
 pub(crate) const RENDER_MODE_AUTO: u8 = 0;
 #[cfg(not(feature = "render"))]
+#[allow(dead_code)]
 pub(crate) const RENDER_MODE_NEVER: u8 = 1;
 #[cfg(not(feature = "render"))]
+#[allow(dead_code)]
 pub(crate) const RENDER_MODE_ALWAYS: u8 = 2;
 
 /// Extract text with OCR fallback, with optional render tier.
@@ -161,17 +165,15 @@ pub(crate) fn extract_text_with_ocr(
           #[cfg(feature = "render")]
           {
             // In Always mode, render every page regardless
-            if render_mode == RENDER_MODE_ALWAYS {
-              if let Some(rendered_text) = try_render_ocr_page(&pdf_arc, page_num, render_dpi, lang)
-              {
-                if !rendered_text.is_empty() {
-                  return OcrPageText {
-                    page: page_num,
-                    text: rendered_text,
-                    source: TextSource::Rendered,
-                  };
-                }
-              }
+            if render_mode == RENDER_MODE_ALWAYS
+              && let Some(rendered_text) = try_render_ocr_page(&pdf_arc, page_num, render_dpi, lang)
+              && !rendered_text.is_empty()
+            {
+              return OcrPageText {
+                page: page_num,
+                text: rendered_text,
+                source: TextSource::Rendered,
+              };
             }
           }
           return OcrPageText {
@@ -195,21 +197,23 @@ pub(crate) fn extract_text_with_ocr(
         #[cfg(feature = "render")]
         {
           if render_mode != RENDER_MODE_NEVER {
+            // Auto: rasterize when the page has content tier 2 could not read directly —
+            // form XObjects, vector drawing, or image XObjects whose codec/filter chain we
+            // could not decode (otherwise such a page is reported as empty OCR).
             let should_render = render_mode == RENDER_MODE_ALWAYS
               || page_has_form_xobjects(doc, page_id)
+              || page_has_image_xobjects(doc, page_id)
               || page_has_vector_content(doc, page_id);
 
-            if should_render {
-              if let Some(rendered_text) = try_render_ocr_page(&pdf_arc, page_num, render_dpi, lang)
-              {
-                if !rendered_text.is_empty() {
-                  return OcrPageText {
-                    page: page_num,
-                    text: rendered_text,
-                    source: TextSource::Rendered,
-                  };
-                }
-              }
+            if should_render
+              && let Some(rendered_text) = try_render_ocr_page(&pdf_arc, page_num, render_dpi, lang)
+              && !rendered_text.is_empty()
+            {
+              return OcrPageText {
+                page: page_num,
+                text: rendered_text,
+                source: TextSource::Rendered,
+              };
             }
           }
         }

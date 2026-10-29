@@ -31,9 +31,9 @@ pub use types::RawPdfDocumentOcr;
 // ── Step 1: Compile-time assertion that lopdf::Document is Send + Sync ──
 const _: () = {
   fn assert_send_sync<T: Send + Sync>() {}
-  fn check() {
-    assert_send_sync::<lopdf::Document>();
-  }
+  // Referenced rather than called: monomorphizing the fn checks the bound at compile time
+  // without leaving an uncalled function behind for dead-code analysis.
+  let _ = assert_send_sync::<lopdf::Document>;
 };
 
 // ── Shared helpers ──────────────────────────────────────────────

@@ -25,10 +25,10 @@ fn try_bind_pdfium_at(_path: &str) -> Option<Pdfium> {
 
 fn init_pdfium() -> Result<Pdfium, String> {
   // 1. PDFIUM_LIBRARY_PATH env var
-  if let Ok(path) = std::env::var("PDFIUM_LIBRARY_PATH") {
-    if let Some(p) = try_bind_pdfium_at(&path) {
-      return Ok(p);
-    }
+  if let Ok(path) = std::env::var("PDFIUM_LIBRARY_PATH")
+    && let Some(p) = try_bind_pdfium_at(&path)
+  {
+    return Ok(p);
   }
 
   // 2. System library paths (dlopen search)
@@ -48,11 +48,11 @@ fn get_pdfium() -> Result<&'static Pdfium, &'static str> {
 
 /// Attempt to initialize PDFium with a custom path (called before the lazy singleton).
 fn get_pdfium_with_path(custom_path: Option<&str>) -> Result<&'static Pdfium, &'static str> {
-  if let Some(path) = custom_path {
-    if PDFIUM.get().is_none() {
-      let result = try_bind_pdfium_at(path).map(Ok).unwrap_or_else(init_pdfium);
-      let _ = PDFIUM.set(result);
-    }
+  if let Some(path) = custom_path
+    && PDFIUM.get().is_none()
+  {
+    let result = try_bind_pdfium_at(path).map(Ok).unwrap_or_else(init_pdfium);
+    let _ = PDFIUM.set(result);
   }
   get_pdfium()
 }
@@ -74,17 +74,19 @@ pub(crate) fn normalize_dpi(dpi: Option<u32>) -> u32 {
 fn render_page_to_image_inner(pdf_bytes: &[u8], page_index: u16, dpi: u32) -> Option<DynamicImage> {
   let pdfium = get_pdfium().ok()?;
   let doc = pdfium.load_pdf_from_byte_slice(pdf_bytes, None).ok()?;
-  let page = doc.pages().get(page_index).ok()?;
+  // pdfium-render 0.9 widened PdfPageIndex from u16 to c_int
+  let page = doc.pages().get(PdfPageIndex::from(page_index)).ok()?;
 
   let config = PdfRenderConfig::new()
     .set_target_width(((page.width().value * dpi as f32) / 72.0) as Pixels)
     .set_target_height(((page.height().value * dpi as f32) / 72.0) as Pixels)
     .render_form_data(true);
 
+  // pdfium-render 0.9: `as_image()` is fallible
   page
     .render_with_config(&config)
     .ok()
-    .map(|bmp| bmp.as_image())
+    .and_then(|bmp| bmp.as_image().ok())
 }
 
 // ── Public lock-acquiring wrappers ──────────────────────────────
@@ -131,7 +133,7 @@ pub(crate) fn render_pages_to_png(
   let mut results = Vec::with_capacity(page_indices.len());
 
   for &idx in page_indices {
-    let page = match doc.pages().get(idx) {
+    let page = match doc.pages().get(PdfPageIndex::from(idx)) {
       Ok(p) => p,
       Err(_) => continue,
     };
@@ -142,7 +144,7 @@ pub(crate) fn render_pages_to_png(
       .render_form_data(true);
 
     if let Ok(bmp) = page.render_with_config(&config) {
-      let img = bmp.as_image();
+      let Ok(img) = bmp.as_image() else { continue };
       let (w, h) = (img.width(), img.height());
       let mut buf = Cursor::new(Vec::new());
       if img.write_to(&mut buf, ImageFormat::Png).is_ok() {

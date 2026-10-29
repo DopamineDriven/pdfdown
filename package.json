@@ -2,51 +2,29 @@
   "name": "@d0paminedriven/pdfdown",
   "version": "0.9.9",
   "description": "Rust powered PDF extraction for Node",
-  "main": "index.js",
+  "keywords": [
+    "N-API",
+    "NAPI",
+    "Rust",
+    "napi-rs",
+    "node-addon",
+    "node-addon-api"
+  ],
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/DopamineDriven/pdfdown"
   },
-  "license": "MIT",
-  "browser": "browser.js",
-  "keywords": [
-    "napi-rs",
-    "NAPI",
-    "N-API",
-    "Rust",
-    "node-addon",
-    "node-addon-api"
-  ],
   "files": [
     "index.d.ts",
     "index.js",
     "browser.js"
   ],
-  "napi": {
-    "binaryName": "pdfdown",
-    "targets": [
-      "x86_64-pc-windows-msvc",
-      "x86_64-apple-darwin",
-      "x86_64-unknown-linux-gnu",
-      "x86_64-unknown-linux-musl",
-      "aarch64-unknown-linux-gnu",
-      "i686-pc-windows-msvc",
-      "armv7-unknown-linux-gnueabihf",
-      "aarch64-apple-darwin",
-      "aarch64-linux-android",
-      "x86_64-unknown-freebsd",
-      "aarch64-unknown-linux-musl",
-      "aarch64-pc-windows-msvc",
-      "armv7-linux-androideabi",
-      "wasm32-wasip1-threads"
-    ]
-  },
-  "engines": {
-    "node": ">= 12.22.0 < 13 || >= 14.17.0 < 15 || >= 15.12.0 < 16 || >= 16.0.0"
-  },
+  "main": "index.js",
+  "browser": "browser.js",
   "publishConfig": {
-    "registry": "https://registry.npmjs.org/",
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "artifacts": "napi artifacts",
@@ -70,57 +48,82 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@emnapi/core": "^1.5.0",
-    "@emnapi/runtime": "^1.5.0",
-    "@napi-rs/cli": "^3.2.0",
-    "@oxc-node/core": "^0.0.35",
+    "@emnapi/core": "2.0.0-alpha.5",
+    "@emnapi/runtime": "2.0.0-alpha.5",
+    "@napi-rs/cli": "^3.10.9",
+    "@napi-rs/wasm-runtime": "^1.2.6",
+    "@oxc-node/core": "^1.0.1",
+    "@oxc-node/core-wasm32-wasi": "^1.0.1",
     "@taplo/cli": "^0.7.0",
-    "@tybys/wasm-util": "^0.10.0",
-    "@types/node": "^25.2.0",
-    "ava": "^6.4.1",
-    "chalk": "^5.6.2",
+    "@tybys/wasm-util": "^0.10.4",
+    "@types/node": "^26.6.6",
+    "ava": "^8.2.0",
+    "chalk": "^6.0.1",
+    "emnapi": "2.0.0-alpha.5",
     "husky": "^9.1.7",
-    "lint-staged": "^16.1.6",
-    "npm-run-all2": "^8.0.4",
-    "oxlint": "^1.14.0",
-    "prettier": "^3.6.2",
-    "tinybench": "^6.0.0",
-    "typescript": "^5.9.2"
+    "lint-staged": "^17.6.0",
+    "npm-run-all2": "^9.0.4",
+    "oxfmt": "^0.73.0",
+    "oxlint": "^1.90.0",
+    "prettier": "^3.9.10",
+    "tinybench": "^6.2.2",
+    "tslib": "^2.8.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   },
   "lint-staged": {
     "*.@(js|ts|tsx)": [
       "oxlint --fix"
     ],
-    "*.@(js|ts|tsx|yml|yaml|md|json)": [
-      "prettier --write"
-    ],
-    "*.toml": [
-      "taplo format"
+    "*.@(js|ts|tsx|yml|yaml|md|json|toml)": [
+      "oxfmt --write"
     ]
   },
-  "ava": {
-    "files": [
-      "__test__/**/*.spec.ts"
-    ],
-    "extensions": {
-      "ts": "module"
-    },
-    "timeout": "2m",
-    "workerThreads": false,
-    "environmentVariables": {
-      "OXC_TSCONFIG_PATH": "./__test__/tsconfig.json"
-    },
-    "nodeArguments": [
-      "--import",
-      "@oxc-node/core/register"
+  "napi": {
+    "binaryName": "pdfdown",
+    "targets": [
+      "x86_64-pc-windows-msvc",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "i686-pc-windows-msvc",
+      "armv7-unknown-linux-gnueabihf",
+      "aarch64-apple-darwin",
+      "aarch64-linux-android",
+      "x86_64-unknown-freebsd",
+      "aarch64-unknown-linux-musl",
+      "aarch64-pc-windows-msvc",
+      "armv7-linux-androideabi",
+      "wasm32-wasip1-threads"
     ]
   },
   "prettier": {
+    "arrowParens": "always",
     "printWidth": 120,
     "semi": false,
-    "trailingComma": "all",
     "singleQuote": true,
-    "arrowParens": "always"
+    "trailingComma": "all"
   },
-  "packageManager": "yarn@4.12.0"
+  "ava": {
+    "environmentVariables": {
+      "OXC_TSCONFIG_PATH": "./__test__/tsconfig.json"
+    },
+    "extensions": [
+      "ts"
+    ],
+    "files": [
+      "__test__/**/*.spec.ts"
+    ],
+    "nodeArguments": [
+      "--import",
+      "@oxc-node/core/register"
+    ],
+    "timeout": "2m",
+    "workerThreads": false
+  },
+  "engines": {
+    "node": ">= 22.14.0 < 23 || >= 23.6.0"
+  },
+  "packageManager": "yarn@4.18.1+sha512.b2e1e7524f654f2749d32b4ebcb4622473cb5bcbc485df2007e12a154e50162a4d795526768bc5f5b8f81717bfd79deb2472813d86fb5ae2eb551fa9c872b08f"
 }

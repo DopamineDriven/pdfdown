@@ -7,10 +7,8 @@ fn extract_info_string(dict: &lopdf::Dictionary, key: &[u8]) -> Option<String> {
     Object::String(bytes, _) => {
       if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
         // UTF-16 BOM
-        let utf16: Vec<u16> = bytes[2..]
-          .chunks_exact(2)
-          .map(|c| u16::from_be_bytes([c[0], c[1]]))
-          .collect();
+        let (pairs, _) = bytes[2..].as_chunks::<2>();
+        let utf16: Vec<u16> = pairs.iter().map(|c| u16::from_be_bytes(*c)).collect();
         Some(String::from_utf16_lossy(&utf16))
       } else {
         Some(String::from_utf8_lossy(bytes).to_string())

@@ -1,7 +1,7 @@
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { readFileSync } from "fs";
+import { join } from "path";
 
-import test from 'ava'
+import test from "ava";
 
 import {
   extractTextWithOcrPerPage,
@@ -10,255 +10,300 @@ import {
   extractImagesPerPage,
   PdfDown,
   capabilities,
-} from '../index'
+} from "../index";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
-const FIXTURES = join(import.meta.dirname, 'fixtures')
+const FIXTURES = join(import.meta.dirname, "fixtures");
 
 // Single-page image-only PDF: text is "Hello OCR World"
-const helloOcr = readFileSync(join(FIXTURES, 'hello-ocr.pdf'))
+const helloOcr = readFileSync(join(FIXTURES, "hello-ocr.pdf"));
 
 // 3-page image-only PDF: "Page One Typed Text", "Second Page Content", "Third page monospace"
-const multipageOcr = readFileSync(join(FIXTURES, 'multipage-ocr.pdf'))
+const multipageOcr = readFileSync(join(FIXTURES, "multipage-ocr.pdf"));
+
+// Single-page scan whose only image XObject is declared with a filter chain,
+// /Filter [ /ASCII85Decode /DCTDecode ] (ReportLab output). Regression fixture for the
+// DCT/JPX fast path handing ASCII85 text to the JPEG decoder and silently dropping the image.
+const ascii85DctScan = readFileSync(
+  join(import.meta.dirname, "../../__test__/fixtures/ascii85-dct-scan.pdf"),
+);
 
 // One of the existing test PDFs (has native text)
-const PDF_URL = 'https://assets.aicoalesce.com/upload/nrr6h4r4480f6kviycyo1zhf/1767766786190-Lollaclaudplooza-Pt-I.pdf'
+const PDF_URL =
+  "https://assets.aicoalesce.com/upload/nrr6h4r4480f6kviycyo1zhf/1767766786190-Lollaclaudplooza-Pt-I.pdf";
 
-const fetcher = async (target: string) => await fetch(target)
-const nativeRes = await fetcher(PDF_URL)
-if (!nativeRes.ok) throw new Error(`Failed to fetch PDF: ${nativeRes.status} ${nativeRes.statusText}`)
-const nativePdf = Buffer.from(await nativeRes.arrayBuffer())
+const fetcher = async (target: string) => await fetch(target);
+const nativeRes = await fetcher(PDF_URL);
+if (!nativeRes.ok)
+  throw new Error(`Failed to fetch PDF: ${nativeRes.status} ${nativeRes.statusText}`);
+const nativePdf = Buffer.from(await nativeRes.arrayBuffer());
 
 // ── OCR on image-only PDFs ───────────────────────────────────────────────────
 
-test('extractTextWithOcrPerPage (sync) — extracts text from single-page image-only PDF', (t) => {
-  const pages = extractTextWithOcrPerPage(helloOcr)
+test("extractTextWithOcrPerPage (sync) — extracts text from single-page image-only PDF", (t) => {
+  const pages = extractTextWithOcrPerPage(helloOcr);
 
-  t.is(pages.length, 1, 'should have exactly 1 page')
-  t.is(pages[0].page, 1, 'page number should be 1')
-  t.is(pages[0].source, 'Ocr', 'source should be Ocr for image-only page')
+  t.is(pages.length, 1, "should have exactly 1 page");
+  t.is(pages[0].page, 1, "page number should be 1");
+  t.is(pages[0].source, "Ocr", "source should be Ocr for image-only page");
 
-  const text = pages[0].text.toLowerCase()
-  t.true(text.includes('hello'), `OCR text should contain "hello", got: "${pages[0].text}"`)
-  t.true(text.includes('ocr'), `OCR text should contain "ocr", got: "${pages[0].text}"`)
-  t.true(text.includes('world'), `OCR text should contain "world", got: "${pages[0].text}"`)
+  const text = pages[0].text.toLowerCase();
+  t.true(text.includes("hello"), `OCR text should contain "hello", got: "${pages[0].text}"`);
+  t.true(text.includes("ocr"), `OCR text should contain "ocr", got: "${pages[0].text}"`);
+  t.true(text.includes("world"), `OCR text should contain "world", got: "${pages[0].text}"`);
 
-  t.log(`OCR result: "${pages[0].text.trim()}"`)
-})
+  t.log(`OCR result: "${pages[0].text.trim()}"`);
+});
 
-test('extractTextWithOcrPerPageAsync — matches sync for image-only PDF', async (t) => {
-  const sync = extractTextWithOcrPerPage(helloOcr)
-  const async_ = await extractTextWithOcrPerPageAsync(helloOcr)
+test("extractTextWithOcrPerPageAsync — matches sync for image-only PDF", async (t) => {
+  const sync = extractTextWithOcrPerPage(helloOcr);
+  const async_ = await extractTextWithOcrPerPageAsync(helloOcr);
 
-  t.is(async_.length, sync.length, 'page count should match')
-  t.is(async_[0].source, sync[0].source, 'source should match')
-  t.is(async_[0].text.trim(), sync[0].text.trim(), 'OCR text should match')
-})
+  t.is(async_.length, sync.length, "page count should match");
+  t.is(async_[0].source, sync[0].source, "source should match");
+  t.is(async_[0].text.trim(), sync[0].text.trim(), "OCR text should match");
+});
 
-test('extractTextWithOcrPerPage — multi-page image-only PDF returns 3 pages', (t) => {
-  const pages = extractTextWithOcrPerPage(multipageOcr)
+test("extractTextWithOcrPerPage — multi-page image-only PDF returns 3 pages", (t) => {
+  const pages = extractTextWithOcrPerPage(multipageOcr);
 
-  t.is(pages.length, 3, 'should have 3 pages')
+  t.is(pages.length, 3, "should have 3 pages");
 
   for (const p of pages) {
-    t.is(p.source, 'Ocr', `page ${p.page} should use OCR`)
-    t.true(p.text.trim().length > 0, `page ${p.page} should have non-empty OCR text`)
-    t.log(`Page ${p.page} [${p.source}]: "${p.text.trim()}"`)
+    t.is(p.source, "Ocr", `page ${p.page} should use OCR`);
+    t.true(p.text.trim().length > 0, `page ${p.page} should have non-empty OCR text`);
+    t.log(`Page ${p.page} [${p.source}]: "${p.text.trim()}"`);
   }
 
   // Verify expected content (case-insensitive, OCR may introduce minor variations)
-  t.true(pages[0].text.toLowerCase().includes('page'), 'page 1 should contain "page"')
-  t.true(pages[1].text.toLowerCase().includes('second'), 'page 2 should contain "second"')
-  t.true(pages[2].text.toLowerCase().includes('third'), 'page 3 should contain "third"')
-})
+  t.true(pages[0].text.toLowerCase().includes("page"), 'page 1 should contain "page"');
+  t.true(pages[1].text.toLowerCase().includes("second"), 'page 2 should contain "second"');
+  t.true(pages[2].text.toLowerCase().includes("third"), 'page 3 should contain "third"');
+});
+
+// ── Filter chains on image XObjects ──────────────────────────────────────────
+
+test("extractImagesPerPage — enumerates a DCT image declared behind an ASCII85 filter chain", (t) => {
+  const images = extractImagesPerPage(ascii85DctScan);
+
+  t.is(images.length, 1, "the page paints exactly one image XObject");
+  t.is(images[0].page, 1);
+  t.is(images[0].filter, "DCTDecode", "filter reports the innermost codec of the chain");
+  t.is(images[0].colorSpace, "DeviceGray");
+  t.is(images[0].bitsPerComponent, 8);
+  t.is(images[0].width, 1240);
+  t.is(images[0].height, 1754);
+  t.deepEqual(
+    [...images[0].data.subarray(0, 4)],
+    [0x89, 0x50, 0x4e, 0x47],
+    "decoded payload is re-encoded as PNG",
+  );
+});
+
+test("extractTextWithOcrPerPage — OCRs a DCT image declared behind an ASCII85 filter chain", (t) => {
+  const pages = extractTextWithOcrPerPage(ascii85DctScan);
+
+  t.is(pages.length, 1);
+  t.is(pages[0].source, "Ocr", "embedded-image OCR path, not the render fallback");
+
+  const normalized = pages[0].text.toLowerCase().replace(/\s+/g, "");
+  t.true(normalized.length > 500, `expected > 500 non-whitespace chars, got ${normalized.length}`);
+  t.true(
+    normalized.includes("scanneddocumentsample"),
+    `got: "${pages[0].text.trim().slice(0, 80)}"`,
+  );
+  t.log(`OCR result (first 80 chars): "${pages[0].text.trim().slice(0, 80)}"`);
+});
 
 // ── OCR with native text PDF (should use Native source) ──────────────────────
 
-test('extractTextWithOcrPerPage — native text PDF uses Native source', (t) => {
-  const pages = extractTextWithOcrPerPage(nativePdf)
+test("extractTextWithOcrPerPage — native text PDF uses Native source", (t) => {
+  const pages = extractTextWithOcrPerPage(nativePdf);
 
-  t.true(pages.length > 0, 'should have pages')
+  t.true(pages.length > 0, "should have pages");
 
-  const nativePages = pages.filter((p) => p.source === 'Native')
-  t.true(nativePages.length > 0, 'at least some pages should use native extraction')
+  const nativePages = pages.filter((p) => p.source === "Native");
+  t.true(nativePages.length > 0, "at least some pages should use native extraction");
 
-  t.log(`Total pages: ${pages.length}`)
-  t.log(`Native: ${nativePages.length}`)
-  t.log(`OCR: ${pages.filter((p) => p.source === 'Ocr').length}`)
-})
+  t.log(`Total pages: ${pages.length}`);
+  t.log(`Native: ${nativePages.length}`);
+  t.log(`OCR: ${pages.filter((p) => p.source === "Ocr").length}`);
+});
 
-test('extractTextWithOcrPerPageAsync — native text PDF matches sync', async (t) => {
-  const sync = extractTextWithOcrPerPage(nativePdf)
-  const async_ = await extractTextWithOcrPerPageAsync(nativePdf)
+test("extractTextWithOcrPerPageAsync — native text PDF matches sync", async (t) => {
+  const sync = extractTextWithOcrPerPage(nativePdf);
+  const async_ = await extractTextWithOcrPerPageAsync(nativePdf);
 
-  t.is(async_.length, sync.length, 'page count should match')
+  t.is(async_.length, sync.length, "page count should match");
 
   for (let i = 0; i < sync.length; i++) {
-    t.is(async_[i].page, sync[i].page, `page number should match at index ${i}`)
-    t.is(async_[i].source, sync[i].source, `source should match at page ${sync[i].page}`)
+    t.is(async_[i].page, sync[i].page, `page number should match at index ${i}`);
+    t.is(async_[i].source, sync[i].source, `source should match at page ${sync[i].page}`);
   }
-})
+});
 
 // ── OcrOptions: minTextLength forcing OCR fallback ───────────────────────────
 
-test('extractTextWithOcrPerPage — high minTextLength forces OCR on native pages', (t) => {
+test("extractTextWithOcrPerPage — high minTextLength forces OCR on native pages", (t) => {
   // Set absurdly high threshold so even pages with native text fall back to OCR
-  const pages = extractTextWithOcrPerPage(nativePdf, {render: 'Auto', minTextLength: 999999 })
+  const pages = extractTextWithOcrPerPage(nativePdf, { render: "Auto", minTextLength: 999999 });
 
   // Pages with images should now be OCR'd
-  const ocrPages = pages.filter((p) => p.source === 'Ocr')
-  const nativePages = pages.filter((p) => p.source === 'Native')
+  const ocrPages = pages.filter((p) => p.source === "Ocr");
+  const nativePages = pages.filter((p) => p.source === "Native");
 
-  const renderedPages = pages.filter((p) => p.source === 'Rendered')
-  t.log(`With minTextLength=999999: OCR=${ocrPages.length}, Native=${nativePages.length}, Rendered=${renderedPages.length}`)
+  const renderedPages = pages.filter((p) => p.source === "Rendered");
+  t.log(
+    `With minTextLength=999999: OCR=${ocrPages.length}, Native=${nativePages.length}, Rendered=${renderedPages.length}`,
+  );
 
   for (const p of pages) {
-    t.is(typeof p.page, 'number', 'page should be a number')
-    t.is(typeof p.text, 'string', 'text should be a string')
+    t.is(typeof p.page, "number", "page should be a number");
+    t.is(typeof p.text, "string", "text should be a string");
     t.true(
-      p.source === 'Native' || p.source === 'Ocr' || p.source === 'Rendered',
+      p.source === "Native" || p.source === "Ocr" || p.source === "Rendered",
       `source should be a valid TextSource, got: ${p.source}`,
-    )
+    );
   }
-})
+});
 
 // ── OcrOptions: maxThreads ───────────────────────────────────────────────────
 
-test('extractTextWithOcrPerPage — maxThreads=1 produces same results', (t) => {
-  const defaultResult = extractTextWithOcrPerPage(helloOcr)
-  const singleThread = extractTextWithOcrPerPage(helloOcr, { maxThreads: 1 })
+test("extractTextWithOcrPerPage — maxThreads=1 produces same results", (t) => {
+  const defaultResult = extractTextWithOcrPerPage(helloOcr);
+  const singleThread = extractTextWithOcrPerPage(helloOcr, { maxThreads: 1 });
 
-  t.is(singleThread.length, defaultResult.length, 'page count should match')
-  t.is(singleThread[0].source, defaultResult[0].source, 'source should match')
-  t.is(singleThread[0].text.trim(), defaultResult[0].text.trim(), 'text should match')
-})
+  t.is(singleThread.length, defaultResult.length, "page count should match");
+  t.is(singleThread[0].source, defaultResult[0].source, "source should match");
+  t.is(singleThread[0].text.trim(), defaultResult[0].text.trim(), "text should match");
+});
 
 // ── PdfDown class OCR methods ────────────────────────────────────────────────
 
-test('PdfDown.textWithOcrPerPage (sync) — image-only PDF', (t) => {
-  const pdf = new PdfDown(helloOcr)
-  const standalone = extractTextWithOcrPerPage(helloOcr)
-  const classResult = pdf.textWithOcrPerPage()
+test("PdfDown.textWithOcrPerPage (sync) — image-only PDF", (t) => {
+  const pdf = new PdfDown(helloOcr);
+  const standalone = extractTextWithOcrPerPage(helloOcr);
+  const classResult = pdf.textWithOcrPerPage();
 
-  t.is(classResult.length, standalone.length, 'page count should match standalone')
-  t.is(classResult[0].source, standalone[0].source, 'source should match')
-  t.is(classResult[0].text.trim(), standalone[0].text.trim(), 'text should match')
-})
+  t.is(classResult.length, standalone.length, "page count should match standalone");
+  t.is(classResult[0].source, standalone[0].source, "source should match");
+  t.is(classResult[0].text.trim(), standalone[0].text.trim(), "text should match");
+});
 
-test('PdfDown.textWithOcrPerPageAsync — image-only PDF', async (t) => {
-  const pdf = new PdfDown(helloOcr)
-  const standalone = extractTextWithOcrPerPage(helloOcr)
-  const classResult = await pdf.textWithOcrPerPageAsync()
+test("PdfDown.textWithOcrPerPageAsync — image-only PDF", async (t) => {
+  const pdf = new PdfDown(helloOcr);
+  const standalone = extractTextWithOcrPerPage(helloOcr);
+  const classResult = await pdf.textWithOcrPerPageAsync();
 
-  t.is(classResult.length, standalone.length, 'page count should match standalone')
-  t.is(classResult[0].source, standalone[0].source, 'source should match')
-  t.is(classResult[0].text.trim(), standalone[0].text.trim(), 'text should match')
-})
+  t.is(classResult.length, standalone.length, "page count should match standalone");
+  t.is(classResult[0].source, standalone[0].source, "source should match");
+  t.is(classResult[0].text.trim(), standalone[0].text.trim(), "text should match");
+});
 
 // ── Superset: base APIs still work through OCR package ───────────────────────
 
-test('base API: extractTextPerPage works through OCR package', (t) => {
-  const pages = extractTextPerPage(nativePdf)
+test("base API: extractTextPerPage works through OCR package", (t) => {
+  const pages = extractTextPerPage(nativePdf);
 
-  t.true(Array.isArray(pages), 'should return an array')
-  t.true(pages.length > 0, 'should have pages')
+  t.true(Array.isArray(pages), "should return an array");
+  t.true(pages.length > 0, "should have pages");
 
   for (const p of pages) {
-    t.is(typeof p.page, 'number')
-    t.is(typeof p.text, 'string')
+    t.is(typeof p.page, "number");
+    t.is(typeof p.text, "string");
   }
-})
+});
 
-test('base API: extractImagesPerPage works through OCR package', (t) => {
-  const images = extractImagesPerPage(nativePdf)
+test("base API: extractImagesPerPage works through OCR package", (t) => {
+  const images = extractImagesPerPage(nativePdf);
 
-  t.true(Array.isArray(images), 'should return an array')
+  t.true(Array.isArray(images), "should return an array");
 
   for (const img of images) {
-    t.is(typeof img.page, 'number')
-    t.is(typeof img.width, 'number')
-    t.is(typeof img.height, 'number')
+    t.is(typeof img.page, "number");
+    t.is(typeof img.width, "number");
+    t.is(typeof img.height, "number");
     // PNG magic bytes
-    const header = img.data.subarray(0, 4)
-    t.deepEqual([...header], [0x89, 0x50, 0x4e, 0x47])
+    const header = img.data.subarray(0, 4);
+    t.deepEqual([...header], [0x89, 0x50, 0x4e, 0x47]);
   }
-})
+});
 
-test('base API: PdfDown class methods work through OCR package', (t) => {
-  const pdf = new PdfDown(nativePdf)
+test("base API: PdfDown class methods work through OCR package", (t) => {
+  const pdf = new PdfDown(nativePdf);
 
-  const meta = pdf.metadata()
-  t.is(typeof meta.pageCount, 'number')
-  t.true(meta.pageCount > 0)
+  const meta = pdf.metadata();
+  t.is(typeof meta.pageCount, "number");
+  t.true(meta.pageCount > 0);
 
-  const text = pdf.textPerPage()
-  t.is(text.length, meta.pageCount)
-})
+  const text = pdf.textPerPage();
+  t.is(text.length, meta.pageCount);
+});
 
 // ── Render + Three-tier cascade tests ────────────────────────────────────────
 
-const chemPdf = readFileSync(join(FIXTURES, 'advanced_organic_chem_presentation_autumn_2014.pdf'))
+const chemPdf = readFileSync(join(FIXTURES, "advanced_organic_chem_presentation_autumn_2014.pdf"));
 
 // ── capabilities ─────────────────────────────────────────────────────────────
 
-test('capabilities — returns ocr and render booleans', (t) => {
-  const caps = capabilities()
-  t.is(typeof caps.ocr, 'boolean', 'ocr should be a boolean')
-  t.is(typeof caps.render, 'boolean', 'render should be a boolean')
-  t.true(caps.ocr, 'ocr should be true in the OCR package')
-  t.log(`capabilities: ocr=${caps.ocr}, render=${caps.render}`)
-})
+test("capabilities — returns ocr and render booleans", (t) => {
+  const caps = capabilities();
+  t.is(typeof caps.ocr, "boolean", "ocr should be a boolean");
+  t.is(typeof caps.render, "boolean", "render should be a boolean");
+  t.true(caps.ocr, "ocr should be true in the OCR package");
+  t.log(`capabilities: ocr=${caps.ocr}, render=${caps.render}`);
+});
 
 // ── PdfDown async render + cascade (only runs if PDFium is available) ────────
 
-const caps = capabilities()
+const caps = capabilities();
 
 if (caps.render) {
-  test('PdfDown — render + cascade on vector-heavy PDF', async (t) => {
-    const pdf = new PdfDown(chemPdf)
+  test("PdfDown — render + cascade on vector-heavy PDF", async (t) => {
+    const pdf = new PdfDown(chemPdf);
 
     const [allPages, autoOnly, lowDpi, highDpi, autoOcr, neverOcr, alwaysOcr] = await Promise.all([
-      pdf.renderPagesAsync({ mode: 'Always' }),
-      pdf.renderPagesAsync({ mode: 'Auto' }),
-      pdf.renderPagesAsync({ mode: 'Auto', dpi: 72 }),
-      pdf.renderPagesAsync({ mode: 'Auto', dpi: 300 }),
-      pdf.textWithOcrPerPageAsync({ render: 'Auto' }),
-      pdf.textWithOcrPerPageAsync({ render: 'Never' }),
-      pdf.textWithOcrPerPageAsync({ render: 'Always' }),
-    ])
+      pdf.renderPagesAsync({ mode: "Always" }),
+      pdf.renderPagesAsync({ mode: "Auto" }),
+      pdf.renderPagesAsync({ mode: "Auto", dpi: 72 }),
+      pdf.renderPagesAsync({ mode: "Auto", dpi: 300 }),
+      pdf.textWithOcrPerPageAsync({ render: "Auto" }),
+      pdf.textWithOcrPerPageAsync({ render: "Never" }),
+      pdf.textWithOcrPerPageAsync({ render: "Always" }),
+    ]);
 
     // renderPagesAsync: all pages (Always mode)
-    t.is(allPages.length, 21)
+    t.is(allPages.length, 21);
     for (const p of allPages) {
-      t.true(p.width > 0)
-      t.true(p.height > 0)
-      t.deepEqual([...p.data.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47])
+      t.true(p.width > 0);
+      t.true(p.height > 0);
+      t.deepEqual([...p.data.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
     }
 
     // renderPagesAsync: Auto mode (only empty pages)
-    t.true(autoOnly.length > 0)
-    t.true(autoOnly.length < 21)
+    t.true(autoOnly.length > 0);
+    t.true(autoOnly.length < 21);
 
     // DPI comparison
-    t.is(lowDpi.length, highDpi.length)
-    t.true(highDpi[0].width > lowDpi[0].width)
-    t.true(highDpi[0].height > lowDpi[0].height)
+    t.is(lowDpi.length, highDpi.length);
+    t.true(highDpi[0].width > lowDpi[0].width);
+    t.true(highDpi[0].height > lowDpi[0].height);
 
     // OCR cascade: Auto
-    t.is(autoOcr.length, 21)
-    t.true(autoOcr.filter((p) => p.source === 'Rendered').length > 0)
-    t.true(autoOcr.filter((p) => p.source === 'Native').length > 0)
+    t.is(autoOcr.length, 21);
+    t.true(autoOcr.filter((p) => p.source === "Rendered").length > 0);
+    t.true(autoOcr.filter((p) => p.source === "Native").length > 0);
 
     // OCR cascade: Never
-    t.is(neverOcr.filter((p) => p.source === 'Rendered').length, 0)
+    t.is(neverOcr.filter((p) => p.source === "Rendered").length, 0);
 
     // OCR cascade: Always
-    t.is(alwaysOcr.filter((p) => p.source === 'Rendered').length, alwaysOcr.length)
-  })
+    t.is(alwaysOcr.filter((p) => p.source === "Rendered").length, alwaysOcr.length);
+  });
 } else {
-  test('render tests skipped — PDFium not available', (t) => {
-    t.log('PDFium library not found; render tests skipped. Set PDFIUM_LIBRARY_PATH to enable.')
-    t.pass()
-  })
+  test("render tests skipped — PDFium not available", (t) => {
+    t.log("PDFium library not found; render tests skipped. Set PDFIUM_LIBRARY_PATH to enable.");
+    t.pass();
+  });
 }
