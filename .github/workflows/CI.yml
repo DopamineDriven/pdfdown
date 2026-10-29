@@ -31,12 +31,19 @@ jobs:
       # Runners ship Yarn 1.x globally, which refuses a packageManager of yarn@4. Enable
       # Corepack before setup-node so its `cache: yarn` probe already resolves Yarn 4.
       - name: Enable Corepack
-        run: npm i -g corepack@latest && corepack enable
         shell: bash
+        # Shims go to a fresh directory prepended to PATH: on Windows the preinstalled
+        # Yarn 1 and Node's bundled corepack.cmd share the npm prefix and collide with
+        # `npm i -g` / `corepack enable` writing into it.
+        run: |
+          npm i -g corepack@latest --force
+          mkdir -p "$RUNNER_TEMP/corepack-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/corepack-bin"
+          echo "$RUNNER_TEMP/corepack-bin" >> "$GITHUB_PATH"
       - name: Setup node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           cache: yarn
       - name: Install
         uses: dtolnay/rust-toolchain@stable
@@ -94,19 +101,26 @@ jobs:
           - host: ubuntu-latest
             target: wasm32-wasip1-threads
             build: yarn build --target wasm32-wasip1-threads
-    name: stable - ${{ matrix.settings.target }} - node@22
+    name: stable - ${{ matrix.settings.target }} - node@26
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v6
       # Runners ship Yarn 1.x globally, which refuses a packageManager of yarn@4. Enable
       # Corepack before setup-node so its `cache: yarn` probe already resolves Yarn 4.
       - name: Enable Corepack
-        run: npm i -g corepack@latest && corepack enable
         shell: bash
+        # Shims go to a fresh directory prepended to PATH: on Windows the preinstalled
+        # Yarn 1 and Node's bundled corepack.cmd share the npm prefix and collide with
+        # `npm i -g` / `corepack enable` writing into it.
+        run: |
+          npm i -g corepack@latest --force
+          mkdir -p "$RUNNER_TEMP/corepack-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/corepack-bin"
+          echo "$RUNNER_TEMP/corepack-bin" >> "$GITHUB_PATH"
       - name: Setup node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           cache: yarn
       - name: Install
         uses: dtolnay/rust-toolchain@stable
@@ -157,7 +171,8 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          - host: macos-latest
+          # macos-latest is arm64; linking the system (Homebrew) Tesseract for x86_64 needs an Intel host
+          - host: macos-15-intel
             target: x86_64-apple-darwin
             build: yarn build:ocr --target x86_64-apple-darwin
           - host: macos-latest
@@ -176,12 +191,19 @@ jobs:
       # Runners ship Yarn 1.x globally, which refuses a packageManager of yarn@4. Enable
       # Corepack before setup-node so its `cache: yarn` probe already resolves Yarn 4.
       - name: Enable Corepack
-        run: npm i -g corepack@latest && corepack enable
         shell: bash
+        # Shims go to a fresh directory prepended to PATH: on Windows the preinstalled
+        # Yarn 1 and Node's bundled corepack.cmd share the npm prefix and collide with
+        # `npm i -g` / `corepack enable` writing into it.
+        run: |
+          npm i -g corepack@latest --force
+          mkdir -p "$RUNNER_TEMP/corepack-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/corepack-bin"
+          echo "$RUNNER_TEMP/corepack-bin" >> "$GITHUB_PATH"
       - name: Setup node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           cache: yarn
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -274,7 +296,7 @@ jobs:
           environment_variables: DEBUG RUSTUP_IO_THREADS
           shell: bash
           run: |
-            sudo pkg install -y -f curl node libnghttp2 npm cmake
+            sudo pkg install -y -f curl node libnghttp2 npm
             sudo npm install -g corepack@latest
             sudo corepack enable
             curl https://sh.rustup.rs -sSf --output rustup.sh
@@ -323,16 +345,24 @@ jobs:
             target: x86_64-apple-darwin
             architecture: x64
         node:
-          - "20"
           - "22"
+          - "24"
+          - "26"
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v6
       # Runners ship Yarn 1.x globally, which refuses a packageManager of yarn@4. Enable
       # Corepack before setup-node so its `cache: yarn` probe already resolves Yarn 4.
       - name: Enable Corepack
-        run: npm i -g corepack@latest && corepack enable
         shell: bash
+        # Shims go to a fresh directory prepended to PATH: on Windows the preinstalled
+        # Yarn 1 and Node's bundled corepack.cmd share the npm prefix and collide with
+        # `npm i -g` / `corepack enable` writing into it.
+        run: |
+          npm i -g corepack@latest --force
+          mkdir -p "$RUNNER_TEMP/corepack-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/corepack-bin"
+          echo "$RUNNER_TEMP/corepack-bin" >> "$GITHUB_PATH"
       - name: Setup node
         uses: actions/setup-node@v6
         with:
@@ -373,16 +403,29 @@ jobs:
           - aarch64-unknown-linux-musl
           - armv7-unknown-linux-gnueabihf
         node:
-          - "20"
           - "22"
+          - "24"
+          - "26"
+        exclude:
+          - target: armv7-unknown-linux-gnueabihf
+            node: "24"
+          - target: armv7-unknown-linux-gnueabihf
+            node: "26"
     runs-on: ${{ contains(matrix.target, 'aarch64') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
       # Runners ship Yarn 1.x globally, which refuses a packageManager of yarn@4. Enable
       # Corepack before setup-node so its `cache: yarn` probe already resolves Yarn 4.
       - name: Enable Corepack
-        run: npm i -g corepack@latest && corepack enable
         shell: bash
+        # Shims go to a fresh directory prepended to PATH: on Windows the preinstalled
+        # Yarn 1 and Node's bundled corepack.cmd share the npm prefix and collide with
+        # `npm i -g` / `corepack enable` writing into it.
+        run: |
+          npm i -g corepack@latest --force
+          mkdir -p "$RUNNER_TEMP/corepack-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/corepack-bin"
+          echo "$RUNNER_TEMP/corepack-bin" >> "$GITHUB_PATH"
       - name: Setup node
         uses: actions/setup-node@v6
         with:
@@ -445,12 +488,19 @@ jobs:
       # Runners ship Yarn 1.x globally, which refuses a packageManager of yarn@4. Enable
       # Corepack before setup-node so its `cache: yarn` probe already resolves Yarn 4.
       - name: Enable Corepack
-        run: npm i -g corepack@latest && corepack enable
         shell: bash
+        # Shims go to a fresh directory prepended to PATH: on Windows the preinstalled
+        # Yarn 1 and Node's bundled corepack.cmd share the npm prefix and collide with
+        # `npm i -g` / `corepack enable` writing into it.
+        run: |
+          npm i -g corepack@latest --force
+          mkdir -p "$RUNNER_TEMP/corepack-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/corepack-bin"
+          echo "$RUNNER_TEMP/corepack-bin" >> "$GITHUB_PATH"
       - name: Setup node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           cache: yarn
       - name: Install dependencies
         run: |
@@ -492,12 +542,19 @@ jobs:
       # Runners ship Yarn 1.x globally, which refuses a packageManager of yarn@4. Enable
       # Corepack before setup-node so its `cache: yarn` probe already resolves Yarn 4.
       - name: Enable Corepack
-        run: npm i -g corepack@latest && corepack enable
         shell: bash
+        # Shims go to a fresh directory prepended to PATH: on Windows the preinstalled
+        # Yarn 1 and Node's bundled corepack.cmd share the npm prefix and collide with
+        # `npm i -g` / `corepack enable` writing into it.
+        run: |
+          npm i -g corepack@latest --force
+          mkdir -p "$RUNNER_TEMP/corepack-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/corepack-bin"
+          echo "$RUNNER_TEMP/corepack-bin" >> "$GITHUB_PATH"
       - name: Setup node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           cache: yarn
           architecture: ${{ matrix.settings.architecture }}
       - name: Install tesseract (Ubuntu)
@@ -576,12 +633,19 @@ jobs:
       # Runners ship Yarn 1.x globally, which refuses a packageManager of yarn@4. Enable
       # Corepack before setup-node so its `cache: yarn` probe already resolves Yarn 4.
       - name: Enable Corepack
-        run: npm i -g corepack@latest && corepack enable
         shell: bash
+        # Shims go to a fresh directory prepended to PATH: on Windows the preinstalled
+        # Yarn 1 and Node's bundled corepack.cmd share the npm prefix and collide with
+        # `npm i -g` / `corepack enable` writing into it.
+        run: |
+          npm i -g corepack@latest --force
+          mkdir -p "$RUNNER_TEMP/corepack-bin"
+          corepack enable --install-directory "$RUNNER_TEMP/corepack-bin"
+          echo "$RUNNER_TEMP/corepack-bin" >> "$GITHUB_PATH"
       - name: Setup node
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           cache: yarn
       - name: Install dependencies
         run: yarn install
