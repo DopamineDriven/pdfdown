@@ -1,6 +1,6 @@
 {
   "name": "@d0paminedriven/pdfdown-ocr",
-  "version": "0.9.9",
+  "version": "0.1.0-",
   "description": "Rust powered PDF extraction for Node with OCR fallback (requires system tesseract).",
   "license": "MIT",
   "repository": {
