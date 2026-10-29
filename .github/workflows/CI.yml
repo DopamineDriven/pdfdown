@@ -162,9 +162,18 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: bindings-${{ matrix.settings.target }}
+          # napi-rs CLI 3.10 `artifacts` needs the whole WASI loader set alongside the .wasm
           path: |
             ${{ env.APP_NAME }}.*.node
             ${{ env.APP_NAME }}.*.wasm
+            index.js
+            browser.js
+            *.wasi*.cjs
+            *.wasi*.d.cts
+            *.wasi*-browser.js
+            *.wasi*-deferred.js
+            *.wasi*-deferred.d.ts
+            wasi-worker*.mjs
           if-no-files-found: error
   build-ocr:
     strategy:
@@ -566,7 +575,8 @@ jobs:
             sudo add-apt-repository -y ppa:alex-p/tesseract-ocr5
             sudo apt-get update
           fi
-          sudo apt-get install -y tesseract-ocr tesseract-ocr-all
+          # the suite only exercises eng; tesseract-ocr-all is 166 packages / 700 MB of wait time
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd
           TESS_PREFIX=$(tesseract --list-langs 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "TESSDATA_PREFIX=${TESS_PREFIX}" >> $GITHUB_ENV
           echo "Tesseract data path: ${TESS_PREFIX}"
