@@ -217,13 +217,19 @@ jobs:
             .cargo-cache
             target/
           key: ocr-${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
-      - name: Install tesseract (Ubuntu 22.04+)
+      - name: Install tesseract (Ubuntu)
         if: runner.os == 'Linux'
+        # Stock apt ships Tesseract 4.1 on 22.04 but 5.x from 24.04 on. The alex-p PPA only
+        # publishes for releases up to 24.04 (no resolute), so add it only where stock is < 5.
         run: |
           sudo apt-get update
-          sudo apt-get install -y software-properties-common
-          sudo add-apt-repository -y ppa:alex-p/tesseract-ocr5
-          sudo apt-get update
+          if apt-cache policy tesseract-ocr | grep -qE 'Candidate: 5\.'; then
+            echo "stock tesseract 5 available on $(. /etc/os-release && echo "$VERSION_CODENAME")"
+          else
+            sudo apt-get install -y software-properties-common
+            sudo add-apt-repository -y ppa:alex-p/tesseract-ocr5
+            sudo apt-get update
+          fi
           sudo apt-get install -y \
             tesseract-ocr tesseract-ocr-eng \
             libtesseract-dev libleptonica-dev \
@@ -552,11 +558,14 @@ jobs:
           architecture: ${{ matrix.settings.architecture }}
       - name: Install tesseract (Ubuntu)
         if: runner.os == 'Linux'
+        # Same rule as build-ocr: the PPA is only needed (and only exists) where stock is < 5.
         run: |
           sudo apt-get update
-          sudo apt-get install -y software-properties-common
-          sudo add-apt-repository -y ppa:alex-p/tesseract-ocr5
-          sudo apt-get update
+          if ! apt-cache policy tesseract-ocr | grep -qE 'Candidate: 5\.'; then
+            sudo apt-get install -y software-properties-common
+            sudo add-apt-repository -y ppa:alex-p/tesseract-ocr5
+            sudo apt-get update
+          fi
           sudo apt-get install -y tesseract-ocr tesseract-ocr-all
           TESS_PREFIX=$(tesseract --list-langs 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "TESSDATA_PREFIX=${TESS_PREFIX}" >> $GITHUB_ENV
