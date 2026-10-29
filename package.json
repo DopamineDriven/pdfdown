@@ -71,6 +71,9 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
+  "resolutions": {
+    "@napi-rs/wasm-runtime": "1.2.5"
+  },
   "lint-staged": {
     "*.@(js|ts|tsx)": [
       "oxlint --fix"
