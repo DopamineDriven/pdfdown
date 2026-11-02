@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "trailingComma": "none",
+  "semi": true,
+  "singleQuote": false,
+  "insertFinalNewline": true,
+  "tabWidth": 2,
+  "useTabs": false,
+  "printWidth": 120,
+  "ignorePatterns": [
+    "index.js",
+    "ocr/index.js",
+    "pdfdown.wasi.cjs",
+    "pdfdown.wasi-browser.js",
+    "wasi-worker.mjs",
+    "wasi-worker-browser.mjs"
+  ]
+}
