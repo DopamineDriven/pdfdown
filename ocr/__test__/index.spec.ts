@@ -8,6 +8,8 @@ import {
   extractTextWithOcrPerPageAsync,
   extractTextPerPage,
   extractImagesPerPage,
+  extractFormFieldsPerPage,
+  pdfDocumentOcr,
   PdfDown,
   capabilities
 } from "../index";
@@ -296,3 +298,12 @@ if (caps.render) {
     t.pass();
   });
 }
+
+test("base API: extractFormFieldsPerPage and documentOcr form aggregates work through OCR package", (t) => {
+  const basic = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/forms/acroform-basic.pdf"));
+  t.is(extractFormFieldsPerPage(basic).length, 11);
+  const doc = pdfDocumentOcr(basic);
+  t.is(doc.totalFormFields, 11);
+  t.deepEqual(doc.formFieldPages, [1]);
+  t.is(doc.form?.fieldCount, 9);
+});

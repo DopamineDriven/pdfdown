@@ -45,7 +45,8 @@
     "test:ocr": "ava --config ocr/ava.config.mjs",
     "preversion": "napi build --platform --no-const-enum && git add .",
     "version": "napi version",
-    "prepare": "husky"
+    "prepare": "husky",
+    "typecheck": "tsc --noEmit --strict --ignoreConfig --module esnext --moduleResolution bundler --types node __test__/forms.types.ts ocr/__test__/forms.types.ts"
   },
   "devDependencies": {
     "@emnapi/core": "2.0.0-alpha.5",

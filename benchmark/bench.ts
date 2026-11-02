@@ -1,7 +1,10 @@
 import { Bench } from "tinybench";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 import {
   extractImagesPerPage,
+  extractFormFieldsPerPage,
   extractImagesPerPageAsync,
   extractTextPerPage,
   extractTextPerPageAsync,
@@ -17,6 +20,18 @@ if (!res.ok) throw new Error(`Failed to fetch PDF: ${res.status} ${res.statusTex
 const pdf = Buffer.from(await res.arrayBuffer());
 
 const b = new Bench();
+
+const FORMS = join(import.meta.dirname, "..", "__test__", "fixtures", "forms");
+const acroformBasic = readFileSync(join(FORMS, "acroform-basic.pdf"));
+const acroformMany = readFileSync(join(FORMS, "acroform-many.pdf"));
+
+b.add("extractFormFieldsPerPage (basic, 11 widgets)", () => {
+  return extractFormFieldsPerPage(acroformBasic);
+});
+
+b.add("extractFormFieldsPerPage (many, 1500 widgets / 30 pages)", () => {
+  return extractFormFieldsPerPage(acroformMany);
+});
 
 b.add("extractTextPerPage (sync)", () => {
   return extractTextPerPage(pdf);

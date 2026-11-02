@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/DopamineDriven/pdfdown/workflows/CI/badge.svg)
 
-Rust-powered PDF extraction for Node.js via [napi-rs](https://napi.rs). Extracts per-page text, images (as PNG), annotations (links, destinations), structured text (with header/footer detection), and metadata from PDF buffers. All extraction is parallelized with [rayon](https://github.com/rayon-rs/rayon) for multi-core performance.
+Rust-powered PDF extraction for Node.js via [napi-rs](https://napi.rs). Extracts per-page text, images (as PNG), annotations (links, destinations), structured text (with header/footer detection), AcroForm fields (read-only, one entry per widget placement), and metadata from PDF buffers. All extraction is parallelized with [rayon](https://github.com/rayon-rs/rayon) for multi-core performance.
 
 An OCR variant is available as [`@d0paminedriven/pdfdown-ocr`](https://www.npmjs.com/package/@d0paminedriven/pdfdown-ocr) for image-only PDF pages (scanned documents, embedded screenshots). It includes all of the APIs below plus Tesseract-based OCR fallback.
 
@@ -29,6 +29,7 @@ export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnn
 export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>;
 export declare function pdfMetadata(buffer: Buffer): PdfMeta;
 export declare function pdfDocument(buffer: Buffer): PdfDocument;
+export declare function extractFormFieldsPerPage(buffer: Buffer): Array<PageFormField>;
 ```
 
 #### Async (libuv thread pool)
@@ -42,6 +43,7 @@ export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<
 export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>;
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>;
 export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>;
+export declare function extractFormFieldsPerPageAsync(buffer: Buffer): Promise<Array<PageFormField>>;
 ```
 
 ### `PdfDown` class
@@ -63,6 +65,8 @@ export declare class PdfDown {
   structuredTextAsync(): Promise<Array<StructuredPageText>>;
   metadataAsync(): Promise<PdfMeta>;
   documentAsync(): Promise<PdfDocument>;
+  formFieldsPerPage(): Array<PageFormField>;
+  formFieldsPerPageAsync(): Promise<Array<PageFormField>>;
 }
 ```
 
@@ -130,6 +134,7 @@ export interface PdfMeta {
   creationDate?: string;
   modificationDate?: string;
   pageBoxes: Array<PageBox>;
+  form?: FormInfo; // present when /AcroForm exists or orphan widgets were found
 }
 
 export interface PdfDocument {
@@ -149,6 +154,93 @@ export interface PdfDocument {
   structuredText: Array<StructuredPageText>;
   images: Array<PageImage>;
   annotations: Array<PageAnnotation>;
+  form?: FormInfo;
+  formFields: Array<PageFormField>; // one entry per widget placement, sorted by page
+  totalFormFields: number; // === formFields.length
+  formFieldPages: Array<number>; // sorted unique pages carrying widgets
+}
+```
+
+### Form field types
+
+`PageFormField` is a discriminated union keyed by `type`: one entry per **widget placement**, so a field shown on two pages yields two entries and a radio group yields one entry per option. Join placements of one logical field on `fieldObjectId`. Presentation data (`/DA`, `/Q`, `/MK`, appearance streams) is deliberately not surfaced: pdfdown reports field data and geometry, never how a viewer should draw it, and it never writes to a form.
+
+```typescript
+export type PageFormField =
+  | { type: "Text"; /* common */ multiline: boolean; password: boolean; comb: boolean; richText: boolean; maxLen?: number }
+  | { type: "Checkbox"; /* common */ onState?: string; exportValue?: string; checked: boolean }
+  | { type: "Radio"; /* common */ onState?: string; exportValue?: string; selected: boolean }
+  | { type: "ComboBox"; /* common */ options: Array<ChoiceOption>; editable: boolean }
+  | { type: "ListBox"; /* common */ options: Array<ChoiceOption>; multiSelect: boolean; values?: Array<string> }
+  | { type: "PushButton" /* common */ }
+  | { type: "Signature"; /* common */ signed: boolean } // signature data present in /V, not cryptographic validation
+  | { type: "Unknown" /* common */ }; // widget annotations no field claims (orphans, or no /AcroForm at all)
+
+// "common" on every variant:
+//   page: number;          // 1-based, like PageText / PageImage / PageAnnotation
+//   rect: Array<number>;   // [x0, y0, x1, y1] PDF user space, same convention as PageAnnotation.rect
+//   objectId: string;      // this widget, "N G obj" like PageImage.objectId ("page P annot I" for an inline dictionary)
+//   fieldObjectId: string; // the logical field; identical on every placement of one field
+//   name: string;          // fully qualified "parent.kid"
+//   partialName: string; widgetIndex: number; widgetCount: number;
+//   value?: string; defaultValue?: string; tooltip?: string; mappingName?: string;
+//   readOnly: boolean; required: boolean; noExport: boolean; hasActions: boolean
+
+export interface ChoiceOption {
+  exportValue: string;
+  displayValue: string;
+}
+
+export interface FormInfo {
+  hasAcroForm: boolean; // /AcroForm present (false when only orphan widgets were found)
+  hasXfa: boolean; // /XFA present; XFA is not parsed
+  needAppearances: boolean;
+  sigFlags: number;
+  fieldCount: number; // logical fields, placed + unplaced; may differ from totalFormFields
+  widgetCount: number; // placements; always equals totalFormFields
+  unplacedFields: Array<UnplacedFormField>; // fields with no widget on any page: data kept, no geometry invented
+  truncated: boolean; // the /Kids depth cap (100) was hit: the result is partial
+  warnings: Array<string>; // dangling references, non-array /Annots, non-dictionary /Kids entries, depth cap
+}
+
+export interface UnplacedFormField {
+  fieldObjectId: string;
+  name: string;
+  partialName: string;
+  type: FormFieldType;
+  value?: string;
+  values?: Array<string>;
+  defaultValue?: string;
+  tooltip?: string;
+  mappingName?: string;
+  options?: Array<ChoiceOption>;
+  maxLen?: number;
+  readOnly: boolean;
+  required: boolean;
+  noExport: boolean;
+  hasActions: boolean;
+  multiline: boolean;
+  password: boolean;
+  comb: boolean;
+  richText: boolean;
+  editable: boolean;
+  multiSelect: boolean;
+  signed: boolean;
+}
+```
+
+Buttons keep the spec's two representations apart: `onState` is the appearance state name from the widget's `/AP /N` (absent, never invented, when there is no appearance dictionary) and `exportValue` is the `/Opt` entry that state maps to. `checked` / `selected` follow `/AS`, then `/V`; `value` always reports `/V`, so a stored value and an appearance state that disagree are both visible.
+
+### Utility types
+
+Every `index.d.ts` starts with a small set of type utilities (`Rm`, `XOR`, `CTR`, `RTC`, `UTR`, `IsExact`, …) and two aliases derived from the generated declarations:
+
+```typescript
+export type FormFieldType = PageFormField["type"]; // "Text" | "Checkbox" | …
+export type FormFieldByType = UTR<PageFormField, "type", true>; // { Text: {…}, Checkbox: {…}, … } without the discriminant
+
+function handle<K extends FormFieldType>(type: K, field: FormFieldByType[K]) {
+  /* … */
 }
 ```
 
@@ -322,6 +414,43 @@ if (meta.pageBoxes.length === 1) {
   }
 }
 ```
+
+#### Extract form fields per page
+
+Read-only. One entry per widget placement, sorted by page, then top-to-bottom, left-to-right. Encrypted PDFs with an empty user password are decrypted on load.
+
+```typescript
+import { readFileSync } from "fs";
+import { extractFormFieldsPerPage, pdfMetadata } from "@d0paminedriven/pdfdown";
+
+const pdf = readFileSync("application.pdf");
+
+for (const field of extractFormFieldsPerPage(pdf)) {
+  switch (field.type) {
+    case "Text":
+      console.log(`p${field.page} ${field.name} = ${field.value ?? ""}`);
+      break;
+    case "Checkbox":
+      console.log(`p${field.page} ${field.name} ${field.checked ? "[x]" : "[ ]"}`);
+      break;
+    case "Radio":
+      if (field.selected) console.log(`p${field.page} ${field.name} -> ${field.exportValue}`);
+      break;
+    default:
+      console.log(`p${field.page} ${field.type} ${field.name}`);
+  }
+}
+
+// Group placements back into logical fields
+const byField = Map.groupBy(extractFormFieldsPerPage(pdf), (f) => f.fieldObjectId);
+
+// Document-level facts: fields without a widget, truncation, warnings
+const form = pdfMetadata(pdf).form;
+if (form?.unplacedFields.length) console.log("hidden fields:", form.unplacedFields.map((u) => u.name));
+if (form?.truncated || form?.warnings.length) console.log("partial extraction:", form.warnings);
+```
+
+`pdfDocument()` carries the same data as `formFields`, `totalFormFields`, `formFieldPages` and `form`, mirroring `images` / `totalImages` / `imagePages`.
 
 ### `PdfDown` class
 

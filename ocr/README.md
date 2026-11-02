@@ -88,6 +88,8 @@ export declare class PdfDown {
   metadataAsync(): Promise<PdfMeta>;
   document(): PdfDocument;
   documentAsync(): Promise<PdfDocument>;
+  formFieldsPerPage(): Array<PageFormField>;
+  formFieldsPerPageAsync(): Promise<Array<PageFormField>>;
 
   // ── OCR methods ──
   textWithOcrPerPage(opts?: OcrOptions): Array<OcrPageText>;
@@ -141,6 +143,10 @@ export interface PdfDocumentOcr {
   structuredText: Array<OcrStructuredPageText>;
   images: Array<PageImage>;
   annotations: Array<PageAnnotation>;
+  form?: FormInfo;
+  formFields: Array<PageFormField>;
+  totalFormFields: number;
+  formFieldPages: Array<number>;
 }
 ```
 
@@ -228,7 +234,7 @@ Both methods extract everything from a PDF in a single call. The difference is h
 | `document()` / `documentAsync()`       | Native PDF text only     | `PdfDocument`    | PDF has selectable text                  |
 | `documentOcr()` / `documentOcrAsync()` | Native with OCR fallback | `PdfDocumentOcr` | PDF may contain scanned/image-only pages |
 
-`PdfDocumentOcr` uses `OcrPageText` (with `source: 'Native' | 'Ocr'`) and `OcrStructuredPageText` (with header/body/footer split plus source) instead of the base `PageText` and `StructuredPageText` types. Images, annotations, and metadata are identical in both.
+`PdfDocumentOcr` uses `OcrPageText` (with `source: 'Native' | 'Ocr'`) and `OcrStructuredPageText` (with header/body/footer split plus source) instead of the base `PageText` and `StructuredPageText` types. Images, annotations, metadata and the read-only AcroForm data (`form`, `formFields`, `totalFormFields`, `formFieldPages`; see the base package docs) are identical in both.
 
 ## How it works
 

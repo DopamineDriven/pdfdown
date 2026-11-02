@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -294,4 +295,26 @@ test("pdfDocumentAsync and PdfDown.document agree on form data", async (t) => {
   t.deepEqual((await pdf.documentAsync()).form, sync.form);
   t.deepEqual(pdf.metadata().form, sync.form);
   t.deepEqual((await pdf.metadataAsync()).form, sync.form);
+});
+
+const hasQpdf = spawnSync("qpdf", ["--version"]).status === 0;
+
+(hasQpdf ? test : test.skip)("qpdf agrees on placed field names, pages and form flags", (t) => {
+  for (const name of ["acroform-basic.pdf", "acroform-inherited.pdf"]) {
+    const ours = extractFormFieldsPerPage(fixture(name));
+    const run = spawnSync("qpdf", ["--json", "--json-key=acroform", join(FIXTURES, name)], { encoding: "utf8" });
+    const theirs = JSON.parse(run.stdout).acroform as {
+      hasacroform: boolean;
+      needappearances: boolean;
+      fields: Array<{ fullname: string; pageposfrom1?: number }>;
+    };
+    const placed = theirs.fields.filter((f) => f.pageposfrom1);
+    t.deepEqual(
+      ours.map((f) => `${f.page}:${f.name}`).sort(),
+      placed.map((f) => `${f.pageposfrom1}:${f.fullname}`).sort()
+    );
+    const form = pdfMetadata(fixture(name)).form;
+    t.is(form?.hasAcroForm, theirs.hasacroform);
+    t.is(form?.needAppearances, theirs.needappearances);
+  }
 });
