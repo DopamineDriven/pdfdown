@@ -59,23 +59,14 @@ This package exports everything from `@d0paminedriven/pdfdown` (text, images, an
 
 ```typescript
 // Per-page OCR text extraction
-export declare function extractTextWithOcrPerPage(
-  buffer: Buffer,
-  opts?: OcrOptions,
-): Array<OcrPageText>;
+export declare function extractTextWithOcrPerPage(buffer: Buffer, opts?: OcrOptions): Array<OcrPageText>;
 
-export declare function extractTextWithOcrPerPageAsync(
-  buffer: Buffer,
-  opts?: OcrOptions,
-): Promise<Array<OcrPageText>>;
+export declare function extractTextWithOcrPerPageAsync(buffer: Buffer, opts?: OcrOptions): Promise<Array<OcrPageText>>;
 
 // Full document extraction with OCR text fallback
 export declare function pdfDocumentOcr(buffer: Buffer, opts?: OcrOptions): PdfDocumentOcr;
 
-export declare function pdfDocumentOcrAsync(
-  buffer: Buffer,
-  opts?: OcrOptions,
-): Promise<PdfDocumentOcr>;
+export declare function pdfDocumentOcrAsync(buffer: Buffer, opts?: OcrOptions): Promise<PdfDocumentOcr>;
 ```
 
 ### `PdfDown` class (includes OCR methods)
@@ -111,7 +102,7 @@ export declare class PdfDown {
 ```typescript
 export const enum TextSource {
   Native = "Native",
-  Ocr = "Ocr",
+  Ocr = "Ocr"
 }
 
 export interface OcrPageText {
@@ -213,7 +204,7 @@ const pdf = new PdfDown(await readFile("scanned-document.pdf"));
 
 const [ocrText, images] = await Promise.all([
   pdf.textWithOcrPerPageAsync({ minTextLength: 10 }),
-  pdf.imagesPerPageAsync(),
+  pdf.imagesPerPageAsync()
 ]);
 
 const imagesByPage = Map.groupBy(images, (img) => img.page);
@@ -222,7 +213,7 @@ for (const { page, text, source } of ocrText) {
   const pageImages = (imagesByPage.get(page) ?? []).map((img) => ({
     dataUrl: `data:image/png;base64,${img.data.toString("base64")}`,
     width: img.width,
-    height: img.height,
+    height: img.height
   }));
   // Send { page, text, source, images: pageImages } to your embedding pipeline
 }

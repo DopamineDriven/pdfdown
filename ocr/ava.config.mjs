@@ -4,7 +4,7 @@ export default {
   timeout: "2m",
   workerThreads: false,
   environmentVariables: {
-    OXC_TSCONFIG_PATH: "./ocr/tsconfig.json",
+    OXC_TSCONFIG_PATH: "./ocr/tsconfig.json"
   },
-  nodeArguments: ["--import", "@oxc-node/core/register"],
+  nodeArguments: ["--import", "@oxc-node/core/register"]
 };

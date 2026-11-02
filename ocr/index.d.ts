@@ -41,9 +41,7 @@ export interface Capabilities {
 
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>;
 
-export declare function extractAnnotationsPerPageAsync(
-  buffer: Buffer,
-): Promise<Array<PageAnnotation>>;
+export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>;
 
 export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>;
 
@@ -51,9 +49,7 @@ export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array
 
 export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>;
 
-export declare function extractStructuredTextPerPageAsync(
-  buffer: Buffer,
-): Promise<Array<StructuredPageText>>;
+export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>;
 
 export declare function extractTextPerPage(buffer: Buffer): Array<PageText>;
 
@@ -61,12 +57,12 @@ export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<P
 
 export declare function extractTextWithOcrPerPage(
   buffer: Buffer,
-  opts?: OcrOptions | undefined | null,
+  opts?: OcrOptions | undefined | null
 ): Array<OcrPageText>;
 
 export declare function extractTextWithOcrPerPageAsync(
   buffer: Buffer,
-  opts?: OcrOptions | undefined | null,
+  opts?: OcrOptions | undefined | null
 ): Promise<Array<OcrPageText>>;
 
 export interface OcrOptions {
@@ -160,10 +156,7 @@ export interface PdfDocument {
 
 export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>;
 
-export declare function pdfDocumentOcr(
-  buffer: Buffer,
-  opts?: OcrOptions | undefined | null,
-): PdfDocumentOcr;
+export declare function pdfDocumentOcr(buffer: Buffer, opts?: OcrOptions | undefined | null): PdfDocumentOcr;
 
 export interface PdfDocumentOcr {
   version: string;
@@ -186,7 +179,7 @@ export interface PdfDocumentOcr {
 
 export declare function pdfDocumentOcrAsync(
   buffer: Buffer,
-  opts?: OcrOptions | undefined | null,
+  opts?: OcrOptions | undefined | null
 ): Promise<PdfDocumentOcr>;
 
 export interface PdfMeta {
@@ -221,7 +214,7 @@ export interface RenderOptions {
 
 export declare function renderPagesAsync(
   buffer: Buffer,
-  opts?: RenderOptions | undefined | null,
+  opts?: RenderOptions | undefined | null
 ): Promise<Array<RenderedPage>>;
 
 export interface StructuredPageText {

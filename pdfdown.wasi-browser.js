@@ -2,74 +2,71 @@ import {
   createOnMessage as __wasmCreateOnMessageForFsProxy,
   getDefaultContext as __emnapiGetDefaultContext,
   instantiateNapiModuleSync as __emnapiInstantiateNapiModuleSync,
-  WASI as __WASI,
-} from '@napi-rs/wasm-runtime'
-
-
+  WASI as __WASI
+} from "@napi-rs/wasm-runtime";
 
 const __wasi = new __WASI({
-  version: 'preview1',
-})
+  version: "preview1"
+});
 
-const __wasmUrl = new URL('./pdfdown.wasm32-wasi.wasm', import.meta.url).href
-const __emnapiContext = __emnapiGetDefaultContext()
-
+const __wasmUrl = new URL("./pdfdown.wasm32-wasi.wasm", import.meta.url).href;
+const __emnapiContext = __emnapiGetDefaultContext();
 
 const __sharedMemory = new WebAssembly.Memory({
   initial: 4000,
   maximum: 65536,
-  shared: true,
-})
+  shared: true
+});
 
-const __wasmFile = await fetch(__wasmUrl).then((res) => res.arrayBuffer())
+const __wasmFile = await fetch(__wasmUrl).then((res) => res.arrayBuffer());
 
 const {
   instance: __napiInstance,
   module: __wasiModule,
-  napiModule: __napiModule,
+  napiModule: __napiModule
 } = __emnapiInstantiateNapiModuleSync(__wasmFile, {
   context: __emnapiContext,
   asyncWorkPoolSize: 4,
   wasi: __wasi,
   onCreateWorker() {
-    const worker = new Worker(new URL('./wasi-worker-browser.mjs', import.meta.url), {
-      type: 'module',
-    })
+    const worker = new Worker(new URL("./wasi-worker-browser.mjs", import.meta.url), {
+      type: "module"
+    });
 
-    return worker
+    return worker;
   },
   overwriteImports(importObject) {
     importObject.env = {
       ...importObject.env,
       ...importObject.napi,
       ...importObject.emnapi,
-      memory: __sharedMemory,
-    }
-    return importObject
+      memory: __sharedMemory
+    };
+    return importObject;
   },
   beforeInit({ instance }) {
     for (const name of Object.keys(instance.exports)) {
-      if (name.startsWith('__napi_register__')) {
-        instance.exports[name]()
+      if (name.startsWith("__napi_register__")) {
+        instance.exports[name]();
       }
     }
-  },
-})
-export default __napiModule.exports
-export const PdfDown = __napiModule.exports.PdfDown
-export const BoxType = __napiModule.exports.BoxType
-export const capabilities = __napiModule.exports.capabilities
-export const extractAnnotationsPerPage = __napiModule.exports.extractAnnotationsPerPage
-export const extractAnnotationsPerPageAsync = __napiModule.exports.extractAnnotationsPerPageAsync
-export const extractImagesPerPage = __napiModule.exports.extractImagesPerPage
-export const extractImagesPerPageAsync = __napiModule.exports.extractImagesPerPageAsync
-export const extractStructuredTextPerPage = __napiModule.exports.extractStructuredTextPerPage
-export const extractStructuredTextPerPageAsync = __napiModule.exports.extractStructuredTextPerPageAsync
-export const extractTextPerPage = __napiModule.exports.extractTextPerPage
-export const extractTextPerPageAsync = __napiModule.exports.extractTextPerPageAsync
-export const pdfDocument = __napiModule.exports.pdfDocument
-export const pdfDocumentAsync = __napiModule.exports.pdfDocumentAsync
-export const pdfMetadata = __napiModule.exports.pdfMetadata
-export const pdfMetadataAsync = __napiModule.exports.pdfMetadataAsync
-export const RenderMode = __napiModule.exports.RenderMode
-export const renderPagesAsync = __napiModule.exports.renderPagesAsync
+  }
+});
+export default __napiModule.exports;
+export const PdfDown = __napiModule.exports.PdfDown;
+export const BoxType = __napiModule.exports.BoxType;
+export const capabilities = __napiModule.exports.capabilities;
+export const extractAnnotationsPerPage = __napiModule.exports.extractAnnotationsPerPage;
+export const extractAnnotationsPerPageAsync = __napiModule.exports.extractAnnotationsPerPageAsync;
+export const extractImagesPerPage = __napiModule.exports.extractImagesPerPage;
+export const extractImagesPerPageAsync = __napiModule.exports.extractImagesPerPageAsync;
+export const extractStructuredTextPerPage = __napiModule.exports.extractStructuredTextPerPage;
+export const extractStructuredTextPerPageAsync = __napiModule.exports.extractStructuredTextPerPageAsync;
+export const extractTextPerPage = __napiModule.exports.extractTextPerPage;
+export const extractTextPerPageAsync = __napiModule.exports.extractTextPerPageAsync;
+export const pdfDocument = __napiModule.exports.pdfDocument;
+export const pdfDocumentAsync = __napiModule.exports.pdfDocumentAsync;
+export const pdfMetadata = __napiModule.exports.pdfMetadata;
+export const pdfMetadataAsync = __napiModule.exports.pdfMetadataAsync;
+export const RenderMode = __napiModule.exports.RenderMode;
+export const renderPagesAsync = __napiModule.exports.renderPagesAsync;

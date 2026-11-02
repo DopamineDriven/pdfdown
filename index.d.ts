@@ -37,9 +37,7 @@ export interface Capabilities {
 
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>;
 
-export declare function extractAnnotationsPerPageAsync(
-  buffer: Buffer,
-): Promise<Array<PageAnnotation>>;
+export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>;
 
 export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>;
 
@@ -47,9 +45,7 @@ export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array
 
 export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>;
 
-export declare function extractStructuredTextPerPageAsync(
-  buffer: Buffer,
-): Promise<Array<StructuredPageText>>;
+export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>;
 
 export declare function extractTextPerPage(buffer: Buffer): Array<PageText>;
 
@@ -155,7 +151,7 @@ export interface RenderOptions {
 
 export declare function renderPagesAsync(
   buffer: Buffer,
-  opts?: RenderOptions | undefined | null,
+  opts?: RenderOptions | undefined | null
 ): Promise<Array<RenderedPage>>;
 
 export interface StructuredPageText {
