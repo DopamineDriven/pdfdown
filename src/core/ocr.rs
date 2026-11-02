@@ -72,34 +72,66 @@ fn get_tessdata_prefix() -> Option<&'static str> {
     .as_deref()
 }
 
-/// OCR a single DynamicImage and return extracted text.
-fn ocr_dynamic_image(img: &DynamicImage, lang: &str) -> String {
+/// Mean Tesseract confidence (0..100) below which a page that did produce
+/// text is OCR'd again rotated. Upright copier scans score 80-95; a landscape
+/// page scanned in portrait scores 35-45 and comes back as punctuation soup.
+const ROTATION_RETRY_CONFIDENCE: f32 = 55.0;
+
+/// Rotations tried, in order, when the upright pass scores too low. Most
+/// rotated scans are a landscape sheet fed in portrait, so the quarter turns
+/// come first and the half turn is only tried when neither of them is good.
+const ROTATIONS: [u32; 3] = [90, 270, 180];
+
+fn rotate_image(img: &DynamicImage, degrees: u32) -> DynamicImage {
+  match degrees {
+    90 => img.rotate90(),
+    180 => img.rotate180(),
+    270 => img.rotate270(),
+    _ => img.clone(),
+  }
+}
+
+/// Plain-text OCR of one image plus Tesseract's mean confidence (0..100).
+fn ocr_image_text(img: &DynamicImage, lang: &str) -> (String, f32) {
   let datapath = get_tessdata_prefix().unwrap_or("");
   let rgb = img.to_rgb8();
   let (w, h) = rgb.dimensions();
   let pixels = rgb.as_raw();
 
   let tess = tesseract_rs::TesseractAPI::new();
-  if tess.init(datapath, lang).is_err() {
-    return String::new();
-  }
-  if tess
-    .set_image(pixels, w as i32, h as i32, 3, (w * 3) as i32)
-    .is_err()
+  if tess.init(datapath, lang).is_err()
+    || tess
+      .set_image(pixels, w as i32, h as i32, 3, (w * 3) as i32)
+      .is_err()
   {
-    return String::new();
+    return (String::new(), 0.0);
   }
-  match tess.get_utf8_text() {
-    Ok(text) => {
-      let trimmed = text.trim();
-      if trimmed.is_empty() {
-        String::new()
-      } else {
-        trimmed.to_string()
-      }
+  let text = tess
+    .get_utf8_text()
+    .map(|t| t.trim().to_string())
+    .unwrap_or_default();
+  let conf = tess.mean_text_conf().unwrap_or(0) as f32;
+  (text, conf)
+}
+
+/// OCR a single DynamicImage and return extracted text, retrying rotated when
+/// the upright pass produced low-confidence text.
+fn ocr_dynamic_image(img: &DynamicImage, lang: &str) -> String {
+  let (text, conf) = ocr_image_text(img, lang);
+  if text.is_empty() || conf >= ROTATION_RETRY_CONFIDENCE {
+    return text;
+  }
+  let mut best = (text, conf);
+  for degrees in ROTATIONS {
+    let candidate = ocr_image_text(&rotate_image(img, degrees), lang);
+    if candidate.1 > best.1 {
+      best = candidate;
     }
-    Err(_) => String::new(),
+    if best.1 >= ROTATION_RETRY_CONFIDENCE {
+      break;
+    }
   }
+  best.0
 }
 
 fn ocr_page_images(doc: &Document, page_id: ObjectId, lang: &str) -> String {
@@ -281,6 +313,43 @@ struct OcrWord {
   confidence: f32,
 }
 
+fn mean_confidence(words: &[OcrWord]) -> f32 {
+  if words.is_empty() {
+    0.0
+  } else {
+    words.iter().map(|w| w.confidence).sum::<f32>() / words.len() as f32
+  }
+}
+
+/// Word boxes in the frame where the text reads upright: the image as given,
+/// or rotated by the returned angle (clockwise degrees) when the upright pass
+/// scored below [`ROTATION_RETRY_CONFIDENCE`] and a rotation scored higher.
+/// Boxes are in pixels of the rotated image, whose size is also returned.
+fn ocr_words_best_orientation(
+  img: &DynamicImage,
+  lang: &str,
+  ppi: Option<i32>,
+) -> (Vec<OcrWord>, u32, (u32, u32)) {
+  let upright = ocr_dynamic_image_words(img, lang, ppi);
+  let conf = mean_confidence(&upright);
+  if upright.is_empty() || conf >= ROTATION_RETRY_CONFIDENCE {
+    return (upright, 0, (img.width(), img.height()));
+  }
+  let mut best = (upright, 0, (img.width(), img.height()), conf);
+  for degrees in ROTATIONS {
+    let rotated = rotate_image(img, degrees);
+    let words = ocr_dynamic_image_words(&rotated, lang, ppi);
+    let conf = mean_confidence(&words);
+    if conf > best.3 {
+      best = (words, degrees, (rotated.width(), rotated.height()), conf);
+    }
+    if best.3 >= ROTATION_RETRY_CONFIDENCE {
+      break;
+    }
+  }
+  (best.0, best.1, best.2)
+}
+
 /// OCR an image and return every recognised word with its pixel box.
 fn ocr_dynamic_image_words(img: &DynamicImage, lang: &str, ppi: Option<i32>) -> Vec<OcrWord> {
   use tesseract_rs::TessPageIteratorLevel;
@@ -358,11 +427,24 @@ fn map_ocr_words(words: Vec<OcrWord>, img_w: u32, img_h: u32, dest: [f64; 4]) ->
 
 /// Tier 2: OCR the page's embedded raster images and place each word through
 /// the image's `Do` placement from the native pass.
+/// The rectangle an upright-frame image maps onto: the placement itself, or,
+/// after a quarter turn, a rectangle of the placement's height × width anchored
+/// at the same corner so the upright text keeps the placement's scale.
+fn upright_dest(dest: [f64; 4], rotation: u32) -> [f64; 4] {
+  if rotation == 90 || rotation == 270 {
+    let (w, h) = (dest[2] - dest[0], dest[3] - dest[1]);
+    [dest[0], dest[1], dest[0] + h, dest[1] + w]
+  } else {
+    dest
+  }
+}
+
 fn ocr_page_image_words(
   doc: &Document,
   page_id: ObjectId,
   lang: &str,
   placements: &[PlacedImage],
+  rotation: &mut u32,
   warnings: &mut Vec<String>,
 ) -> Vec<Word> {
   let mut out = Vec::new();
@@ -383,12 +465,18 @@ fn ocr_page_image_words(
         placed.len()
       ));
     }
-    let words = ocr_dynamic_image_words(&img, lang, None);
+    let (words, degrees, (w, h)) = ocr_words_best_orientation(&img, lang, None);
+    if degrees != 0 {
+      warnings.push(format!(
+        "image {name}: text reads upright after a {degrees}° turn; its words are in that frame"
+      ));
+      *rotation = degrees;
+    }
     out.extend(map_ocr_words(
       words,
-      img.width(),
-      img.height(),
-      [first.x0, first.y0, first.x1, first.y1],
+      w,
+      h,
+      upright_dest([first.x0, first.y0, first.x1, first.y1], degrees),
     ));
   }
   out
@@ -402,6 +490,7 @@ fn render_page_words(
   dpi: u32,
   lang: &str,
   geo: &crate::core::layout::PageGeometry,
+  rotation: &mut u32,
   warnings: &mut Vec<String>,
 ) -> Option<Vec<Word>> {
   if !render::is_pdfium_available() {
@@ -415,15 +504,30 @@ fn render_page_words(
       geo.rotate
     ));
   }
-  let words = ocr_dynamic_image_words(&img, lang, Some(dpi as i32));
-  Some(map_ocr_words(words, img.width(), img.height(), geo.bbox))
+  let (words, degrees, (w, h)) = ocr_words_best_orientation(&img, lang, Some(dpi as i32));
+  if degrees != 0 {
+    warnings.push(format!(
+      "page {page_num}: text reads upright after a {degrees}° turn; words, width and height are in that frame"
+    ));
+    *rotation = degrees;
+  }
+  Some(map_ocr_words(words, w, h, upright_dest(geo.bbox, degrees)))
 }
 
-fn finish_ocr_layout(mut layout: PageLayout, words: Vec<Word>, source: TextSource) -> PageLayout {
+fn finish_ocr_layout(
+  mut layout: PageLayout,
+  words: Vec<Word>,
+  source: TextSource,
+  rotation: u32,
+) -> PageLayout {
   let (words, lines) = words_to_lines(words, &[]);
   layout.words = words;
   layout.lines = lines;
   layout.source = source;
+  layout.content_rotation = rotation;
+  if rotation == 90 || rotation == 270 {
+    std::mem::swap(&mut layout.width, &mut layout.height);
+  }
   layout
 }
 
@@ -463,15 +567,22 @@ pub(crate) fn extract_layout_with_ocr(
         // Tier 1: native glyph placement (also yields image placements for tier 2).
         let native = page_layout(doc, page_num, page_id);
         let mut warnings = Vec::new();
+        let mut rotation = 0u32;
 
         #[cfg(feature = "render")]
         if render_mode == RENDER_MODE_ALWAYS {
           let geo = page_geometry(doc, page_id);
-          if let Some(words) =
-            render_page_words(&pdf_arc, page_num, render_dpi, lang, &geo, &mut warnings)
-            && !words.is_empty()
+          if let Some(words) = render_page_words(
+            &pdf_arc,
+            page_num,
+            render_dpi,
+            lang,
+            &geo,
+            &mut rotation,
+            &mut warnings,
+          ) && !words.is_empty()
           {
-            let mut out = finish_ocr_layout(native, words, TextSource::Rendered);
+            let mut out = finish_ocr_layout(native, words, TextSource::Rendered, rotation);
             out.warnings.extend(warnings);
             return out;
           }
@@ -482,9 +593,16 @@ pub(crate) fn extract_layout_with_ocr(
         }
 
         // Tier 2: OCR embedded raster images.
-        let words = ocr_page_image_words(doc, page_id, lang, &native.images, &mut warnings);
+        let words = ocr_page_image_words(
+          doc,
+          page_id,
+          lang,
+          &native.images,
+          &mut rotation,
+          &mut warnings,
+        );
         if !words.is_empty() {
-          let mut out = finish_ocr_layout(native, words, TextSource::Ocr);
+          let mut out = finish_ocr_layout(native, words, TextSource::Ocr, rotation);
           out.warnings.extend(warnings);
           return out;
         }
@@ -497,18 +615,24 @@ pub(crate) fn extract_layout_with_ocr(
             || page_has_vector_content(doc, page_id);
           if should_render {
             let geo = page_geometry(doc, page_id);
-            if let Some(words) =
-              render_page_words(&pdf_arc, page_num, render_dpi, lang, &geo, &mut warnings)
-              && !words.is_empty()
+            if let Some(words) = render_page_words(
+              &pdf_arc,
+              page_num,
+              render_dpi,
+              lang,
+              &geo,
+              &mut rotation,
+              &mut warnings,
+            ) && !words.is_empty()
             {
-              let mut out = finish_ocr_layout(native, words, TextSource::Rendered);
+              let mut out = finish_ocr_layout(native, words, TextSource::Rendered, rotation);
               out.warnings.extend(warnings);
               return out;
             }
           }
         }
 
-        let mut out = finish_ocr_layout(native, Vec::new(), TextSource::Ocr);
+        let mut out = finish_ocr_layout(native, Vec::new(), TextSource::Ocr, 0);
         out.warnings.extend(warnings);
         out
       })
@@ -521,6 +645,26 @@ pub(crate) fn extract_layout_with_ocr(
 #[cfg(test)]
 mod layout_tests {
   use super::*;
+
+  #[test]
+  fn quarter_turns_swap_the_destination_rectangle() {
+    assert_eq!(
+      upright_dest([10.0, 20.0, 110.0, 220.0], 90),
+      [10.0, 20.0, 210.0, 120.0]
+    );
+    assert_eq!(
+      upright_dest([10.0, 20.0, 110.0, 220.0], 270),
+      [10.0, 20.0, 210.0, 120.0]
+    );
+    assert_eq!(
+      upright_dest([10.0, 20.0, 110.0, 220.0], 180),
+      [10.0, 20.0, 110.0, 220.0]
+    );
+    assert_eq!(
+      upright_dest([10.0, 20.0, 110.0, 220.0], 0),
+      [10.0, 20.0, 110.0, 220.0]
+    );
+  }
 
   #[test]
   fn pixel_boxes_map_onto_the_destination_rectangle() {

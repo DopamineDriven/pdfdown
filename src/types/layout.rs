@@ -68,6 +68,10 @@ pub struct PageLayout {
   pub height: f64,
   /// `/Rotate`, reported and not applied.
   pub rotate: u32,
+  /// Clockwise degrees (0, 90, 180, 270) the OCR tiers had to turn the raster
+  /// before its text read upright. Words, lines, `width` and `height` are then
+  /// in that upright frame. Always 0 for `Native` pages.
+  pub content_rotation: u32,
   pub source: TextSource,
   pub words: Vec<TextWord>,
   pub lines: Vec<TextLine>,

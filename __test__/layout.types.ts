@@ -24,6 +24,10 @@ const _wordOptional = true satisfies IsExact<
 >;
 const _wordRequired = true satisfies IsExact<keyof OnlyRequired<TextWord>, "text" | "x0" | "y0" | "x1" | "y1" | "line">;
 
+// Page-level fields are all required; contentRotation is a plain number (0 on native pages).
+const _pageRequired = true satisfies IsExact<keyof OnlyOptional<PageLayout>, never>;
+const _contentRotation = true satisfies IsExact<PageLayout["contentRotation"], number>;
+
 // Lines and placements are fully required.
 const _lineRequired = true satisfies IsExact<keyof OnlyOptional<TextLine>, never>;
 const _imageRequired = true satisfies IsExact<keyof OnlyOptional<PlacedImage>, never>;
