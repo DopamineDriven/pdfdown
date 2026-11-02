@@ -12,8 +12,11 @@ mod types;
 
 // Public API types (appear in generated .d.ts)
 pub use types::{
-  BoxType, Capabilities, ChoiceOption, FormInfo, PageAnnotation, PageBox, PageFormField, PageImage,
-  PageText, PdfDocument, PdfMeta, StructuredPageText, UnplacedFormField,
+  AddressField, Attachment, BoxType, Capabilities, ChoiceOption, DateField, DateOrder,
+  EInvoiceStandard, EmbeddedInvoiceXml, FieldSpan, FormInfo, InvoiceDocumentType, InvoiceFields,
+  InvoiceItem, InvoiceOptions, InvoiceResult, InvoiceSource, MoneyField, NumberField,
+  PageAnnotation, PageBox, PageFormField, PageImage, PageText, PaymentDetail, PdfDocument, PdfMeta,
+  StringField, StructuredPageText, TaxDetail, UnplacedFormField,
 };
 
 #[cfg(feature = "ocr")]
@@ -23,7 +26,7 @@ pub use types::{OcrOptions, OcrPageText, OcrStructuredPageText, PdfDocumentOcr, 
 pub use types::{RawRenderedPage, RenderMode, RenderOptions, RenderedPage};
 
 // Internal plumbing (used by Task impls in this file — must be `pub` for napi Task trait)
-pub use types::{RawPageImage, RawPdfDocument};
+pub use types::{RawAttachment, RawPageImage, RawPdfDocument};
 
 #[cfg(feature = "ocr")]
 pub use types::RawPdfDocumentOcr;
@@ -38,9 +41,11 @@ const _: () = {
 
 // ── Shared helpers ──────────────────────────────────────────────
 
+use crate::core::attachments::extract_attachments;
 use crate::core::document::{extract_all, extract_annotations};
 use crate::core::forms::extract_forms;
 use crate::core::images::extract_images_raw;
+use crate::core::invoice::extract_invoice as extract_invoice_impl;
 use crate::core::meta::extract_metadata;
 use crate::core::text::{extract_structured_text, extract_text};
 
@@ -114,6 +119,26 @@ pub fn pdf_metadata(buffer: Buffer) -> Result<PdfMeta> {
 pub fn extract_annotations_per_page(buffer: Buffer) -> Result<Vec<PageAnnotation>> {
   let doc = load_doc(buffer.as_ref())?;
   Ok(extract_annotations(&doc))
+}
+
+/// Every embedded file: `/Names /EmbeddedFiles`, catalog `/AF`, and page `/FileAttachment` annotations.
+#[napi]
+pub fn attachments(buffer: Buffer) -> Result<Vec<Attachment>> {
+  let doc = load_doc(buffer.as_ref())?;
+  Ok(
+    extract_attachments(&doc)
+      .into_iter()
+      .map(Attachment::from)
+      .collect(),
+  )
+}
+
+/// Structured invoice data. This version reads embedded Factur-X / ZUGFeRD /
+/// XRechnung / UBL XML; documents without it return `source: "None"`.
+#[napi]
+pub fn extract_invoice(buffer: Buffer, opts: Option<InvoiceOptions>) -> Result<InvoiceResult> {
+  let doc = load_doc(buffer.as_ref())?;
+  Ok(extract_invoice_impl(&doc, opts.as_ref()))
 }
 
 #[napi]
@@ -392,6 +417,59 @@ pub fn extract_annotations_per_page_async(buffer: Buffer) -> AsyncTask<ExtractAn
   AsyncTask::new(ExtractAnnotationsTask(buffer.to_vec()))
 }
 
+pub struct AttachmentsTask(Vec<u8>);
+
+#[napi]
+impl Task for AttachmentsTask {
+  type Output = Vec<RawAttachment>;
+  type JsValue = Vec<Attachment>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.0)?;
+    Ok(extract_attachments(&doc))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output.into_iter().map(Attachment::from).collect())
+  }
+}
+
+#[napi]
+pub fn attachments_async(buffer: Buffer) -> AsyncTask<AttachmentsTask> {
+  AsyncTask::new(AttachmentsTask(buffer.to_vec()))
+}
+
+pub struct ExtractInvoiceTask {
+  data: Vec<u8>,
+  opts: Option<InvoiceOptions>,
+}
+
+#[napi]
+impl Task for ExtractInvoiceTask {
+  type Output = InvoiceResult;
+  type JsValue = InvoiceResult;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.data)?;
+    Ok(extract_invoice_impl(&doc, self.opts.as_ref()))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+pub fn extract_invoice_async(
+  buffer: Buffer,
+  opts: Option<InvoiceOptions>,
+) -> AsyncTask<ExtractInvoiceTask> {
+  AsyncTask::new(ExtractInvoiceTask {
+    data: buffer.to_vec(),
+    opts,
+  })
+}
+
 #[napi]
 pub fn pdf_metadata_async(buffer: Buffer) -> AsyncTask<PdfMetaTask> {
   AsyncTask::new(PdfMetaTask(buffer.to_vec()))
@@ -628,6 +706,41 @@ impl Task for SharedExtractAnnotationsTask {
 
   fn compute(&mut self) -> Result<Self::Output> {
     Ok(extract_annotations(&self.0))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+pub struct SharedAttachmentsTask(Arc<Document>);
+
+#[napi]
+impl Task for SharedAttachmentsTask {
+  type Output = Vec<RawAttachment>;
+  type JsValue = Vec<Attachment>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(extract_attachments(&self.0))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output.into_iter().map(Attachment::from).collect())
+  }
+}
+
+pub struct SharedInvoiceTask {
+  doc: Arc<Document>,
+  opts: Option<InvoiceOptions>,
+}
+
+#[napi]
+impl Task for SharedInvoiceTask {
+  type Output = InvoiceResult;
+  type JsValue = InvoiceResult;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(extract_invoice_impl(&self.doc, self.opts.as_ref()))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -882,6 +995,32 @@ impl PdfDown {
   #[napi]
   pub fn metadata(&self) -> PdfMeta {
     extract_metadata(&self.doc)
+  }
+
+  #[napi]
+  pub fn attachments(&self) -> Vec<Attachment> {
+    extract_attachments(&self.doc)
+      .into_iter()
+      .map(Attachment::from)
+      .collect()
+  }
+
+  #[napi]
+  pub fn attachments_async(&self) -> AsyncTask<SharedAttachmentsTask> {
+    AsyncTask::new(SharedAttachmentsTask(Arc::clone(&self.doc)))
+  }
+
+  #[napi]
+  pub fn invoice(&self, opts: Option<InvoiceOptions>) -> InvoiceResult {
+    extract_invoice_impl(&self.doc, opts.as_ref())
+  }
+
+  #[napi]
+  pub fn invoice_async(&self, opts: Option<InvoiceOptions>) -> AsyncTask<SharedInvoiceTask> {
+    AsyncTask::new(SharedInvoiceTask {
+      doc: Arc::clone(&self.doc),
+      opts,
+    })
   }
 
   #[napi]

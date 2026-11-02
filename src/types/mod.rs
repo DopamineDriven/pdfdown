@@ -352,4 +352,6 @@ impl From<RawPdfDocumentOcr> for PdfDocumentOcr {
 }
 
 mod forms;
+mod invoice;
 pub use forms::*;
+pub use invoice::*;

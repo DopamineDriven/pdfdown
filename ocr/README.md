@@ -53,7 +53,7 @@ export TESSDATA_PREFIX="/opt/custom/tessdata"
 
 ## API
 
-This package exports everything from `@d0paminedriven/pdfdown` (text, images, annotations, structured text, metadata -- both sync and async), plus the OCR-specific APIs below. See the [base package docs](https://www.npmjs.com/package/@d0paminedriven/pdfdown) for the full base API.
+This package exports everything from `@d0paminedriven/pdfdown` (text, images, annotations, AcroForm fields, attachments, embedded e-invoice extraction, structured text, metadata -- both sync and async), plus the OCR-specific APIs below. `PdfDocumentOcr` carries the same `form`, `formFields`, `totalFormFields` and `formFieldPages` aggregates as `PdfDocument`; form extraction is read-only and needs neither Tesseract nor PDFium. See the [base package docs](https://www.npmjs.com/package/@d0paminedriven/pdfdown) for the full base API.
 
 ### OCR standalone functions
 
@@ -82,6 +82,10 @@ export declare class PdfDown {
   imagesPerPageAsync(): Promise<Array<PageImage>>;
   annotationsPerPage(): Array<PageAnnotation>;
   annotationsPerPageAsync(): Promise<Array<PageAnnotation>>;
+  attachments(): Array<Attachment>;
+  attachmentsAsync(): Promise<Array<Attachment>>;
+  invoice(opts?: InvoiceOptions): InvoiceResult;
+  invoiceAsync(opts?: InvoiceOptions): Promise<InvoiceResult>;
   structuredText(): Array<StructuredPageText>;
   structuredTextAsync(): Promise<Array<StructuredPageText>>;
   metadata(): PdfMeta;
