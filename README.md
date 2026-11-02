@@ -248,11 +248,14 @@ Buttons keep the spec's two representations apart: `onState` is the appearance s
 
 ### Utility types
 
-Every `index.d.ts` starts with a small set of type utilities (`Rm`, `XOR`, `CTR`, `RTC`, `UTR`, `IsExact`, …) and two aliases derived from the generated declarations:
+Every `index.d.ts` starts with a small set of type utilities (`Rm`, `XOR`, `CTR`, `RTC`, `UTR`, `IsExact`, `Equal`, …) and three aliases derived from the generated declarations:
 
 ```typescript
 export type FormFieldType = PageFormField["type"]; // "Text" | "Checkbox" | …
 export type FormFieldByType = UTR<PageFormField, "type", true>; // { Text: {…}, Checkbox: {…}, … } without the discriminant
+export type FormFieldPayload<T extends keyof FormFieldByType = keyof FormFieldByType> = {
+  [P in T]: FormFieldByType[P];
+}[T]; // one or more variants' payloads, by key
 
 function handle<K extends FormFieldType>(type: K, field: FormFieldByType[K]) {
   /* … */
