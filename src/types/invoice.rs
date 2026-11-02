@@ -147,6 +147,26 @@ pub struct PaymentDetail {
   pub routing_number: Option<StringField>,
 }
 
+/// An aircraft or engine the invoice relates to. Maintenance, parts and
+/// program invoices identify the asset by airframe (model, manufacturer serial
+/// number, registration) and/or by engine (model, engine serial number); one
+/// invoice can cover several assets, so `InvoiceFields.aircraft` is a list.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[napi(object)]
+pub struct AircraftReference {
+  /// Airframe model, e.g. "Challenger 350", "Global 6000", "Phenom 300".
+  pub model: Option<StringField>,
+  /// Manufacturer serial number (MSN).
+  pub serial_number: Option<StringField>,
+  /// Registration / tail number, e.g. "N123AB", "C-GXYZ".
+  pub registration: Option<StringField>,
+  /// Engine model, e.g. "BR710", "AE 3007", "PW308C".
+  pub engine_model: Option<StringField>,
+  /// Engine serial number (ESN).
+  pub engine_serial_number: Option<StringField>,
+  pub span: Option<FieldSpan>,
+}
+
 /// Field names mirror the de-facto vocabulary of common invoice extractors so
 /// consumers can swap sources with a thin mapper. Naming only: nothing here
 /// talks to any service.
@@ -181,6 +201,10 @@ pub struct InvoiceFields {
   pub invoice_total: Option<MoneyField>,
   pub amount_due: Option<MoneyField>,
   pub previous_unpaid_balance: Option<MoneyField>,
+  /// MRO work order / shop order the invoice bills against.
+  pub work_order: Option<StringField>,
+  /// Aircraft and engines the invoice relates to; empty when none is identified.
+  pub aircraft: Vec<AircraftReference>,
   pub tax_details: Vec<TaxDetail>,
   pub payment_details: Vec<PaymentDetail>,
   pub items: Vec<InvoiceItem>,

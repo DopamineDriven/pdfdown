@@ -1,4 +1,5 @@
 import type {
+  AircraftReference,
   Attachment,
   EInvoiceStandard,
   InvoiceDocumentType,
@@ -6,7 +7,8 @@ import type {
   InvoiceResult,
   InvoiceSource,
   IsExact,
-  MoneyField
+  MoneyField,
+  StringField
 } from "../index";
 import type { extractInvoice } from "../index";
 
@@ -24,3 +26,7 @@ true satisfies IsExact<NonNullable<InvoiceResult["fields"]["invoiceTotal"]>["val
 true satisfies IsExact<NonNullable<InvoiceResult["fields"]["invoiceTotal"]>["text"], string>;
 true satisfies IsExact<NonNullable<InvoiceResult["fields"]["vendorAddress"]>["lines"], string[]>;
 true satisfies IsExact<NonNullable<InvoiceResult["fields"]["invoiceId"]>["confidence"], number>;
+
+// aviation extension: aircraft references and their engine serials
+true satisfies IsExact<InvoiceResult["fields"]["aircraft"], AircraftReference[]>;
+true satisfies IsExact<AircraftReference["engineSerialNumber"], StringField | undefined>;

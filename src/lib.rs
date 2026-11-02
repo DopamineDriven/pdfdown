@@ -12,12 +12,12 @@ mod types;
 
 // Public API types (appear in generated .d.ts)
 pub use types::{
-  AddressField, Attachment, BoxType, Capabilities, ChoiceOption, DateField, DateOrder,
-  EInvoiceStandard, EmbeddedInvoiceXml, FieldSpan, FormInfo, InvoiceDocumentType, InvoiceFields,
-  InvoiceItem, InvoiceOptions, InvoiceResult, InvoiceSource, MoneyField, NumberField,
-  PageAnnotation, PageBox, PageFormField, PageImage, PageLayout, PageText, PaymentDetail,
-  PdfDocument, PdfMeta, PlacedImage, StringField, StructuredPageText, TaxDetail, TextLine,
-  TextSource, TextWord, UnplacedFormField,
+  AddressField, AircraftReference, Attachment, BoxType, Capabilities, ChoiceOption, DateField,
+  DateOrder, EInvoiceStandard, EmbeddedInvoiceXml, FieldSpan, FormInfo, InvoiceDocumentType,
+  InvoiceFields, InvoiceItem, InvoiceOptions, InvoiceResult, InvoiceSource, MoneyField,
+  NumberField, PageAnnotation, PageBox, PageFormField, PageImage, PageLayout, PageText,
+  PaymentDetail, PdfDocument, PdfMeta, PlacedImage, StringField, StructuredPageText, TaxDetail,
+  TextLine, TextSource, TextWord, UnplacedFormField,
 };
 
 #[cfg(feature = "ocr")]
