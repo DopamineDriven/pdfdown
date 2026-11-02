@@ -392,6 +392,16 @@ export interface TaxDetail {
   base?: MoneyField;
   category?: StringField;
 }
+// Aircraft maintenance, parts and program invoices identify the asset by airframe and/or engine;
+// one invoice may cover several, so `aircraft` is a list.
+export interface AircraftReference {
+  model?: StringField; // "Challenger 350", "Global 6000", ...
+  serialNumber?: StringField; // manufacturer serial number (MSN)
+  registration?: StringField; // tail number, "N123AB"
+  engineModel?: StringField; // "BR710", "AE 3007", ...
+  engineSerialNumber?: StringField; // ESN
+  span?: FieldSpan;
+}
 export interface PaymentDetail {
   iban?: StringField;
   swift?: StringField;
@@ -429,6 +439,8 @@ export interface InvoiceFields {
   invoiceTotal?: MoneyField;
   amountDue?: MoneyField;
   previousUnpaidBalance?: MoneyField;
+  workOrder?: StringField; // MRO work / shop order the invoice bills against
+  aircraft: Array<AircraftReference>;
   taxDetails: Array<TaxDetail>;
   paymentDetails: Array<PaymentDetail>;
   items: Array<InvoiceItem>;
