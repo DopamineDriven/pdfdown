@@ -1,5 +1,5 @@
 //! Generates the AcroForm test fixtures under `__test__/fixtures/forms/` (plan: notes/phase-1.md,
-//! Task 5). Deterministic, pure lopdf, our own code. Re-run with `cargo run --example gen_fixtures`
+//! Task 5) and the e-invoice attachment fixtures under `__test__/fixtures/einvoice/`. Deterministic, pure lopdf, our own code. Re-run with `cargo run --example gen_fixtures`
 //! and commit the output together with any test that depends on it.
 
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, StringFormat, dictionary};
@@ -32,6 +32,8 @@ struct Pdf {
   page_ids: Vec<ObjectId>,
   page_annots: Vec<Vec<Object>>,
   indirect_annots: Vec<bool>,
+  /// Extra catalog entries (`/Names`, `/AF`, …) merged in by `finish`.
+  catalog_extra: Dictionary,
 }
 
 impl Pdf {
@@ -45,6 +47,7 @@ impl Pdf {
       page_ids,
       page_annots: vec![Vec::new(); page_count],
       indirect_annots: vec![false; page_count],
+      catalog_extra: Dictionary::new(),
     }
   }
 
@@ -135,6 +138,8 @@ impl Pdf {
     if let Some(af) = acroform {
       catalog.set("AcroForm", af);
     }
+    let extra = std::mem::take(&mut self.catalog_extra);
+    catalog.extend(&extra);
     let catalog_id = self.add(catalog);
     self.doc.trailer.set("Root", Object::Reference(catalog_id));
     self.doc.save(path).expect("write fixture");
@@ -435,6 +440,164 @@ fn dangling(out: &Path) {
   );
 }
 
+// ── Embedded files ────────────────────────────────────────────────
+
+impl Pdf {
+  /// An embedded file stream plus its file specification; returns the spec id.
+  fn embedded_file(
+    &mut self,
+    name: &str,
+    mime: &str,
+    data: &[u8],
+    relationship: Option<&str>,
+    description: Option<&str>,
+    compress: bool,
+  ) -> ObjectId {
+    let mut stream = Stream::new(
+      dictionary! {
+        "Type" => "EmbeddedFile",
+        "Subtype" => Object::Name(mime.as_bytes().to_vec()),
+        "Params" => Object::Dictionary(dictionary! { "Size" => data.len() as i64 }),
+      },
+      data.to_vec(),
+    );
+    if compress {
+      stream.compress().expect("compress embedded file");
+    }
+    let stream_id = self.doc.add_object(stream);
+    let mut spec = dictionary! {
+      "Type" => "Filespec",
+      "F" => s(name),
+      "UF" => lopdf::text_string(name),
+      "EF" => Object::Dictionary(dictionary! {
+        "F" => Object::Reference(stream_id),
+        "UF" => Object::Reference(stream_id),
+      }),
+    };
+    if let Some(r) = relationship {
+      spec.set("AFRelationship", r);
+    }
+    if let Some(d) = description {
+      spec.set("Desc", s(d));
+    }
+    self.doc.add_object(spec)
+  }
+
+  /// `/Names /EmbeddedFiles` as a flat leaf, plus optional catalog `/AF`.
+  fn embedded_files_leaf(&mut self, entries: &[(&str, ObjectId)], af: &[ObjectId]) {
+    let mut names = Vec::new();
+    for (name, id) in entries {
+      names.push(s(name));
+      names.push(Object::Reference(*id));
+    }
+    let tree = Object::Dictionary(dictionary! { "Names" => names });
+    self.catalog_extra.set(
+      "Names",
+      Object::Dictionary(dictionary! { "EmbeddedFiles" => tree }),
+    );
+    if !af.is_empty() {
+      let af: Vec<Object> = af.iter().map(|id| Object::Reference(*id)).collect();
+      self.catalog_extra.set("AF", Object::Array(af));
+    }
+  }
+
+  /// `/Names /EmbeddedFiles` as a root with `/Kids`, one leaf per entry.
+  fn embedded_files_kids(&mut self, entries: &[(&str, ObjectId)]) {
+    let mut kids = Vec::new();
+    for (name, id) in entries {
+      let leaf = self.doc.add_object(dictionary! {
+        "Limits" => vec![s(name), s(name)],
+        "Names" => vec![s(name), Object::Reference(*id)],
+      });
+      kids.push(Object::Reference(leaf));
+    }
+    let root = self.doc.add_object(dictionary! { "Kids" => kids });
+    self.catalog_extra.set(
+      "Names",
+      Object::Dictionary(dictionary! { "EmbeddedFiles" => Object::Reference(root) }),
+    );
+  }
+
+  /// A `/FileAttachment` annotation on `page` pointing at `spec`.
+  fn file_attachment_annot(&mut self, page: usize, spec: ObjectId) {
+    let annot = self.doc.add_object(dictionary! {
+      "Type" => "Annot",
+      "Subtype" => "FileAttachment",
+      "Rect" => rect(500, 700, 520, 720),
+      "F" => 4,
+      "Name" => "Paperclip",
+      "FS" => Object::Reference(spec),
+    });
+    self.page_annots[page].push(Object::Reference(annot));
+  }
+}
+
+/// Factur-X: CII XML as both `/AF` associated file and `/EmbeddedFiles` entry,
+/// FlateDecode-compressed, `/AFRelationship /Alternative`.
+fn facturx_minimal(out: &Path) {
+  let xml = std::fs::read(out.join("cii-sample.xml")).expect("cii sample");
+  let mut p = Pdf::new(1);
+  let spec = p.embedded_file(
+    "factur-x.xml",
+    "text/xml",
+    &xml,
+    Some("Alternative"),
+    Some("Factur-X invoice"),
+    true,
+  );
+  p.embedded_files_leaf(&[("factur-x.xml", spec)], &[spec]);
+  p.finish(None, &out.join("facturx-minimal.pdf"));
+}
+
+/// UBL invoice reachable only through a `/Kids` name tree, next to a plain text
+/// attachment, plus a CSV attached as a page-2 `/FileAttachment` annotation.
+fn ubl_attachments(out: &Path) {
+  let xml = std::fs::read(out.join("ubl-sample.xml")).expect("ubl sample");
+  let mut p = Pdf::new(2);
+  let inv = p.embedded_file(
+    "invoice.xml",
+    "application/xml",
+    &xml,
+    Some("Data"),
+    None,
+    false,
+  );
+  let readme = p.embedded_file(
+    "readme.txt",
+    "text/plain",
+    b"Supporting documents for UBL-77.\n",
+    None,
+    Some("Cover note"),
+    false,
+  );
+  let csv = p.embedded_file(
+    "notes.csv",
+    "text/csv",
+    b"line,qty\n1,10\n",
+    None,
+    None,
+    false,
+  );
+  p.embedded_files_kids(&[("invoice.xml", inv), ("readme.txt", readme)]);
+  p.file_attachment_annot(1, csv);
+  p.finish(None, &out.join("ubl-attachments.pdf"));
+}
+
+/// An e-invoice attachment that is not well-formed XML.
+fn einvoice_broken(out: &Path) {
+  let mut p = Pdf::new(1);
+  let spec = p.embedded_file(
+    "factur-x.xml",
+    "text/xml",
+    b"<rsm:CrossIndustryInvoice><ram:ID>oops",
+    Some("Alternative"),
+    None,
+    false,
+  );
+  p.embedded_files_leaf(&[("factur-x.xml", spec)], &[spec]);
+  p.finish(None, &out.join("einvoice-broken.pdf"));
+}
+
 fn main() {
   let out = PathBuf::from(
     std::env::args()
@@ -449,4 +612,14 @@ fn main() {
   many(&out);
   hostile(&out);
   dangling(&out);
+
+  // The e-invoice fixtures live next to the forms directory and read their XML samples from it.
+  let einvoice = out
+    .parent()
+    .unwrap_or_else(|| Path::new("__test__/fixtures"))
+    .join("einvoice");
+  std::fs::create_dir_all(&einvoice).expect("einvoice fixture dir");
+  facturx_minimal(&einvoice);
+  ubl_attachments(&einvoice);
+  einvoice_broken(&einvoice);
 }

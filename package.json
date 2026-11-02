@@ -46,7 +46,7 @@
     "preversion": "napi build --platform --no-const-enum && git add .",
     "version": "napi version",
     "prepare": "husky",
-    "typecheck": "tsgo --noEmit --strict --ignoreConfig --module esnext --moduleResolution bundler --types node __test__/forms.types.ts ocr/__test__/forms.types.ts"
+    "typecheck": "tsgo --noEmit --strict --ignoreConfig --module esnext --moduleResolution bundler --types node __test__/forms.types.ts __test__/invoice.types.ts ocr/__test__/forms.types.ts ocr/__test__/invoice.types.ts"
   },
   "devDependencies": {
     "@ava/typescript": "^7.0.0",
