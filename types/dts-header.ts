@@ -76,3 +76,15 @@ export type FormFieldType = PageFormField["type"];
 
 /** Variant lookup by discriminant, with the `type` key stripped. */
 export type FormFieldByType = UTR<PageFormField, "type", true>;
+
+/**
+ * Payload of one or more variants, selected by discriminant. Pass a single key
+ * for that variant's fields, or a union of keys for the union of their payloads.
+ *
+ * @example
+ * type Sig = FormFieldPayload<"Signature">;              // { signed: boolean; page: number; ... }
+ * type Buttons = FormFieldPayload<"Checkbox" | "Radio">; // either payload
+ */
+export type FormFieldPayload<T extends keyof FormFieldByType = keyof FormFieldByType> = {
+  [P in T]: FormFieldByType[P];
+}[T];

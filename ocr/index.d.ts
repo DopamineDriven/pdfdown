@@ -78,6 +78,18 @@ export type FormFieldType = PageFormField["type"];
 export type FormFieldByType = UTR<PageFormField, "type", true>;
 
 /**
+ * Payload of one or more variants, selected by discriminant. Pass a single key
+ * for that variant's fields, or a union of keys for the union of their payloads.
+ *
+ * @example
+ * type Sig = FormFieldPayload<"Signature">;              // { signed: boolean; page: number; ... }
+ * type Buttons = FormFieldPayload<"Checkbox" | "Radio">; // either payload
+ */
+export type FormFieldPayload<T extends keyof FormFieldByType = keyof FormFieldByType> = {
+  [P in T]: FormFieldByType[P];
+}[T];
+
+/**
  * Which binding artifact the generated loader actually loaded: `'native'` for
  * a native addon, otherwise the `platformArchABI` of the WASI flavor. Every
  * flavor napi-rs can build is listed, because `NAPI_RS_NATIVE_LIBRARY_PATH`

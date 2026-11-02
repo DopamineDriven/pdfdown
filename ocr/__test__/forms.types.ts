@@ -1,7 +1,15 @@
 // Type-level assertions over the generated declarations. Not an ava spec:
 // checked by `yarn typecheck` (tsc --noEmit). Flip a literal to see it fail.
 
-import type { FormFieldByType, FormFieldType, IsExact, PageFormField, Rm, UnplacedFormField } from "../index";
+import type {
+  FormFieldByType,
+  FormFieldPayload,
+  FormFieldType,
+  IsExact,
+  PageFormField,
+  Rm,
+  UnplacedFormField
+} from "../index";
 import { extractFormFieldsPerPage } from "../index";
 
 // ── Shape ────────────────────────────────────────────────────────────────────
@@ -21,6 +29,19 @@ const _checkbox = true satisfies IsExact<
 const _noType = true satisfies "type" extends keyof FormFieldByType["Text"] ? false : true;
 
 const _unplacedType = true satisfies IsExact<UnplacedFormField["type"], FormFieldType>;
+
+// FormFieldPayload: one key gives that variant's payload, a union of keys the union of payloads,
+// and no key at all is every payload.
+const _sigPayload = true satisfies IsExact<FormFieldPayload<"Signature">, FormFieldByType["Signature"]>;
+const _buttonPayload = true satisfies IsExact<
+  FormFieldPayload<"Checkbox" | "Radio">,
+  FormFieldByType["Checkbox"] | FormFieldByType["Radio"]
+>;
+const _allPayloads = true satisfies IsExact<FormFieldPayload, FormFieldByType[FormFieldType]>;
+const _payloadHasNoType = true satisfies "type" extends keyof FormFieldPayload<"Text"> ? false : true;
+declare const sig: FormFieldPayload<"Signature">;
+const signed: boolean = sig.signed;
+void signed;
 
 // ── Narrowing ────────────────────────────────────────────────────────────────
 
@@ -59,3 +80,7 @@ void _keys;
 void _checkbox;
 void _noType;
 void _unplacedType;
+void _sigPayload;
+void _buttonPayload;
+void _allPayloads;
+void _payloadHasNoType;

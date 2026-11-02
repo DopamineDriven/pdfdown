@@ -592,6 +592,7 @@ import type { FormFieldByType, FormFieldType, PageFormField } from "@d0paminedri
 
 type Kinds = FormFieldType; // 'Text' | 'Checkbox' | 'Radio' | 'ComboBox' | 'ListBox' | 'PushButton' | 'Signature' | 'Unknown'
 type CheckboxField = FormFieldByType["Checkbox"]; // the Checkbox variant without its `type` key
+type ButtonPayload = FormFieldPayload<"Checkbox" | "Radio">; // one or more variants' payloads, by key
 const isText = (f: PageFormField): f is Extract<PageFormField, { type: "Text" }> => f.type === "Text";
 ```
 
