@@ -15,12 +15,13 @@ pub use types::{
   AddressField, AircraftReference, Attachment, BoxType, Capabilities, ChoiceOption, DateField,
   DateOrder, EInvoiceStandard, EmbeddedInvoiceXml, FieldSpan, FormInfo, InvoiceDocumentType,
   InvoiceFields, InvoiceItem, InvoiceOptions, InvoiceResult, InvoiceSource, MoneyField,
-  NumberField, PageAnnotation, PageBox, PageFormField, PageImage, PageText, PaymentDetail,
-  PdfDocument, PdfMeta, StringField, StructuredPageText, TaxDetail, UnplacedFormField,
+  NumberField, PageAnnotation, PageBox, PageFormField, PageImage, PageLayout, PageText,
+  PaymentDetail, PdfDocument, PdfMeta, PlacedImage, StringField, StructuredPageText, TaxDetail,
+  TextLine, TextSource, TextWord, UnplacedFormField,
 };
 
 #[cfg(feature = "ocr")]
-pub use types::{OcrOptions, OcrPageText, OcrStructuredPageText, PdfDocumentOcr, TextSource};
+pub use types::{OcrOptions, OcrPageText, OcrStructuredPageText, PdfDocumentOcr};
 
 #[cfg(feature = "render")]
 pub use types::{RawRenderedPage, RenderMode, RenderOptions, RenderedPage};
@@ -46,13 +47,14 @@ use crate::core::document::{extract_all, extract_annotations};
 use crate::core::forms::extract_forms;
 use crate::core::images::extract_images_raw;
 use crate::core::invoice::extract_invoice as extract_invoice_impl;
+use crate::core::layout::extract_layout;
 use crate::core::meta::extract_metadata;
 use crate::core::text::{extract_structured_text, extract_text};
 
 #[cfg(feature = "ocr")]
 use crate::core::document::extract_all_with_ocr;
 #[cfg(feature = "ocr")]
-use crate::core::ocr::{extract_text_with_ocr, normalize_max_threads};
+use crate::core::ocr::{extract_layout_with_ocr, extract_text_with_ocr, normalize_max_threads};
 
 fn load_doc(buf: &[u8]) -> Result<Document> {
   Document::load_mem(buf).map_err(|e| Error::from_reason(format!("Failed to load PDF: {e}")))
@@ -101,6 +103,31 @@ fn maybe_init_pdfium(opts: &Option<OcrOptions>) {
 #[cfg(all(feature = "ocr", not(feature = "render")))]
 fn maybe_init_pdfium(_opts: &Option<OcrOptions>) {}
 
+/// Resolved OCR settings shared by the positioned-text entry points.
+#[cfg(feature = "ocr")]
+struct OcrParams {
+  lang: String,
+  min_len: u32,
+  max_threads: u32,
+  render_dpi: u32,
+  render_mode: u8,
+}
+
+#[cfg(feature = "ocr")]
+fn ocr_params(opts: &Option<OcrOptions>) -> OcrParams {
+  maybe_init_pdfium(opts);
+  OcrParams {
+    lang: opts
+      .as_ref()
+      .and_then(|o| o.lang.clone())
+      .unwrap_or_else(|| "eng".to_string()),
+    min_len: opts.as_ref().and_then(|o| o.min_text_length).unwrap_or(1),
+    max_threads: normalize_max_threads(opts.as_ref().and_then(|o| o.max_threads)),
+    render_dpi: extract_render_dpi(opts),
+    render_mode: extract_render_mode(opts),
+  }
+}
+
 // ── Standalone sync functions ───────────────────────────────────
 
 #[napi]
@@ -126,6 +153,14 @@ pub fn extract_annotations_per_page(buffer: Buffer) -> Result<Vec<PageAnnotation
 pub fn extract_form_fields_per_page(buffer: Buffer) -> Result<Vec<PageFormField>> {
   let doc = load_doc(buffer.as_ref())?;
   Ok(extract_forms(&doc).fields)
+}
+
+/// Positioned words and lines per page from the content stream (native text only).
+/// Coordinates are PDF user space in points, y up.
+#[napi]
+pub fn layout_per_page(buffer: Buffer) -> Result<Vec<PageLayout>> {
+  let doc = load_doc(buffer.as_ref())?;
+  Ok(extract_layout(&doc))
 }
 
 /// Every embedded file: `/Names /EmbeddedFiles`, catalog `/AF`, and page `/FileAttachment` annotations.
@@ -195,6 +230,28 @@ pub fn extract_text_with_ocr_per_page(
     max_threads,
     render_dpi,
     render_mode,
+  )
+}
+
+/// Positioned words and lines per page with the OCR cascade: native glyph
+/// placement, then OCR of embedded images mapped through their placements,
+/// then (with PDFium) OCR of the rasterised page.
+#[cfg(feature = "ocr")]
+#[napi]
+pub fn extract_layout_with_ocr_per_page(
+  buffer: Buffer,
+  opts: Option<OcrOptions>,
+) -> Result<Vec<PageLayout>> {
+  let p = ocr_params(&opts);
+  let doc = load_doc(buffer.as_ref())?;
+  extract_layout_with_ocr(
+    &doc,
+    buffer.as_ref(),
+    &p.lang,
+    p.min_len,
+    p.max_threads,
+    p.render_dpi,
+    p.render_mode,
   )
 }
 
@@ -440,6 +497,28 @@ pub fn extract_form_fields_per_page_async(buffer: Buffer) -> AsyncTask<ExtractFo
   AsyncTask::new(ExtractFormFieldsTask(buffer.to_vec()))
 }
 
+pub struct ExtractLayoutTask(Vec<u8>);
+
+#[napi]
+impl Task for ExtractLayoutTask {
+  type Output = Vec<PageLayout>;
+  type JsValue = Vec<PageLayout>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.0)?;
+    Ok(extract_layout(&doc))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+pub fn layout_per_page_async(buffer: Buffer) -> AsyncTask<ExtractLayoutTask> {
+  AsyncTask::new(ExtractLayoutTask(buffer.to_vec()))
+}
+
 pub struct AttachmentsTask(Vec<u8>);
 
 #[napi]
@@ -604,6 +683,49 @@ pub fn extract_text_with_ocr_per_page_async(
 }
 
 #[cfg(feature = "ocr")]
+pub struct ExtractLayoutOcrTask {
+  data: Vec<u8>,
+  params: OcrParams,
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+impl Task for ExtractLayoutOcrTask {
+  type Output = Vec<PageLayout>;
+  type JsValue = Vec<PageLayout>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.data)?;
+    let p = &self.params;
+    extract_layout_with_ocr(
+      &doc,
+      &self.data,
+      &p.lang,
+      p.min_len,
+      p.max_threads,
+      p.render_dpi,
+      p.render_mode,
+    )
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+pub fn extract_layout_with_ocr_per_page_async(
+  buffer: Buffer,
+  opts: Option<OcrOptions>,
+) -> AsyncTask<ExtractLayoutOcrTask> {
+  AsyncTask::new(ExtractLayoutOcrTask {
+    data: buffer.to_vec(),
+    params: ocr_params(&opts),
+  })
+}
+
+#[cfg(feature = "ocr")]
 pub struct PdfDocumentOcrTask {
   data: Vec<u8>,
   lang: String,
@@ -730,6 +852,22 @@ impl Task for SharedFormFieldsTask {
   }
 }
 
+pub struct SharedLayoutTask(Arc<Document>);
+
+#[napi]
+impl Task for SharedLayoutTask {
+  type Output = Vec<PageLayout>;
+  type JsValue = Vec<PageLayout>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(extract_layout(&self.0))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
 pub struct SharedAttachmentsTask(Arc<Document>);
 
 #[napi]
@@ -839,6 +977,37 @@ impl Task for SharedExtractTextOcrTask {
       self.max_threads,
       self.render_dpi,
       self.render_mode,
+    )
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[cfg(feature = "ocr")]
+pub struct SharedLayoutOcrTask {
+  doc: Arc<Document>,
+  raw: Arc<Vec<u8>>,
+  params: OcrParams,
+}
+
+#[cfg(feature = "ocr")]
+#[napi]
+impl Task for SharedLayoutOcrTask {
+  type Output = Vec<PageLayout>;
+  type JsValue = Vec<PageLayout>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let p = &self.params;
+    extract_layout_with_ocr(
+      &self.doc,
+      &self.raw,
+      &p.lang,
+      p.min_len,
+      p.max_threads,
+      p.render_dpi,
+      p.render_mode,
     )
   }
 
@@ -1008,6 +1177,17 @@ impl PdfDown {
     AsyncTask::new(SharedFormFieldsTask(Arc::clone(&self.doc)))
   }
 
+  /// Positioned words and lines per page from the content stream (native text only).
+  #[napi]
+  pub fn layout(&self) -> Vec<PageLayout> {
+    extract_layout(&self.doc)
+  }
+
+  #[napi]
+  pub fn layout_async(&self) -> AsyncTask<SharedLayoutTask> {
+    AsyncTask::new(SharedLayoutTask(Arc::clone(&self.doc)))
+  }
+
   #[napi]
   pub fn attachments(&self) -> Vec<Attachment> {
     extract_attachments(&self.doc)
@@ -1122,6 +1302,30 @@ impl PdfDown {
       max_threads,
       render_dpi,
       render_mode,
+    })
+  }
+
+  /// Positioned words and lines per page with the OCR cascade.
+  #[napi]
+  pub fn layout_with_ocr(&self, opts: Option<OcrOptions>) -> Result<Vec<PageLayout>> {
+    let p = ocr_params(&opts);
+    extract_layout_with_ocr(
+      &self.doc,
+      &self.raw,
+      &p.lang,
+      p.min_len,
+      p.max_threads,
+      p.render_dpi,
+      p.render_mode,
+    )
+  }
+
+  #[napi]
+  pub fn layout_with_ocr_async(&self, opts: Option<OcrOptions>) -> AsyncTask<SharedLayoutOcrTask> {
+    AsyncTask::new(SharedLayoutOcrTask {
+      doc: Arc::clone(&self.doc),
+      raw: Arc::clone(&self.raw),
+      params: ocr_params(&opts),
     })
   }
 

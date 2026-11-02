@@ -9,8 +9,15 @@ import { join } from "path";
 
 import test from "ava";
 
-import { attachments, extractFormFieldsPerPage, extractInvoice, extractTextPerPage, pdfMetadata } from "../index";
-import type { Attachment, FormInfo, InvoiceResult, PageFormField, PageText, PdfMeta } from "../index";
+import {
+  attachments,
+  extractFormFieldsPerPage,
+  extractInvoice,
+  extractTextPerPage,
+  layoutPerPage,
+  pdfMetadata
+} from "../index";
+import type { Attachment, FormInfo, InvoiceResult, PageFormField, PageText, PdfMeta, TextSource } from "../index";
 
 /** One private invoice's results. Attachment payloads are omitted; everything else is verbatim. */
 interface PrivateCorpusEntry {
@@ -23,6 +30,22 @@ interface PrivateCorpusEntry {
   text: Array<PageText>;
   nativeChars: number;
   invoice: InvoiceResult;
+  layout: Array<PrivateCorpusPageLayout>;
+}
+
+/** Positioned-text summary of one page: counts plus the line texts in reading order. */
+interface PrivateCorpusPageLayout {
+  page: number;
+  source: TextSource;
+  width: number;
+  height: number;
+  rotate: number;
+  words: number;
+  lines: number;
+  images: number;
+  fonts: Array<string>;
+  warnings: Array<string>;
+  lineText: Array<string>;
 }
 
 interface PrivateCorpusReport {
@@ -41,7 +64,7 @@ const files = existsSync(PRIVATE) ? readdirSync(PRIVATE).filter((n) => /\.pdf$/i
     const widths = { name: Math.max(...files.map((n) => n.length), 4) };
     const entries: Array<PrivateCorpusEntry> = [];
     t.log(`${files.length} private invoice(s)`);
-    t.log(`${"file".padEnd(widths.name)}  pages  nativeChars  form  attach  invoice`);
+    t.log(`${"file".padEnd(widths.name)}  pages  nativeChars  words  form  attach  invoice`);
     for (const name of files) {
       const buf = readFileSync(join(PRIVATE, name));
       const meta = pdfMetadata(buf);
@@ -49,6 +72,7 @@ const files = existsSync(PRIVATE) ? readdirSync(PRIVATE).filter((n) => /\.pdf$/i
       const fields = extractFormFieldsPerPage(buf);
       const att = attachments(buf);
       const inv = extractInvoice(buf);
+      const layout = layoutPerPage(buf);
 
       t.true(meta.pageCount >= 1, `${name}: page count`);
       t.is(text.length, meta.pageCount, `${name}: one text entry per page`);
@@ -70,6 +94,27 @@ const files = existsSync(PRIVATE) ? readdirSync(PRIVATE).filter((n) => /\.pdf$/i
         t.truthy(inv.fields.invoiceId ?? inv.fields.invoiceTotal, `${name}: an extracted invoice has an id or a total`);
       }
 
+      t.is(layout.length, meta.pageCount, `${name}: one layout per page`);
+      for (const p of layout) {
+        t.is(p.source, "Native", `${name} p${p.page}: native layout`);
+        let next = 0;
+        for (const [i, line] of p.lines.entries()) {
+          t.is(line.firstWord, next, `${name} p${p.page} line ${i}: contiguous firstWord`);
+          const slice = p.words.slice(line.firstWord, line.firstWord + line.wordCount);
+          t.is(slice.length, line.wordCount, `${name} p${p.page} line ${i}: wordCount in range`);
+          t.true(
+            slice.every((w) => w.line === i),
+            `${name} p${p.page} line ${i}: words point back`
+          );
+          if (i > 0) {
+            t.true(line.y1 <= p.lines[i - 1].y1 + 0.5, `${name} p${p.page} line ${i}: top-to-bottom`);
+          }
+          next += line.wordCount;
+        }
+        t.is(next, p.words.length, `${name} p${p.page}: lines cover every word`);
+      }
+      const layoutWords = layout.reduce((n, p) => n + p.words.length, 0);
+
       const nativeChars = text.reduce((n, p) => n + p.text.replace(/\s+/g, "").length, 0);
       const { form, ...metaRest } = meta;
       entries.push({
@@ -81,12 +126,25 @@ const files = existsSync(PRIVATE) ? readdirSync(PRIVATE).filter((n) => /\.pdf$/i
         attachments: att.map(({ data: _data, ...rest }) => rest),
         text,
         nativeChars,
-        invoice: inv
+        invoice: inv,
+        layout: layout.map((p) => ({
+          page: p.page,
+          source: p.source,
+          width: p.width,
+          height: p.height,
+          rotate: p.rotate,
+          words: p.words.length,
+          lines: p.lines.length,
+          images: p.images.length,
+          fonts: [...new Set(p.words.map((w) => `${w.fontName ?? "?"}${w.bold ? " (bold)" : ""}`))],
+          warnings: p.warnings,
+          lineText: p.lines.map((l) => l.text)
+        }))
       });
       const formCol = meta.form ? `${meta.form.fieldCount}/${meta.form.widgetCount}` : "-";
       const invCol = inv.source === "EmbeddedXml" ? `${inv.source} ${inv.embeddedXml?.standard}` : inv.source;
       t.log(
-        `${name.padEnd(widths.name)}  ${String(meta.pageCount).padStart(5)}  ${String(nativeChars).padStart(11)}  ${formCol.padStart(4)}  ${String(att.length).padStart(6)}  ${invCol}`
+        `${name.padEnd(widths.name)}  ${String(meta.pageCount).padStart(5)}  ${String(nativeChars).padStart(11)}  ${String(layoutWords).padStart(5)}  ${formCol.padStart(4)}  ${String(att.length).padStart(6)}  ${invCol}`
       );
     }
 
@@ -101,7 +159,7 @@ const files = existsSync(PRIVATE) ? readdirSync(PRIVATE).filter((n) => /\.pdf$/i
       join(PRIVATE, "report.ts"),
       [
         "// Generated by __test__/private-corpus.spec.ts. Lives in a gitignored directory; do not commit.",
-        'import type { Attachment, FormInfo, InvoiceResult, PageFormField, PageText, PdfMeta } from "../../../../index";',
+        'import type { Attachment, FormInfo, InvoiceResult, PageFormField, PageText, PdfMeta, TextSource } from "../../../../index";',
         "",
         "export interface PrivateCorpusEntry {",
         "  file: string;",
@@ -113,6 +171,21 @@ const files = existsSync(PRIVATE) ? readdirSync(PRIVATE).filter((n) => /\.pdf$/i
         "  text: Array<PageText>;",
         "  nativeChars: number;",
         "  invoice: InvoiceResult;",
+        "  layout: Array<PrivateCorpusPageLayout>;",
+        "}",
+        "",
+        "export interface PrivateCorpusPageLayout {",
+        "  page: number;",
+        "  source: TextSource;",
+        "  width: number;",
+        "  height: number;",
+        "  rotate: number;",
+        "  words: number;",
+        "  lines: number;",
+        "  images: number;",
+        "  fonts: Array<string>;",
+        "  warnings: Array<string>;",
+        "  lineText: Array<string>;",
         "}",
         "",
         "export interface PrivateCorpusReport {",

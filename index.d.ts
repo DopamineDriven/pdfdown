@@ -105,6 +105,9 @@ export declare class PdfDown {
   metadata(): PdfMeta;
   formFieldsPerPage(): Array<PageFormField>;
   formFieldsPerPageAsync(): Promise<Array<PageFormField>>;
+  /** Positioned words and lines per page from the content stream (native text only). */
+  layout(): Array<PageLayout>;
+  layoutAsync(): Promise<Array<PageLayout>>;
   attachments(): Array<Attachment>;
   attachmentsAsync(): Promise<Array<Attachment>>;
   invoice(opts?: InvoiceOptions | undefined | null): InvoiceResult;
@@ -370,6 +373,14 @@ export interface InvoiceResult {
 export type InvoiceSource = "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "None";
 
 /**
+ * Positioned words and lines per page from the content stream (native text only).
+ * Coordinates are PDF user space in points, y up.
+ */
+export declare function layoutPerPage(buffer: Buffer): Array<PageLayout>;
+
+export declare function layoutPerPageAsync(buffer: Buffer): Promise<Array<PageLayout>>;
+
+/**
  * Money as a JS number plus the exact printed text; `text` is authoritative
  * when cents matter.
  */
@@ -600,6 +611,23 @@ export interface PageImage {
   objectId: string;
 }
 
+export interface PageLayout {
+  page: number;
+  /**
+   * CropBox (fallback MediaBox) size in points. Coordinates in `words`,
+   * `lines` and `images` are raw user space, not shifted to this box's origin.
+   */
+  width: number;
+  height: number;
+  /** `/Rotate`, reported and not applied. */
+  rotate: number;
+  source: TextSource;
+  words: Array<TextWord>;
+  lines: Array<TextLine>;
+  images: Array<PlacedImage>;
+  warnings: Array<string>;
+}
+
 export interface PageText {
   page: number;
   text: string;
@@ -657,6 +685,18 @@ export declare function pdfMetadata(buffer: Buffer): PdfMeta;
 
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>;
 
+/**
+ * Where an image XObject was painted: the unit square under the CTM at the
+ * `Do` operator, as an axis-aligned box in user space.
+ */
+export interface PlacedImage {
+  xobjectName: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 export interface RenderedPage {
   page: number;
   width: number;
@@ -697,6 +737,46 @@ export interface TaxDetail {
   amount?: MoneyField;
   base?: MoneyField;
   category?: StringField;
+}
+
+/**
+ * Words sharing a baseline band, left to right. `firstWord` / `wordCount`
+ * address a contiguous slice of `PageLayout.words`.
+ */
+export interface TextLine {
+  text: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  firstWord: number;
+  wordCount: number;
+}
+
+/**
+ * Where a page's text came from. Present in every build; `Rendered` is only
+ * produced when the `render` feature rasterised the page.
+ */
+export type TextSource = "Native" | "Ocr" | "Rendered";
+
+/** One word with its box in PDF user space (points, y up). */
+export interface TextWord {
+  text: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  /** Index into `PageLayout.lines`. */
+  line: number;
+  /** Native only: font size in user space (after the CTM), in points. */
+  fontSize?: number;
+  /** Native only: base font name with any subset prefix stripped. */
+  fontName?: string;
+  /** Native: from the font descriptor and name. OCR: not reported. */
+  bold?: boolean;
+  italic?: boolean;
+  /** OCR only: Tesseract word confidence, 0..1. */
+  confidence?: number;
 }
 
 /**

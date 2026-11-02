@@ -67,6 +67,11 @@ export declare function extractTextWithOcrPerPageAsync(buffer: Buffer, opts?: Oc
 export declare function pdfDocumentOcr(buffer: Buffer, opts?: OcrOptions): PdfDocumentOcr;
 
 export declare function pdfDocumentOcrAsync(buffer: Buffer, opts?: OcrOptions): Promise<PdfDocumentOcr>;
+
+// Positioned words and lines with the same three-tier cascade
+export declare function extractLayoutWithOcrPerPage(buffer: Buffer, opts?: OcrOptions): Array<PageLayout>;
+
+export declare function extractLayoutWithOcrPerPageAsync(buffer: Buffer, opts?: OcrOptions): Promise<Array<PageLayout>>;
 ```
 
 ### `PdfDown` class (includes OCR methods)
@@ -100,16 +105,15 @@ export declare class PdfDown {
   textWithOcrPerPageAsync(opts?: OcrOptions): Promise<Array<OcrPageText>>;
   documentOcr(opts?: OcrOptions): PdfDocumentOcr;
   documentOcrAsync(opts?: OcrOptions): Promise<PdfDocumentOcr>;
+  layoutWithOcr(opts?: OcrOptions): Array<PageLayout>;
+  layoutWithOcrAsync(opts?: OcrOptions): Promise<Array<PageLayout>>;
 }
 ```
 
 ### Types
 
 ```typescript
-export const enum TextSource {
-  Native = "Native",
-  Ocr = "Ocr"
-}
+export type TextSource = "Native" | "Ocr" | "Rendered";
 
 export interface OcrPageText {
   page: number;
@@ -235,6 +239,27 @@ Both methods extract everything from a PDF in a single call. The difference is h
 | `documentOcr()` / `documentOcrAsync()` | Native with OCR fallback | `PdfDocumentOcr` | PDF may contain scanned/image-only pages |
 
 `PdfDocumentOcr` uses `OcrPageText` (with `source: 'Native' | 'Ocr'`) and `OcrStructuredPageText` (with header/body/footer split plus source) instead of the base `PageText` and `StructuredPageText` types. Images, annotations, and metadata are identical in both.
+
+### Positioned text with OCR
+
+`extractLayoutWithOcrPerPage` returns the base package's `PageLayout` shape (words, lines and image placements with boxes in PDF points) for every page, choosing the source per page exactly like the text cascade:
+
+1. **Native** -- glyphs placed from the content stream, with `fontName` / `fontSize` / `bold` on every word.
+2. **Ocr** -- the page's embedded raster images are OCR'd and each Tesseract word box is mapped through the image's `Do` placement onto the page. Words carry `confidence` (0..1) instead of font metadata.
+3. **Rendered** -- with PDFium, the page is rasterised at `renderDpi` and OCR'd; word boxes are mapped onto the page box. Pages with `/Rotate` get a warning because the boxes are in displayed orientation.
+
+```typescript
+import { readFileSync } from "fs";
+import { extractLayoutWithOcrPerPage } from "@d0paminedriven/pdfdown-ocr";
+
+for (const page of extractLayoutWithOcrPerPage(readFileSync("scan.pdf"), { render: "Auto" })) {
+  console.log(`page ${page.page} (${page.source})`);
+  for (const line of page.lines) {
+    const confidence = page.words.slice(line.firstWord, line.firstWord + line.wordCount).map((w) => w.confidence ?? 1);
+    console.log(`  ${Math.min(...confidence).toFixed(2)}  ${line.text}`);
+  }
+}
+```
 
 ## How it works
 

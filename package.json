@@ -44,7 +44,7 @@
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
     "test:ocr": "ava --config ocr/ava.config.mjs",
-    "typecheck": "tsc --noEmit --strict --module esnext --moduleResolution bundler --types node --ignoreConfig __test__/forms.types.ts __test__/invoice.types.ts ocr/__test__/forms.types.ts ocr/__test__/invoice.types.ts",
+    "typecheck": "tsc --noEmit --strict --module esnext --moduleResolution bundler --types node --ignoreConfig __test__/forms.types.ts __test__/invoice.types.ts __test__/layout.types.ts ocr/__test__/forms.types.ts ocr/__test__/invoice.types.ts ocr/__test__/layout.types.ts",
     "preversion": "napi build --platform --no-const-enum && git add .",
     "version": "napi version",
     "prepare": "husky"
