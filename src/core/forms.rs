@@ -4,9 +4,11 @@
 //! inheritable attributes once per logical field, and (in later tasks) joins fields to the
 //! widget annotations placed on pages. Nothing here writes to the document.
 
-use crate::types::{ChoiceOption, FieldCommon, FieldKind};
+use crate::types::{
+  ChoiceOption, FieldCommon, FieldKind, FormInfo, PageFormField, UnplacedFormField,
+};
 use lopdf::{Dictionary, Document, Object, ObjectId};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// Bounds `/Kids` recursion on malformed or adversarial field trees; real hierarchies are shallow.
 const MAX_FIELD_DEPTH: usize = 100;
@@ -793,6 +795,286 @@ pub(crate) fn common_for(
     no_export: flags.no_export(),
     has_actions: node.has_actions || widget.dict.has(b"AA") || widget.dict.has(b"A"),
   }
+}
+
+// ── Extraction entry point ───────────────────────────────────────
+
+/// Everything the forms module produces for one document.
+pub(crate) struct FormsExtraction {
+  /// Present when `/AcroForm` exists or any widget was found.
+  pub info: Option<FormInfo>,
+  /// One entry per placed widget, sorted (see [`sort_fields`]).
+  pub fields: Vec<PageFormField>,
+}
+
+/// Read-only per-page form field extraction (spec §5.2). Never writes to `doc`.
+pub(crate) fn extract_forms(doc: &Document) -> FormsExtraction {
+  let mut warnings = Vec::new();
+
+  // 1. Widgets on pages, independent of /AcroForm.
+  let widgets = scan_widgets(doc, &mut warnings);
+  let by_key: HashMap<ObjectId, usize> = widgets
+    .iter()
+    .enumerate()
+    .filter_map(|(k, w)| w.key.map(|id| (id, k)))
+    .collect();
+  let mut claimed = vec![false; widgets.len()];
+
+  // 2. /AcroForm, if present.
+  let acroform = doc
+    .catalog()
+    .ok()
+    .and_then(|cat| cat.get(b"AcroForm").ok())
+    .and_then(|o| deref(doc, o, &mut warnings, "/AcroForm"))
+    .and_then(|o| match o {
+      Object::Dictionary(d) => Some(d),
+      _ => None,
+    });
+  let mut need_appearances = false;
+  let mut sig_flags = 0u32;
+  let mut has_xfa = false;
+  let mut field_entries: Vec<Object> = Vec::new();
+  if let Some(af) = acroform {
+    need_appearances = af
+      .get(b"NeedAppearances")
+      .ok()
+      .and_then(|o| deref(doc, o, &mut warnings, "/NeedAppearances"))
+      .is_some_and(|o| matches!(o, Object::Boolean(true)));
+    sig_flags = af
+      .get(b"SigFlags")
+      .ok()
+      .and_then(|o| deref(doc, o, &mut warnings, "/SigFlags"))
+      .and_then(|o| match o {
+        Object::Integer(i) => u32::try_from(*i).ok(),
+        _ => None,
+      })
+      .unwrap_or(0);
+    has_xfa = af.has(b"XFA");
+    match af
+      .get(b"Fields")
+      .ok()
+      .and_then(|o| deref(doc, o, &mut warnings, "/Fields"))
+    {
+      Some(Object::Array(items)) => field_entries = items.clone(),
+      Some(other) => warnings.push(format!(
+        "/AcroForm /Fields is not an array ({})",
+        other.enum_variant()
+      )),
+      None => {}
+    }
+  }
+
+  // 3. Field tree → placements and unplaced fields.
+  let tree = FieldTree::walk(doc, &field_entries);
+  let mut fields = Vec::new();
+  let mut unplaced = Vec::new();
+  let mut field_count = 0u32;
+  for i in 0..tree.nodes.len() {
+    if !tree.is_logical(i) {
+      continue;
+    }
+    field_count += 1;
+    let node = &tree.nodes[i];
+    let mut placements: Vec<usize> = Vec::new();
+    if let Some(k) = node.object_id.and_then(|id| by_key.get(&id)) {
+      placements.push(*k);
+    }
+    for &c in &node.children {
+      let kid = &tree.nodes[c];
+      if kid.partial_name.is_empty()
+        && let Some(k) = kid.object_id.and_then(|id| by_key.get(&id))
+      {
+        placements.push(*k);
+      }
+    }
+    if placements.is_empty() {
+      unplaced.push(unplaced_for(doc, &tree, i, &mut warnings));
+      continue;
+    }
+    let count = placements.len() as u32;
+    for (index, &k) in placements.iter().enumerate() {
+      claimed[k] = true;
+      let placement = PlacementRef {
+        widget: &widgets[k],
+        index: index as u32,
+        count,
+      };
+      let kind = resolve_kind(doc, &tree, i, Some(placement), &mut warnings);
+      let common = common_for(doc, &tree, i, placement, &mut warnings);
+      fields.push(PageFormField::new(common, kind));
+    }
+  }
+
+  // 4. Widgets no field claims.
+  for (k, widget) in widgets.iter().enumerate() {
+    if !claimed[k] {
+      fields.push(unknown_for(doc, widget, &mut warnings));
+    }
+  }
+
+  // 5. Order and summarise.
+  sort_fields(&mut fields);
+  let mut all_warnings = tree.warnings.clone();
+  all_warnings.extend(warnings);
+  let info = (acroform.is_some() || !fields.is_empty()).then(|| FormInfo {
+    has_acro_form: acroform.is_some(),
+    has_xfa,
+    need_appearances,
+    sig_flags,
+    field_count,
+    widget_count: fields.len() as u32,
+    unplaced_fields: unplaced,
+    truncated: tree.truncated,
+    warnings: all_warnings,
+  });
+  FormsExtraction { info, fields }
+}
+
+/// A logical field with no placed widget: full payload, no geometry.
+fn unplaced_for(
+  doc: &Document,
+  tree: &FieldTree,
+  i: usize,
+  warnings: &mut Vec<String>,
+) -> UnplacedFormField {
+  let kind = resolve_kind(doc, tree, i, None, warnings);
+  let flags = tree.effective_flags(i);
+  let node = &tree.nodes[i];
+  let mut u = UnplacedFormField {
+    field_object_id: tree.field_object_id(i),
+    name: tree.full_name(i),
+    partial_name: node.partial_name.clone(),
+    kind: kind.kind_name().to_string(),
+    value: field_value(doc, tree, i, tree.effective_value(i), warnings),
+    values: None,
+    default_value: field_value(doc, tree, i, tree.effective_default(i), warnings),
+    tooltip: tree.effective_tooltip(i).map(str::to_owned),
+    mapping_name: node.mapping_name.clone(),
+    options: None,
+    max_len: None,
+    read_only: flags.read_only(),
+    required: flags.required(),
+    no_export: flags.no_export(),
+    has_actions: node.has_actions,
+    multiline: false,
+    password: false,
+    comb: false,
+    rich_text: false,
+    editable: false,
+    multi_select: false,
+    signed: false,
+  };
+  match kind {
+    FieldKind::Text {
+      multiline,
+      password,
+      comb,
+      rich_text,
+      max_len,
+    } => {
+      u.multiline = multiline;
+      u.password = password;
+      u.comb = comb;
+      u.rich_text = rich_text;
+      u.max_len = max_len;
+    }
+    FieldKind::ComboBox { options, editable } => {
+      u.options = Some(options);
+      u.editable = editable;
+    }
+    FieldKind::ListBox {
+      options,
+      multi_select,
+      values,
+    } => {
+      u.options = Some(options);
+      u.multi_select = multi_select;
+      u.values = values;
+    }
+    FieldKind::Signature { signed } => u.signed = signed,
+    FieldKind::Checkbox { .. }
+    | FieldKind::Radio { .. }
+    | FieldKind::PushButton {}
+    | FieldKind::Unknown {} => {}
+  }
+  u
+}
+
+/// A widget annotation no field claims: whatever its own dictionary says, typed `Unknown`.
+fn unknown_for(doc: &Document, widget: &PlacedWidget, warnings: &mut Vec<String>) -> PageFormField {
+  let dict = &widget.dict;
+  let text = |key: &[u8], warnings: &mut Vec<String>| {
+    dict
+      .get(key)
+      .ok()
+      .and_then(|o| decode_text_object(o, doc, warnings))
+  };
+  let name = text(b"T", warnings).unwrap_or_default();
+  let flags = FieldFlags(
+    dict
+      .get(b"Ff")
+      .ok()
+      .and_then(|o| deref(doc, o, warnings, "/Ff"))
+      .and_then(|o| match o {
+        Object::Integer(i) => u32::try_from(*i).ok(),
+        _ => None,
+      })
+      .unwrap_or(0),
+  );
+  let common = FieldCommon {
+    page: widget.page,
+    rect: widget.rect.clone(),
+    object_id: widget.object_id.clone(),
+    field_object_id: widget.object_id.clone(),
+    partial_name: name.clone(),
+    name,
+    widget_index: 0,
+    widget_count: 1,
+    value: text(b"V", warnings),
+    default_value: text(b"DV", warnings),
+    tooltip: text(b"TU", warnings),
+    mapping_name: text(b"TM", warnings),
+    read_only: flags.read_only(),
+    required: flags.required(),
+    no_export: flags.no_export(),
+    has_actions: dict.has(b"AA") || dict.has(b"A"),
+  };
+  PageFormField::new(common, FieldKind::Unknown {})
+}
+
+/// Page ascending, then top edge descending, then left edge ascending, then name, then object id.
+/// A missing coordinate counts as `0.0`.
+pub(crate) fn sort_fields(fields: &mut [PageFormField]) {
+  fn top(r: &[f64]) -> f64 {
+    r.get(1)
+      .copied()
+      .unwrap_or(0.0)
+      .max(r.get(3).copied().unwrap_or(0.0))
+  }
+  fn left(r: &[f64]) -> f64 {
+    r.first()
+      .copied()
+      .unwrap_or(0.0)
+      .min(r.get(2).copied().unwrap_or(0.0))
+  }
+  fields.sort_by(|a, b| {
+    a.page()
+      .cmp(&b.page())
+      .then_with(|| top(b.rect()).total_cmp(&top(a.rect())))
+      .then_with(|| left(a.rect()).total_cmp(&left(b.rect())))
+      .then_with(|| a.name().cmp(b.name()))
+      .then_with(|| a.object_id().cmp(b.object_id()))
+  });
+}
+
+/// Sorted unique page numbers of the given placements (mirrors `imagePages`).
+pub(crate) fn form_field_pages(fields: &[PageFormField]) -> Vec<u32> {
+  fields
+    .iter()
+    .map(PageFormField::page)
+    .collect::<BTreeSet<u32>>()
+    .into_iter()
+    .collect()
 }
 
 #[cfg(test)]
@@ -1662,5 +1944,371 @@ mod tests {
     assert!(c.has_actions);
     let (_, c, _) = resolve_single(text(Object::string_literal("x")), vec![]);
     assert!(!c.has_actions);
+  }
+
+  // ── Task 4: emission, sorting, FormInfo, extract_forms ───────
+
+  fn common() -> FieldCommon {
+    FieldCommon {
+      page: 1,
+      rect: vec![],
+      object_id: "0 0 obj".into(),
+      field_object_id: "0 0 obj".into(),
+      name: String::new(),
+      partial_name: String::new(),
+      widget_index: 0,
+      widget_count: 1,
+      value: None,
+      default_value: None,
+      tooltip: None,
+      mapping_name: None,
+      read_only: false,
+      required: false,
+      no_export: false,
+      has_actions: false,
+    }
+  }
+
+  /// Catalog (1,0) with optional /AcroForm, pages (2,0), page k at (100+k, 0).
+  fn pdf_full(
+    acroform: Option<Dictionary>,
+    annots: Vec<Object>,
+    extras: Vec<(ObjectId, Object)>,
+  ) -> Document {
+    let mut d = pdf_with_pages(annots, extras);
+    if let Some(af) = acroform {
+      let cat = d.get_dictionary_mut((1, 0)).unwrap();
+      cat.set("AcroForm", Object::Dictionary(af));
+    }
+    d
+  }
+
+  fn acroform(fields: &[(u32, u16)]) -> Dictionary {
+    dictionary! { "Fields" => refs(fields) }
+  }
+
+  fn merged_text(t: &str, v: &str, r: Object) -> Dictionary {
+    widget_dict(
+      dictionary! { "T" => Object::string_literal(t), "FT" => name("Tx"), "V" => Object::string_literal(v), "Rect" => r },
+    )
+  }
+
+  fn rect_at(x0: i64, y0: i64, x1: i64, y1: i64) -> Object {
+    Object::Array(vec![
+      Object::Integer(x0),
+      Object::Integer(y0),
+      Object::Integer(x1),
+      Object::Integer(y1),
+    ])
+  }
+
+  #[test]
+  fn no_acroform_no_widgets_gives_none_and_empty() {
+    let d = pdf_full(None, vec![Object::Array(vec![])], vec![]);
+    let out = extract_forms(&d);
+    assert!(out.info.is_none());
+    assert!(out.fields.is_empty());
+  }
+
+  #[test]
+  fn widgets_without_acroform_become_unknown_with_info() {
+    let d = pdf_full(
+      None,
+      vec![
+        refs(&[(5, 0)]),
+        Object::Array(vec![widget_dict(dictionary! { "T" => Object::string_literal("inline") }).into()]),
+      ],
+      vec![((5, 0), widget_dict(dictionary! { "T" => Object::string_literal("ghost"), "V" => Object::string_literal("boo") }).into())],
+    );
+    let out = extract_forms(&d);
+    assert_eq!(out.fields.len(), 2);
+    assert!(out.fields.iter().all(|f| f.kind_name() == "Unknown"));
+    assert_eq!(
+      out
+        .fields
+        .iter()
+        .map(|f| f.name().to_string())
+        .collect::<Vec<_>>(),
+      vec!["ghost", "inline"]
+    );
+    assert_eq!(out.fields[1].object_id(), "page 2 annot 0");
+    let info = out.info.expect("widgets imply info");
+    assert!(!info.has_acro_form);
+    assert_eq!(info.field_count, 0);
+    assert_eq!(info.widget_count, 2);
+  }
+
+  #[test]
+  fn unplaced_field_goes_to_info_not_array() {
+    let d = pdf_full(
+      Some(acroform(&[(10, 0)])),
+      vec![],
+      vec![((10, 0), dictionary! { "T" => Object::string_literal("hidden"), "FT" => name("Tx"), "V" => Object::string_literal("secret") }.into())],
+    );
+    let out = extract_forms(&d);
+    assert!(out.fields.is_empty());
+    let info = out.info.unwrap();
+    assert_eq!(info.field_count, 1);
+    assert_eq!(info.widget_count, 0);
+    assert_eq!(info.unplaced_fields.len(), 1);
+    let u = &info.unplaced_fields[0];
+    assert_eq!(u.name, "hidden");
+    assert_eq!(u.kind, "Text");
+    assert_eq!(u.value, Some("secret".into()));
+    assert_eq!(u.field_object_id, "10 0 obj");
+  }
+
+  #[test]
+  fn unplaced_multiselect_keeps_values_options_and_flags() {
+    let d = pdf_full(
+      Some(acroform(&[(10, 0)])),
+      vec![],
+      vec![((10, 0), dictionary! {
+        "T" => Object::string_literal("tags"),
+        "FT" => name("Ch"),
+        "Ff" => Object::Integer(1 << 21),
+        "Opt" => Object::Array(vec![Object::string_literal("a"), Object::string_literal("b"), Object::string_literal("c")]),
+        "V" => Object::Array(vec![Object::string_literal("a"), Object::string_literal("c")])
+      }.into())],
+    );
+    let info = extract_forms(&d).info.unwrap();
+    let u = &info.unplaced_fields[0];
+    assert_eq!(u.kind, "ListBox");
+    assert_eq!(u.values, Some(vec!["a".into(), "c".into()]));
+    assert_eq!(u.options.as_ref().map(|o| o.len()), Some(3));
+    assert!(u.multi_select);
+    assert_eq!(u.value, Some("a".into()));
+  }
+
+  #[test]
+  fn inline_widget_kid_leaves_parent_unplaced_under_its_own_id() {
+    let d = pdf_full(
+      Some(acroform(&[(5, 0)])),
+      vec![Object::Array(vec![])],
+      vec![(
+        (5, 0),
+        dictionary! {
+          "T" => Object::string_literal("inlinekid"),
+          "FT" => name("Tx"),
+          "Kids" => Object::Array(vec![widget_dict(Dictionary::new()).into()])
+        }
+        .into(),
+      )],
+    );
+    let out = extract_forms(&d);
+    assert!(out.fields.is_empty());
+    let info = out.info.unwrap();
+    assert_eq!(info.unplaced_fields.len(), 1);
+    assert_eq!(info.unplaced_fields[0].field_object_id, "5 0 obj");
+    assert_eq!(info.unplaced_fields[0].name, "inlinekid");
+  }
+
+  #[test]
+  fn inline_named_field_is_unplaced_with_synthetic_id() {
+    let d = pdf_full(
+      Some(acroform(&[(5, 0)])),
+      vec![],
+      vec![((5, 0), dictionary! {
+        "T" => Object::string_literal("p"),
+        "Kids" => Object::Array(vec![dictionary! { "T" => Object::string_literal("sub"), "FT" => name("Tx"), "V" => Object::string_literal("x") }.into()])
+      }.into())],
+    );
+    let info = extract_forms(&d).info.unwrap();
+    assert_eq!(info.field_count, 1);
+    assert_eq!(info.unplaced_fields.len(), 1);
+    assert_eq!(info.unplaced_fields[0].field_object_id, "5 0 obj/kid 0");
+    assert_eq!(info.unplaced_fields[0].name, "p.sub");
+    assert_eq!(info.unplaced_fields[0].value, Some("x".into()));
+  }
+
+  #[test]
+  fn unplaced_signature_reports_signed() {
+    let sig = |v: Option<Object>| {
+      let mut f = dictionary! { "T" => Object::string_literal("sig"), "FT" => name("Sig") };
+      if let Some(v) = v {
+        f.set("V", v);
+      }
+      pdf_full(
+        Some(acroform(&[(10, 0)])),
+        vec![],
+        vec![((10, 0), f.into())],
+      )
+    };
+    let info = extract_forms(&sig(Some(Object::Dictionary(
+      dictionary! { "Type" => name("Sig") },
+    ))))
+    .info
+    .unwrap();
+    assert_eq!(info.unplaced_fields[0].kind, "Signature");
+    assert!(info.unplaced_fields[0].signed);
+    let info = extract_forms(&sig(None)).info.unwrap();
+    assert!(!info.unplaced_fields[0].signed);
+  }
+
+  #[test]
+  fn truncation_and_dangling_refs_surface_in_info() {
+    let mut objects = vec![];
+    for i in 10..160u32 {
+      let mut dict = dictionary! { "T" => Object::string_literal(format!("n{i}")) };
+      if i < 159 {
+        dict.set("Kids", refs(&[(i + 1, 0)]));
+      } else {
+        dict.set("FT", name("Tx"));
+      }
+      objects.push(((i, 0), dict.into()));
+    }
+    let d = pdf_full(Some(acroform(&[(10, 0), (999, 0)])), vec![], objects);
+    let info = extract_forms(&d).info.unwrap();
+    assert!(info.truncated);
+    assert!(info.warnings.len() >= 2, "{:?}", info.warnings);
+  }
+
+  #[test]
+  fn multi_page_field_emits_one_entry_per_placement() {
+    let kid = |page_rect: Object| {
+      let mut k = widget_dict(dictionary! { "Rect" => page_rect });
+      k.set("Parent", Object::Reference((10, 0)));
+      k
+    };
+    let d = pdf_full(
+      Some(acroform(&[(10, 0)])),
+      vec![Object::Array(vec![]), refs(&[(11, 0)]), refs(&[(12, 0)])],
+      vec![
+        ((10, 0), dictionary! { "T" => Object::string_literal("id"), "FT" => name("Tx"), "V" => Object::string_literal("A-1"), "Kids" => refs(&[(11, 0), (12, 0)]) }.into()),
+        ((11, 0), kid(rect_at(50, 700, 200, 720)).into()),
+        ((12, 0), kid(rect_at(50, 700, 200, 720)).into()),
+      ],
+    );
+    let out = extract_forms(&d);
+    assert_eq!(out.fields.len(), 2);
+    let idx: Vec<u32> = out
+      .fields
+      .iter()
+      .map(|f| match f {
+        PageFormField::Text { widget_index, .. } => *widget_index,
+        _ => panic!(),
+      })
+      .collect();
+    assert_eq!(idx, vec![0, 1]);
+    assert!(out.fields.iter().all(|f| match f {
+      PageFormField::Text {
+        widget_count,
+        field_object_id,
+        ..
+      } => *widget_count == 2 && field_object_id == "10 0 obj",
+      _ => false,
+    }));
+    assert_eq!(form_field_pages(&out.fields), vec![2, 3]);
+    let info = out.info.unwrap();
+    assert_eq!(info.field_count, 1);
+    assert_eq!(info.widget_count, 2);
+  }
+
+  #[test]
+  fn duplicate_names_keep_distinct_field_object_ids() {
+    let d = pdf_full(
+      Some(acroform(&[(10, 0), (11, 0)])),
+      vec![refs(&[(10, 0), (11, 0)])],
+      vec![
+        (
+          (10, 0),
+          merged_text("dup", "one", rect_at(50, 600, 200, 620)).into(),
+        ),
+        (
+          (11, 0),
+          merged_text("dup", "two", rect_at(50, 560, 200, 580)).into(),
+        ),
+      ],
+    );
+    let out = extract_forms(&d);
+    assert_eq!(out.fields.len(), 2);
+    let ids: Vec<&str> = out
+      .fields
+      .iter()
+      .map(|f| match f {
+        PageFormField::Text {
+          field_object_id, ..
+        } => field_object_id.as_str(),
+        _ => panic!(),
+      })
+      .collect();
+    assert_ne!(ids[0], ids[1]);
+    assert!(out.fields.iter().all(|f| f.name() == "dup"));
+  }
+
+  #[test]
+  fn sort_is_page_then_top_down_then_left_right_then_name() {
+    let entry = |name: &str, page: u32, rect: Vec<f64>| {
+      let mut c = common();
+      c.name = name.into();
+      c.page = page;
+      c.rect = rect;
+      PageFormField::new(c, FieldKind::Unknown {})
+    };
+    let mut fields = vec![
+      entry("z", 2, vec![0.0, 0.0, 10.0, 10.0]),
+      entry("b", 1, vec![50.0, 700.0, 100.0, 720.0]),
+      entry("c", 1, vec![50.0, 600.0, 100.0, 620.0]),
+      entry("d", 1, vec![10.0, 700.0, 20.0, 720.0]),
+      entry("e", 1, vec![0.0, 0.0, 100.0]),
+      entry("a", 1, vec![50.0, 700.0, 100.0, 720.0]),
+    ];
+    sort_fields(&mut fields);
+    assert_eq!(
+      fields
+        .iter()
+        .map(|f| f.name().to_string())
+        .collect::<Vec<_>>(),
+      vec!["d", "a", "b", "c", "e", "z"]
+    );
+  }
+
+  #[test]
+  fn field_count_excludes_unknown_and_counts_unplaced() {
+    let d = pdf_full(
+      Some(acroform(&[(10, 0), (11, 0)])),
+      vec![refs(&[(10, 0), (12, 0)])],
+      vec![
+        (
+          (10, 0),
+          merged_text("placed", "p", rect_at(0, 0, 10, 10)).into(),
+        ),
+        (
+          (11, 0),
+          dictionary! { "T" => Object::string_literal("hidden"), "FT" => name("Tx") }.into(),
+        ),
+        (
+          (12, 0),
+          widget_dict(dictionary! { "T" => Object::string_literal("orphan") }).into(),
+        ),
+      ],
+    );
+    let out = extract_forms(&d);
+    let info = out.info.unwrap();
+    assert_eq!(info.field_count, 2);
+    assert_eq!(info.widget_count, 2);
+    assert_eq!(out.fields.len(), 2);
+    assert_eq!(info.unplaced_fields.len(), 1);
+  }
+
+  #[test]
+  fn acroform_dictionary_flags_are_reported() {
+    let mut af = acroform(&[]);
+    af.set("NeedAppearances", Object::Boolean(true));
+    af.set("SigFlags", Object::Integer(3));
+    af.set("XFA", Object::Array(vec![]));
+    let info = extract_forms(&pdf_full(Some(af), vec![], vec![]))
+      .info
+      .unwrap();
+    assert!(info.need_appearances);
+    assert_eq!(info.sig_flags, 3);
+    assert!(info.has_xfa);
+    let info = extract_forms(&pdf_full(Some(acroform(&[])), vec![], vec![]))
+      .info
+      .unwrap();
+    assert!(!info.need_appearances);
+    assert_eq!(info.sig_flags, 0);
+    assert!(!info.has_xfa);
+    assert!(info.has_acro_form);
   }
 }

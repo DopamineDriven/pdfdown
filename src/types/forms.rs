@@ -127,6 +127,14 @@ macro_rules! page_form_field {
     }
 
     #[allow(dead_code)]
+    impl FieldKind {
+      /// The variant name, identical to the `type` literal of the matching `PageFormField`.
+      pub(crate) fn kind_name(&self) -> &'static str {
+        match self { $(FieldKind::$variant { .. } => stringify!($variant),)+ }
+      }
+    }
+
+    #[allow(dead_code)]
     impl PageFormField {
       pub(crate) fn new(c: FieldCommon, kind: FieldKind) -> Self {
         match kind {

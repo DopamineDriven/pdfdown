@@ -360,7 +360,7 @@ Expected: compile errors for `extract_forms` / `FormsExtraction`.
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --lib core::forms`
-Expected: 39 passed.
+Expected: 40 passed.
 
 - [ ] **Step 5: Format, lint, commit**
 
