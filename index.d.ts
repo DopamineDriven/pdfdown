@@ -131,6 +131,26 @@ export interface AddressField {
 }
 
 /**
+ * An aircraft or engine the invoice relates to. Maintenance, parts and
+ * program invoices identify the asset by airframe (model, manufacturer serial
+ * number, registration) and/or by engine (model, engine serial number); one
+ * invoice can cover several assets, so `InvoiceFields.aircraft` is a list.
+ */
+export interface AircraftReference {
+  /** Airframe model, e.g. "Challenger 350", "Global 6000", "Phenom 300". */
+  model?: StringField;
+  /** Manufacturer serial number (MSN). */
+  serialNumber?: StringField;
+  /** Registration / tail number, e.g. "N123AB", "C-GXYZ". */
+  registration?: StringField;
+  /** Engine model, e.g. "BR710", "AE 3007", "PW308C". */
+  engineModel?: StringField;
+  /** Engine serial number (ESN). */
+  engineSerialNumber?: StringField;
+  span?: FieldSpan;
+}
+
+/**
  * A file embedded in the PDF: a `/Names /EmbeddedFiles` entry, a catalog
  * `/AF` associated file, or a page-level `/FileAttachment` annotation.
  */
@@ -291,6 +311,10 @@ export interface InvoiceFields {
   invoiceTotal?: MoneyField;
   amountDue?: MoneyField;
   previousUnpaidBalance?: MoneyField;
+  /** MRO work order / shop order the invoice bills against. */
+  workOrder?: StringField;
+  /** Aircraft and engines the invoice relates to; empty when none is identified. */
+  aircraft: Array<AircraftReference>;
   taxDetails: Array<TaxDetail>;
   paymentDetails: Array<PaymentDetail>;
   items: Array<InvoiceItem>;
