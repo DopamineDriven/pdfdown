@@ -1,6 +1,7 @@
 // Type-level assertions for the invoice and attachment surface. Checked by `yarn typecheck`.
 
 import type {
+  AircraftReference,
   Attachment,
   EInvoiceStandard,
   InvoiceDocumentType,
@@ -8,7 +9,8 @@ import type {
   InvoiceResult,
   InvoiceSource,
   IsExact,
-  MoneyField
+  MoneyField,
+  StringField
 } from "../index";
 import { extractInvoice } from "../index";
 
@@ -18,6 +20,8 @@ const _docType = true satisfies IsExact<InvoiceDocumentType, "Invoice" | "Credit
 const _separator = true satisfies IsExact<NonNullable<InvoiceOptions["decimalSeparator"]>, "Auto" | "." | ",">;
 const _money = true satisfies IsExact<MoneyField["currencyCode"], string | undefined>;
 const _attachmentData = true satisfies IsExact<Attachment["data"], Buffer>;
+const _aircraft = true satisfies IsExact<InvoiceResult["fields"]["aircraft"], Array<AircraftReference>>;
+const _esn = true satisfies IsExact<AircraftReference["engineSerialNumber"], StringField | undefined>;
 
 declare const buf: Buffer;
 const r: InvoiceResult = extractInvoice(buf, { preferEmbeddedXml: true, dateOrder: "Auto" });
@@ -38,3 +42,5 @@ void _docType;
 void _separator;
 void _money;
 void _attachmentData;
+void _aircraft;
+void _esn;
