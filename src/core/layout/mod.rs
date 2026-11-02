@@ -79,6 +79,7 @@ pub(crate) fn page_layout(doc: &Document, page_num: u32, page_id: ObjectId) -> P
     width: geo.width,
     height: geo.height,
     rotate: geo.rotate,
+    content_rotation: 0,
     source: TextSource::Native,
     words: Vec::new(),
     lines: Vec::new(),

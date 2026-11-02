@@ -674,6 +674,57 @@ fn layout_sample(out: &Path) {
   p.finish(None, &out.join("layout-sample.pdf"));
 }
 
+// ── CCITT ────────────────────────────────────────────────────────
+
+/// Pack a string of 0/1 characters (spaces ignored) into bytes, MSB first.
+fn bits(s: &str) -> Vec<u8> {
+  let mut out = Vec::new();
+  let mut acc = 0u8;
+  let mut n = 0;
+  for c in s.chars().filter(|c| *c == '0' || *c == '1') {
+    acc = (acc << 1) | u8::from(c == '1');
+    n += 1;
+    if n == 8 {
+      out.push(acc);
+      acc = 0;
+      n = 0;
+    }
+  }
+  if n > 0 {
+    out.push(acc << (8 - n));
+  }
+  out
+}
+
+/// A one-page PDF whose only image is an 8×2 Group 4 fax stream, hand-coded:
+/// row 1 `WWBBBWWW` (horizontal mode, white 2, black 3, then V0), row 2 all
+/// white (pass mode, then V0), then EOFB. The same bits are decoded in the
+/// `ccitt_tests` unit tests in `src/core/images.rs`.
+fn ccitt_tiny(out: &Path) {
+  let mut p = Pdf::new(1);
+  let image = p.doc.add_object(Stream::new(
+    dictionary! {
+      "Type" => "XObject", "Subtype" => "Image", "Width" => 8, "Height" => 2,
+      "ColorSpace" => "DeviceGray", "BitsPerComponent" => 1, "Filter" => "CCITTFaxDecode",
+      "DecodeParms" => Object::Dictionary(dictionary! { "K" => -1, "Columns" => 8, "Rows" => 2 }),
+    },
+    bits("001 0111 10 1  0001 1  000000000001 000000000001"),
+  ));
+  let content = p.doc.add_object(Stream::new(
+    dictionary! {},
+    b"q 80 0 0 20 100 700 cm /Im1 Do Q".to_vec(),
+  ));
+  p.set_page(0, "Contents", Object::Reference(content));
+  p.set_page(
+    0,
+    "Resources",
+    Object::Dictionary(dictionary! {
+      "XObject" => Object::Dictionary(dictionary! { "Im1" => Object::Reference(image) }),
+    }),
+  );
+  p.finish(None, &out.join("ccitt-g4-tiny.pdf"));
+}
+
 fn main() {
   let out = PathBuf::from(
     std::env::args()
@@ -705,4 +756,10 @@ fn main() {
     .join("layout");
   std::fs::create_dir_all(&layout).expect("layout fixture dir");
   layout_sample(&layout);
+
+  // The CCITT sample sits at the fixtures root, next to the other scan fixtures.
+  let fixtures_root = out
+    .parent()
+    .unwrap_or_else(|| Path::new("__test__/fixtures"));
+  ccitt_tiny(fixtures_root);
 }

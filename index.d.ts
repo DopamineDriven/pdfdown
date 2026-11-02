@@ -470,6 +470,12 @@ export interface PageLayout {
   height: number
   /** `/Rotate`, reported and not applied. */
   rotate: number
+  /**
+   * Clockwise degrees (0, 90, 180, 270) the OCR tiers had to turn the raster
+   * before its text read upright. Words, lines, `width` and `height` are then
+   * in that upright frame. Always 0 for `Native` pages.
+   */
+  contentRotation: number
   source: TextSource
   words: Array<TextWord>
   lines: Array<TextLine>

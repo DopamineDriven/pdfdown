@@ -79,7 +79,7 @@ pub(crate) fn collect_page_decoded_images_named(
     let filter = resolve_filter(&stream.dict);
 
     let content = match filter.as_str() {
-      "DCTDecode" | "JPXDecode" => image_codec_payload(stream),
+      "DCTDecode" | "JPXDecode" | "CCITTFaxDecode" => image_codec_payload(stream),
       _ => {
         let mut s = stream.clone();
         if s.decompress().is_ok() {
@@ -90,10 +90,19 @@ pub(crate) fn collect_page_decoded_images_named(
       }
     };
 
+    let ccitt = ccitt_params(doc, &stream.dict, &filter, width, height);
+
     // Skip SMask for OCR — to_rgb8() drops alpha anyway
-    if let Some(img) =
-      decode_xobject_to_dynamic_image(&content, width, height, bpc, &color_space, &filter, None)
-    {
+    if let Some(img) = decode_xobject_to_dynamic_image(
+      &content,
+      width,
+      height,
+      bpc,
+      &color_space,
+      &filter,
+      None,
+      ccitt,
+    ) {
       decoded.push((String::from_utf8_lossy(name).to_string(), img));
     }
   }
@@ -165,12 +174,13 @@ fn collect_page_images_raw(doc: &Document, page_id: ObjectId, page_num: u32) -> 
     // Step 4: Skip the full stream clone for DCT/JPX — they're already in their
     // target encoded format and don't need lopdf decompression.
     let content = match filter.as_str() {
-      "DCTDecode" | "JPXDecode" => image_codec_payload(stream),
+      "DCTDecode" | "JPXDecode" | "CCITTFaxDecode" => image_codec_payload(stream),
       _ => decompress_stream_content(doc, stream, width, height, channels, bpc),
     };
 
     // Check for SMask (alpha channel)
     let smask_data = get_smask_data(doc, &stream.dict);
+    let ccitt = ccitt_params(doc, &stream.dict, &filter, width, height);
 
     let png_data = match encode_to_png(
       &content,
@@ -180,6 +190,7 @@ fn collect_page_images_raw(doc: &Document, page_id: ObjectId, page_num: u32) -> 
       &color_space,
       &filter,
       smask_data.as_deref(),
+      ccitt,
     ) {
       Some(data) => data,
       None => continue,
@@ -775,7 +786,142 @@ fn image_codec_payload(stream: &lopdf::Stream) -> Vec<u8> {
     .unwrap_or_else(|_| stream.content.clone())
 }
 
+/// `/DecodeParms` of a `CCITTFaxDecode` image plus the `/Decode` inversion
+/// (ISO 32000-1 §7.4.6, table 11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CcittParams {
+  /// `/K`: < 0 pure Group 4, 0 pure Group 3 1-D, > 0 mixed Group 3 2-D.
+  pub k: i64,
+  pub columns: u32,
+  pub rows: u32,
+  pub black_is_1: bool,
+  pub encoded_byte_align: bool,
+  pub end_of_line: bool,
+  pub end_of_block: bool,
+  /// `/Decode [1 0]` on the image dictionary.
+  pub inverted: bool,
+}
+
+fn ccitt_params(
+  doc: &Document,
+  dict: &lopdf::Dictionary,
+  filter: &str,
+  width: u32,
+  height: u32,
+) -> Option<CcittParams> {
+  if filter != "CCITTFaxDecode" {
+    return None;
+  }
+  let parms = resolve_decode_parms(doc, dict).unwrap_or_default();
+  let flag = |key: &[u8], default: bool| match parms.get(key) {
+    Ok(Object::Boolean(b)) => *b,
+    _ => default,
+  };
+  let inverted = match dict.get(b"Decode") {
+    Ok(Object::Array(a)) => {
+      matches!(a.first(), Some(Object::Integer(1)))
+        || matches!(a.first(), Some(Object::Real(r)) if *r >= 0.5)
+    }
+    _ => false,
+  };
+  Some(CcittParams {
+    k: get_dict_int(&parms, b"K").unwrap_or(0),
+    columns: get_dict_int(&parms, b"Columns")
+      .filter(|c| *c > 0)
+      .map(|c| c as u32)
+      .unwrap_or(if width > 0 { width } else { 1728 }),
+    rows: get_dict_int(&parms, b"Rows")
+      .filter(|r| *r > 0)
+      .map(|r| r as u32)
+      .unwrap_or(height),
+    black_is_1: flag(b"BlackIs1", false),
+    encoded_byte_align: flag(b"EncodedByteAlign", false),
+    end_of_line: flag(b"EndOfLine", false),
+    end_of_block: flag(b"EndOfBlock", true),
+    inverted,
+  })
+}
+
+/// Collects decoded CCITT rows as 8-bit gray pixels.
+struct CcittRows {
+  width: usize,
+  black: u8,
+  white: u8,
+  pixels: Vec<u8>,
+}
+
+impl hayro_ccitt::Decoder for CcittRows {
+  fn push_row(&mut self, changes: &[u32]) {
+    let start = self.pixels.len();
+    self.pixels.resize(start + self.width, self.white);
+    let row = &mut self.pixels[start..];
+    for pair in changes.chunks(2) {
+      let a = (pair[0] as usize).min(self.width);
+      let b = pair
+        .get(1)
+        .map_or(self.width, |c| (*c as usize).min(self.width));
+      row[a..b].fill(self.black);
+    }
+  }
+}
+
+/// Decode a Group 3 / Group 4 fax image (the format copiers and fax gateways
+/// scan to) into an 8-bit gray image. A truncated stream yields the rows that
+/// did decode, padded with white to the declared height.
+fn decode_ccitt(content: &[u8], width: u32, height: u32, p: CcittParams) -> Option<DynamicImage> {
+  use hayro_ccitt::{DecodeSettings, DecoderContext, EncodingMode};
+
+  let encoding = if p.k < 0 {
+    EncodingMode::Group4
+  } else if p.k == 0 {
+    EncodingMode::Group3_1D
+  } else {
+    EncodingMode::Group3_2D
+  };
+  let settings = DecodeSettings {
+    columns: p.columns,
+    rows: p.rows,
+    end_of_block: p.end_of_block,
+    end_of_line: p.end_of_line,
+    rows_are_byte_aligned: p.encoded_byte_align,
+    encoding,
+    strict: false,
+  };
+  // The filter emits black as 1 only with /BlackIs1; DeviceGray then shows a 1
+  // bit as white unless /Decode [1 0] flips it back.
+  let black_bit_is_white = p.black_is_1 != p.inverted;
+  let (black, white) = if black_bit_is_white {
+    (255u8, 0u8)
+  } else {
+    (0u8, 255u8)
+  };
+  let mut sink = CcittRows {
+    width: p.columns as usize,
+    black,
+    white,
+    pixels: Vec::with_capacity(p.columns as usize * height as usize),
+  };
+  let mut ctx = DecoderContext::new(settings);
+  // Errors mean a malformed tail; keep whatever rows came through.
+  let _ = hayro_ccitt::decode(content, &mut sink, &mut ctx);
+  let rows_decoded = sink.pixels.len() / sink.width.max(1);
+  if rows_decoded == 0 {
+    return None;
+  }
+  let (w, h) = (p.columns, height.max(1));
+  sink.pixels.resize(w as usize * h as usize, white);
+  let gray = image::GrayImage::from_raw(w, h, sink.pixels)?;
+  let img = DynamicImage::ImageLuma8(gray);
+  // /Columns is authoritative for the bitstream; resample only if /Width disagrees.
+  Some(if width > 0 && width != w {
+    img.resize_exact(width, h, image::imageops::FilterType::Nearest)
+  } else {
+    img
+  })
+}
+
 /// Decode an XObject stream into a DynamicImage (shared by PNG export and OCR).
+#[allow(clippy::too_many_arguments)]
 fn decode_xobject_to_dynamic_image(
   content: &[u8],
   width: u32,
@@ -784,11 +930,14 @@ fn decode_xobject_to_dynamic_image(
   color_space: &str,
   filter: &str,
   smask: Option<&[u8]>,
+  ccitt: Option<CcittParams>,
 ) -> Option<DynamicImage> {
   let dynamic_img = if filter == "DCTDecode" {
     image::load_from_memory_with_format(content, ImageFormat::Jpeg).ok()?
   } else if filter == "JPXDecode" {
     decode_jpx(content)?
+  } else if let Some(p) = ccitt {
+    decode_ccitt(content, width, height, p)?
   } else {
     decode_raw_pixels(content, width, height, bpc, color_space)?
   };
@@ -800,6 +949,7 @@ fn decode_xobject_to_dynamic_image(
   })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_to_png(
   content: &[u8],
   width: u32,
@@ -808,9 +958,18 @@ fn encode_to_png(
   color_space: &str,
   filter: &str,
   smask: Option<&[u8]>,
+  ccitt: Option<CcittParams>,
 ) -> Option<Vec<u8>> {
-  let final_img =
-    decode_xobject_to_dynamic_image(content, width, height, bpc, color_space, filter, smask)?;
+  let final_img = decode_xobject_to_dynamic_image(
+    content,
+    width,
+    height,
+    bpc,
+    color_space,
+    filter,
+    smask,
+    ccitt,
+  )?;
   let mut png_buf = Cursor::new(Vec::new());
   final_img.write_to(&mut png_buf, ImageFormat::Png).ok()?;
   Some(png_buf.into_inner())
@@ -931,4 +1090,121 @@ fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
   }
 
   rgb
+}
+
+#[cfg(test)]
+mod ccitt_tests {
+  use super::*;
+  use lopdf::dictionary;
+
+  /// Pack a string of 0/1 characters (spaces ignored) into bytes, MSB first.
+  fn bits(s: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut acc = 0u8;
+    let mut n = 0;
+    for c in s.chars().filter(|c| *c == '0' || *c == '1') {
+      acc = (acc << 1) | u8::from(c == '1');
+      n += 1;
+      if n == 8 {
+        out.push(acc);
+        acc = 0;
+        n = 0;
+      }
+    }
+    if n > 0 {
+      out.push(acc << (8 - n));
+    }
+    out
+  }
+
+  fn params(k: i64, columns: u32, rows: u32) -> CcittParams {
+    CcittParams {
+      k,
+      columns,
+      rows,
+      black_is_1: false,
+      encoded_byte_align: false,
+      end_of_line: false,
+      end_of_block: true,
+      inverted: false,
+    }
+  }
+
+  const W: u8 = 255;
+  const B: u8 = 0;
+
+  #[test]
+  fn group4_rows_decode_to_gray_pixels() {
+    // Row 1 "WWBBBWWW": horizontal mode (001) white 2 (0111) black 3 (10), then V0 (1).
+    // Row 2 all white: pass mode (0001) past the reference changes, then V0 (1).
+    // Then EOFB.
+    let data = bits("001 0111 10 1  0001 1  000000000001 000000000001");
+    let img = decode_ccitt(&data, 8, 2, params(-1, 8, 2)).expect("decodes");
+    assert_eq!((img.width(), img.height()), (8, 2));
+    let px = img.to_luma8().into_raw();
+    assert_eq!(&px[..8], &[W, W, B, B, B, W, W, W]);
+    assert_eq!(&px[8..], &[W; 8]);
+  }
+
+  #[test]
+  fn group3_one_dimensional_rows_decode() {
+    // K = 0 (what Ricoh copiers write): modified Huffman runs, no EOLs.
+    // Row 1: white 2 (0111) black 3 (10) white 3 (1000). Row 2: white 8 (10011).
+    let data = bits("0111 10 1000  10011");
+    let img = decode_ccitt(&data, 8, 2, params(0, 8, 2)).expect("decodes");
+    let px = img.to_luma8().into_raw();
+    assert_eq!(&px[..8], &[W, W, B, B, B, W, W, W]);
+    assert_eq!(&px[8..], &[W; 8]);
+  }
+
+  #[test]
+  fn black_is_1_and_decode_array_flip_polarity_together() {
+    let data = bits("0111 10 1000  10011");
+    let mut p = params(0, 8, 2);
+    p.black_is_1 = true;
+    let px = decode_ccitt(&data, 8, 2, p).unwrap().to_luma8().into_raw();
+    assert_eq!(
+      &px[..8],
+      &[B, B, W, W, W, B, B, B],
+      "BlackIs1 alone shows inverted"
+    );
+    p.inverted = true;
+    let px = decode_ccitt(&data, 8, 2, p).unwrap().to_luma8().into_raw();
+    assert_eq!(
+      &px[..8],
+      &[W, W, B, B, B, W, W, W],
+      "/Decode [1 0] restores it"
+    );
+  }
+
+  #[test]
+  fn truncated_streams_keep_decoded_rows_and_pad_white() {
+    let data = bits("0111 10 1000");
+    let img = decode_ccitt(&data, 8, 3, params(0, 8, 3)).expect("partial decode");
+    assert_eq!(img.height(), 3);
+    let px = img.to_luma8().into_raw();
+    assert_eq!(&px[..8], &[W, W, B, B, B, W, W, W]);
+    assert_eq!(&px[8..], &[W; 16]);
+    assert!(decode_ccitt(&[], 8, 2, params(0, 8, 2)).is_none());
+  }
+
+  #[test]
+  fn params_follow_the_spec_defaults() {
+    let doc = Document::with_version("1.7");
+    let dict = dictionary! { "Filter" => "CCITTFaxDecode" };
+    let p = ccitt_params(&doc, &dict, "CCITTFaxDecode", 2480, 3508).unwrap();
+    assert_eq!((p.k, p.columns, p.rows), (0, 2480, 3508));
+    assert!(
+      !p.black_is_1 && !p.encoded_byte_align && !p.end_of_line && p.end_of_block && !p.inverted
+    );
+    let dict = dictionary! {
+      "Filter" => "CCITTFaxDecode",
+      "Decode" => vec![1.into(), 0.into()],
+      "DecodeParms" => Object::Dictionary(dictionary! { "K" => -1, "Columns" => 1728, "BlackIs1" => true }),
+    };
+    let p = ccitt_params(&doc, &dict, "CCITTFaxDecode", 1728, 10).unwrap();
+    assert_eq!((p.k, p.columns, p.rows), (-1, 1728, 10));
+    assert!(p.black_is_1 && p.inverted);
+    assert!(ccitt_params(&doc, &dict, "DCTDecode", 1, 1).is_none());
+  }
 }

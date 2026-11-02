@@ -252,6 +252,8 @@ Both methods extract everything from a PDF in a single call. The difference is h
 2. **Ocr** -- the page's embedded raster images are OCR'd and each Tesseract word box is mapped through the image's `Do` placement onto the page. Words carry `confidence` (0..1) instead of font metadata.
 3. **Rendered** -- with PDFium, the page is rasterised at `renderDpi` and OCR'd; word boxes are mapped onto the page box. Pages with `/Rotate` get a warning because the boxes are in displayed orientation.
 
+Copier and fax scans (`CCITTFaxDecode`, Group 3 and Group 4) are decoded in pure Rust, so they are read at tier 2 without PDFium. When the upright pass scores a mean Tesseract confidence under 55 (a landscape sheet scanned in portrait comes back as punctuation at 35-45), the raster is OCR'd again turned 90°, 270° and 180° and the best orientation wins. The page then reports `contentRotation`, its words and `width`/`height` are in that upright frame, and a warning says so. The same retry applies to `extractTextWithOcrPerPage`.
+
 ```typescript
 import { readFileSync } from "fs";
 import { extractLayoutWithOcrPerPage } from "@d0paminedriven/pdfdown-ocr";
