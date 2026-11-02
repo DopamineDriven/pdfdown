@@ -234,7 +234,7 @@ Expected: compile errors (module missing).
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --lib core::forms`
-Expected: 17 passed.
+Expected: 16 passed.
 
 - [ ] **Step 5: Format, lint, commit**
 
@@ -297,7 +297,7 @@ Expected: compile errors for the new names.
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --lib core::forms`
-Expected: 28 passed (17 from Task 2 + 11).
+Expected: 27 passed (16 from Task 2 + 11).
 
 - [ ] **Step 5: Format, lint, commit**
 
@@ -360,7 +360,7 @@ Expected: compile errors for `extract_forms` / `FormsExtraction`.
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --lib core::forms`
-Expected: 40 passed.
+Expected: 39 passed.
 
 - [ ] **Step 5: Format, lint, commit**
 
