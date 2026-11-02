@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024 (rustc 1.94), lopdf 0.46, napi 3 + napi-derive 3.7 (structured enums), @napi-rs/cli 3.2 (`dtsHeaderFile`), ava 8 + oxc-node for JS tests, qpdf 10 (fixture encryption + cross-check), oxfmt / cargo fmt / taplo.
 
-**Spec:** `notes/01-11-2026.md` — §5 (Feature A, incl. 5.1.1 structured-enum rules), §9 (testing), §10 phase 1, §13 (calls). The spec travels with this plan; read §5 first.
+**Spec:** `notes/2026-11-01.md` — §5 (Feature A, incl. 5.1.1 structured-enum rules), §9 (testing), §10 phase 1, §13 (calls). The spec travels with this plan; read §5 first.
 
 ## Global Constraints
 
