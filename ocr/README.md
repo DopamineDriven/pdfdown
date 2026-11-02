@@ -53,29 +53,20 @@ export TESSDATA_PREFIX="/opt/custom/tessdata"
 
 ## API
 
-This package exports everything from `@d0paminedriven/pdfdown` (text, images, annotations, structured text, metadata -- both sync and async), plus the OCR-specific APIs below. See the [base package docs](https://www.npmjs.com/package/@d0paminedriven/pdfdown) for the full base API.
+This package exports everything from `@d0paminedriven/pdfdown` (text, images, annotations, AcroForm fields, structured text, metadata -- both sync and async), plus the OCR-specific APIs below. `PdfDocumentOcr` carries the same `form`, `formFields`, `totalFormFields` and `formFieldPages` aggregates as `PdfDocument`; form extraction is read-only and needs neither Tesseract nor PDFium. See the [base package docs](https://www.npmjs.com/package/@d0paminedriven/pdfdown) for the full base API.
 
 ### OCR standalone functions
 
 ```typescript
 // Per-page OCR text extraction
-export declare function extractTextWithOcrPerPage(
-  buffer: Buffer,
-  opts?: OcrOptions,
-): Array<OcrPageText>;
+export declare function extractTextWithOcrPerPage(buffer: Buffer, opts?: OcrOptions): Array<OcrPageText>;
 
-export declare function extractTextWithOcrPerPageAsync(
-  buffer: Buffer,
-  opts?: OcrOptions,
-): Promise<Array<OcrPageText>>;
+export declare function extractTextWithOcrPerPageAsync(buffer: Buffer, opts?: OcrOptions): Promise<Array<OcrPageText>>;
 
 // Full document extraction with OCR text fallback
 export declare function pdfDocumentOcr(buffer: Buffer, opts?: OcrOptions): PdfDocumentOcr;
 
-export declare function pdfDocumentOcrAsync(
-  buffer: Buffer,
-  opts?: OcrOptions,
-): Promise<PdfDocumentOcr>;
+export declare function pdfDocumentOcrAsync(buffer: Buffer, opts?: OcrOptions): Promise<PdfDocumentOcr>;
 ```
 
 ### `PdfDown` class (includes OCR methods)
@@ -91,6 +82,8 @@ export declare class PdfDown {
   imagesPerPageAsync(): Promise<Array<PageImage>>;
   annotationsPerPage(): Array<PageAnnotation>;
   annotationsPerPageAsync(): Promise<Array<PageAnnotation>>;
+  formFieldsPerPage(): Array<PageFormField>;
+  formFieldsPerPageAsync(): Promise<Array<PageFormField>>;
   structuredText(): Array<StructuredPageText>;
   structuredTextAsync(): Promise<Array<StructuredPageText>>;
   metadata(): PdfMeta;
@@ -111,7 +104,7 @@ export declare class PdfDown {
 ```typescript
 export const enum TextSource {
   Native = "Native",
-  Ocr = "Ocr",
+  Ocr = "Ocr"
 }
 
 export interface OcrPageText {
@@ -213,7 +206,7 @@ const pdf = new PdfDown(await readFile("scanned-document.pdf"));
 
 const [ocrText, images] = await Promise.all([
   pdf.textWithOcrPerPageAsync({ minTextLength: 10 }),
-  pdf.imagesPerPageAsync(),
+  pdf.imagesPerPageAsync()
 ]);
 
 const imagesByPage = Map.groupBy(images, (img) => img.page);
@@ -222,7 +215,7 @@ for (const { page, text, source } of ocrText) {
   const pageImages = (imagesByPage.get(page) ?? []).map((img) => ({
     dataUrl: `data:image/png;base64,${img.data.toString("base64")}`,
     width: img.width,
-    height: img.height,
+    height: img.height
   }));
   // Send { page, text, source, images: pageImages } to your embedding pipeline
 }
