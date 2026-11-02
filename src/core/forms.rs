@@ -4,7 +4,7 @@
 //! inheritable attributes once per logical field, and (in later tasks) joins fields to the
 //! widget annotations placed on pages. Nothing here writes to the document.
 
-use crate::types::ChoiceOption;
+use crate::types::{ChoiceOption, FieldCommon, FieldKind};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 use std::collections::HashSet;
 
@@ -449,6 +449,352 @@ pub(crate) fn parse_rect(obj: &Object) -> Vec<f64> {
   }
 }
 
+// ── Widgets on pages ─────────────────────────────────────────────
+
+/// A `/Subtype /Widget` annotation found in some page's `/Annots`.
+#[derive(Debug, Clone)]
+pub(crate) struct PlacedWidget {
+  /// `"N G obj"`, or `"page P annot I"` for a dictionary written inline in `/Annots`.
+  pub object_id: String,
+  /// `None` for an inline dictionary (which can never be joined to a field by identity).
+  pub key: Option<ObjectId>,
+  /// 1-based page number.
+  pub page: u32,
+  /// Raw `/Rect` numbers in file order (same convention as `PageAnnotation.rect`).
+  pub rect: Vec<f64>,
+  pub dict: Dictionary,
+}
+
+/// Which placement of a logical field a widget is: the widget, its index and the field's
+/// placement count. Needed by the button-state rules (a one-widget radio group behaves like a
+/// checkbox; a state-less radio widget is reported by index).
+#[derive(Clone, Copy)]
+pub(crate) struct PlacementRef<'a> {
+  pub widget: &'a PlacedWidget,
+  pub index: u32,
+  pub count: u32,
+}
+
+/// Every widget annotation on every page, in page order. `/Annots` may be a direct array or a
+/// reference to one; entries may be references or inline dictionaries. Object ids are kept so
+/// widgets can be joined to field nodes by identity.
+pub(crate) fn scan_widgets(doc: &Document, warnings: &mut Vec<String>) -> Vec<PlacedWidget> {
+  let mut widgets = Vec::new();
+  for (page_num, page_id) in doc.get_pages() {
+    let Ok(page) = doc.get_dictionary(page_id) else {
+      continue;
+    };
+    let Ok(annots_obj) = page.get(b"Annots") else {
+      continue;
+    };
+    let entries = match deref(
+      doc,
+      annots_obj,
+      warnings,
+      &format!("page {page_num}: /Annots"),
+    ) {
+      Some(Object::Array(entries)) => entries,
+      Some(other) => {
+        warnings.push(format!(
+          "page {page_num}: /Annots is not an array ({})",
+          other.enum_variant()
+        ));
+        continue;
+      }
+      None => continue,
+    };
+    for (index, entry) in entries.iter().enumerate() {
+      let (key, dict): (Option<ObjectId>, &Dictionary) = match entry {
+        Object::Reference(id) => match doc.get_dictionary(*id) {
+          Ok(d) => (Some(*id), d),
+          Err(_) => {
+            warnings.push(format!(
+              "page {page_num}: /Annots[{index}] unresolved reference {} {} R",
+              id.0, id.1
+            ));
+            continue;
+          }
+        },
+        Object::Dictionary(d) => (None, d),
+        other => {
+          warnings.push(format!(
+            "page {page_num}: /Annots[{index}] is not a dictionary ({})",
+            other.enum_variant()
+          ));
+          continue;
+        }
+      };
+      let is_widget = dict
+        .get(b"Subtype")
+        .ok()
+        .and_then(|o| deref(doc, o, warnings, "/Subtype"))
+        .is_some_and(|o| matches!(o, Object::Name(n) if n == b"Widget"));
+      if !is_widget {
+        continue;
+      }
+      let rect = dict
+        .get(b"Rect")
+        .ok()
+        .and_then(|o| deref(doc, o, warnings, "/Rect"))
+        .map(parse_rect)
+        .unwrap_or_default();
+      widgets.push(PlacedWidget {
+        object_id: key
+          .map(object_id_string)
+          .unwrap_or_else(|| format!("page {page_num} annot {index}")),
+        key,
+        page: page_num,
+        rect,
+        dict: dict.clone(),
+      });
+    }
+  }
+  widgets
+}
+
+// ── Button state helpers ─────────────────────────────────────────
+
+/// The widget's appearance "on" state: the first key of `/AP /N` that is not `Off`. `None`
+/// when the widget has no appearance dictionary; never a fabricated default.
+pub(crate) fn on_state_of(
+  dict: &Dictionary,
+  doc: &Document,
+  warnings: &mut Vec<String>,
+) -> Option<String> {
+  let ap = match deref(doc, dict.get(b"AP").ok()?, warnings, "/AP")? {
+    Object::Dictionary(d) => d,
+    _ => return None,
+  };
+  let n = match deref(doc, ap.get(b"N").ok()?, warnings, "/AP /N")? {
+    Object::Dictionary(d) => d,
+    _ => return None,
+  };
+  n.iter()
+    .map(|(k, _)| k.as_slice())
+    .find(|k| *k != b"Off")
+    .map(decode_name_bytes)
+}
+
+/// Map an appearance state name onto the field's `/Opt` export value when the state is an index
+/// into `/Opt`; otherwise the state name is its own export value (ISO 32000-1 §12.7.4.2.3).
+pub(crate) fn export_value_for(state: &str, options: Option<&[ChoiceOption]>) -> String {
+  if let Some(opts) = options
+    && let Ok(idx) = state.parse::<usize>()
+    && let Some(opt) = opts.get(idx)
+  {
+    return opt.export_value.clone();
+  }
+  state.to_string()
+}
+
+/// A button's `/V` as a state name (names are the norm; a text string is accepted too).
+fn button_value_name(
+  doc: &Document,
+  tree: &FieldTree,
+  i: usize,
+  warnings: &mut Vec<String>,
+) -> Option<String> {
+  let v = deref(doc, tree.effective_value(i)?, warnings, "/V")?;
+  match v {
+    Object::Name(n) => Some(decode_name_bytes(n)),
+    Object::String(..) => decode_text_object(v, doc, warnings),
+    _ => None,
+  }
+}
+
+/// The widget's `/AS`, decoded.
+fn appearance_state_of(
+  dict: &Dictionary,
+  doc: &Document,
+  warnings: &mut Vec<String>,
+) -> Option<String> {
+  match deref(doc, dict.get(b"AS").ok()?, warnings, "/AS")? {
+    Object::Name(n) => Some(decode_name_bytes(n)),
+    _ => None,
+  }
+}
+
+/// Resolve `checked` / `selected` for one button widget. Rules, in order: `/AS` when present;
+/// else `/V` equals this widget's state name; else, with no appearance states at all, a checkbox
+/// (or a one-widget radio group) is on iff `/V` is a non-`Off` name, and a radio widget is
+/// reported unselected with a warning, because a group value cannot identify a state-less widget.
+fn button_is_on(
+  doc: &Document,
+  tree: &FieldTree,
+  i: usize,
+  placement: Option<PlacementRef<'_>>,
+  on_state: Option<&str>,
+  is_radio: bool,
+  warnings: &mut Vec<String>,
+) -> bool {
+  let as_state = placement.and_then(|p| appearance_state_of(&p.widget.dict, doc, warnings));
+  let v_name = button_value_name(doc, tree, i, warnings);
+  match (as_state, on_state) {
+    (Some(a), _) => a != "Off",
+    (None, Some(s)) => v_name.as_deref() == Some(s),
+    (None, None) => {
+      let single = placement.is_some_and(|p| p.count == 1);
+      if is_radio && !single {
+        if let Some(p) = placement {
+          warnings.push(format!(
+            "radio '{}' widget {} has no appearance states; selection unknown",
+            tree.full_name(i),
+            p.index
+          ));
+        }
+        false
+      } else {
+        v_name.as_deref().is_some_and(|v| v != "Off")
+      }
+    }
+  }
+}
+
+// ── Kind and common-field resolution ─────────────────────────────
+
+/// Kind-specific payload for logical field `i`, seen through one placement (or none, for an
+/// unplaced field).
+pub(crate) fn resolve_kind(
+  doc: &Document,
+  tree: &FieldTree,
+  i: usize,
+  placement: Option<PlacementRef<'_>>,
+  warnings: &mut Vec<String>,
+) -> FieldKind {
+  let flags = tree.effective_flags(i);
+  match tree.effective_type(i) {
+    Some(FieldType::Text) => FieldKind::Text {
+      multiline: flags.multiline(),
+      password: flags.password(),
+      comb: flags.comb(),
+      rich_text: flags.rich_text(),
+      max_len: tree.effective_max_len(i),
+    },
+    Some(FieldType::Button) if flags.push_button() => FieldKind::PushButton {},
+    Some(FieldType::Button) => {
+      let is_radio = flags.radio();
+      let on_state = placement.and_then(|p| on_state_of(&p.widget.dict, doc, warnings));
+      let export_value = on_state
+        .as_deref()
+        .map(|s| export_value_for(s, tree.effective_options(i)));
+      let on = button_is_on(
+        doc,
+        tree,
+        i,
+        placement,
+        on_state.as_deref(),
+        is_radio,
+        warnings,
+      );
+      if is_radio {
+        FieldKind::Radio {
+          on_state,
+          export_value,
+          selected: on,
+        }
+      } else {
+        FieldKind::Checkbox {
+          on_state,
+          export_value,
+          checked: on,
+        }
+      }
+    }
+    Some(FieldType::Choice) => {
+      let options = tree
+        .effective_options(i)
+        .map(<[_]>::to_vec)
+        .unwrap_or_default();
+      if flags.combo() {
+        FieldKind::ComboBox {
+          options,
+          editable: flags.edit(),
+        }
+      } else {
+        let values = tree
+          .effective_value(i)
+          .and_then(|v| deref(doc, v, warnings, "/V"))
+          .and_then(|v| match v {
+            Object::Array(items) => Some(
+              items
+                .iter()
+                .filter_map(|item| decode_text_object(item, doc, warnings))
+                .collect::<Vec<String>>(),
+            ),
+            _ => None,
+          });
+        FieldKind::ListBox {
+          options,
+          multi_select: flags.multi_select(),
+          values,
+        }
+      }
+    }
+    Some(FieldType::Signature) => FieldKind::Signature {
+      signed: tree
+        .effective_value(i)
+        .and_then(|v| deref(doc, v, warnings, "/V"))
+        .is_some_and(|v| matches!(v, Object::Dictionary(_))),
+    },
+    None => FieldKind::Unknown {},
+  }
+}
+
+/// The value of field `i` as reported to consumers: buttons in export-value form, signatures
+/// never (their `/V` is signature data), everything else as decoded text.
+fn field_value(
+  doc: &Document,
+  tree: &FieldTree,
+  i: usize,
+  raw: Option<&Object>,
+  warnings: &mut Vec<String>,
+) -> Option<String> {
+  match tree.effective_type(i) {
+    Some(FieldType::Signature) => None,
+    Some(FieldType::Button) => {
+      let v = deref(doc, raw?, warnings, "/V")?;
+      let state = match v {
+        Object::Name(n) => Some(decode_name_bytes(n)),
+        Object::String(..) => decode_text_object(v, doc, warnings),
+        _ => None,
+      }?;
+      Some(export_value_for(&state, tree.effective_options(i)))
+    }
+    _ => decode_text_object(raw?, doc, warnings),
+  }
+}
+
+/// The common fields of one placement of logical field `i`.
+pub(crate) fn common_for(
+  doc: &Document,
+  tree: &FieldTree,
+  i: usize,
+  placement: PlacementRef<'_>,
+  warnings: &mut Vec<String>,
+) -> FieldCommon {
+  let flags = tree.effective_flags(i);
+  let node = &tree.nodes[i];
+  let widget = placement.widget;
+  FieldCommon {
+    page: widget.page,
+    rect: widget.rect.clone(),
+    object_id: widget.object_id.clone(),
+    field_object_id: tree.field_object_id(i),
+    name: tree.full_name(i),
+    partial_name: node.partial_name.clone(),
+    widget_index: placement.index,
+    widget_count: placement.count,
+    value: field_value(doc, tree, i, tree.effective_value(i), warnings),
+    default_value: field_value(doc, tree, i, tree.effective_default(i), warnings),
+    tooltip: tree.effective_tooltip(i).map(str::to_owned),
+    mapping_name: node.mapping_name.clone(),
+    read_only: flags.read_only(),
+    required: flags.required(),
+    no_export: flags.no_export(),
+    has_actions: node.has_actions || widget.dict.has(b"AA") || widget.dict.has(b"A"),
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -812,5 +1158,509 @@ mod tests {
       ])),
       vec![0.0, 100.5]
     );
+  }
+
+  // ── Task 3: widget scan and kind resolution ──────────────────
+
+  /// Catalog (1,0), pages (2,0), page k at (100+k, 0) with the given `/Annots` value.
+  fn pdf_with_pages(annots: Vec<Object>, extras: Vec<(ObjectId, Object)>) -> Document {
+    let mut objects = extras;
+    let mut kids = vec![];
+    for (k, a) in annots.into_iter().enumerate() {
+      let id = (100 + k as u32, 0);
+      kids.push(Object::Reference(id));
+      objects.push((
+        id,
+        dictionary! {
+          "Type" => name("Page"),
+          "Parent" => Object::Reference((2, 0)),
+          "MediaBox" => rect(),
+          "Annots" => a
+        }
+        .into(),
+      ));
+    }
+    let count = kids.len() as i64;
+    objects.push((
+      (2, 0),
+      dictionary! { "Type" => name("Pages"), "Kids" => Object::Array(kids), "Count" => Object::Integer(count) }
+        .into(),
+    ));
+    objects.push((
+      (1, 0),
+      dictionary! { "Type" => name("Catalog"), "Pages" => Object::Reference((2, 0)) }.into(),
+    ));
+    let mut d = doc(objects);
+    d.trailer.set("Root", Object::Reference((1, 0)));
+    d
+  }
+
+  fn widget_dict(extra: Dictionary) -> Dictionary {
+    let mut w =
+      dictionary! { "Type" => name("Annot"), "Subtype" => name("Widget"), "Rect" => rect() };
+    w.extend(&extra);
+    w
+  }
+
+  /// A merged field+widget placed as the only widget of its own logical field.
+  fn placed(id: ObjectId, dict: &Dictionary) -> PlacedWidget {
+    PlacedWidget {
+      object_id: object_id_string(id),
+      key: Some(id),
+      page: 1,
+      rect: vec![0.0, 0.0, 10.0, 10.0],
+      dict: dict.clone(),
+    }
+  }
+
+  fn ap_n(keys: &[&str]) -> Object {
+    let mut n = Dictionary::new();
+    for k in keys {
+      n.set(k.as_bytes().to_vec(), Object::Reference((90, 0)));
+    }
+    dictionary! { "N" => Object::Dictionary(n) }.into()
+  }
+
+  /// Resolve a single merged field (1,0): returns (kind, common, warnings).
+  fn resolve_single(
+    field: Dictionary,
+    extras: Vec<(ObjectId, Object)>,
+  ) -> (FieldKind, FieldCommon, Vec<String>) {
+    let mut objects = extras;
+    objects.push(((1, 0), field.clone().into()));
+    let d = doc(objects);
+    let tree = walk_root(&d, (1, 0));
+    let w = placed((1, 0), &field);
+    let mut warnings = vec![];
+    let kind = resolve_kind(
+      &d,
+      &tree,
+      0,
+      Some(PlacementRef {
+        widget: &w,
+        index: 0,
+        count: 1,
+      }),
+      &mut warnings,
+    );
+    let common = common_for(
+      &d,
+      &tree,
+      0,
+      PlacementRef {
+        widget: &w,
+        index: 0,
+        count: 1,
+      },
+      &mut warnings,
+    );
+    (kind, common, warnings)
+  }
+
+  #[test]
+  fn scan_finds_widgets_behind_indirect_annots_and_inline_dicts() {
+    let d = pdf_with_pages(
+      vec![
+        Object::Reference((10, 0)),
+        Object::Array(vec![
+          widget_dict(dictionary! { "T" => Object::string_literal("inline") }).into(),
+        ]),
+      ],
+      vec![
+        (
+          (10, 0),
+          Object::Array(vec![Object::Reference((5, 0)), Object::Reference((6, 0))]),
+        ),
+        (
+          (5, 0),
+          widget_dict(dictionary! { "T" => Object::string_literal("ghost") }).into(),
+        ),
+        (
+          (6, 0),
+          dictionary! { "Type" => name("Annot"), "Subtype" => name("Link"), "Rect" => rect() }
+            .into(),
+        ),
+      ],
+    );
+    let mut w = vec![];
+    let widgets = scan_widgets(&d, &mut w);
+    assert_eq!(widgets.len(), 2);
+    assert_eq!(
+      widgets.iter().map(|x| x.page).collect::<Vec<_>>(),
+      vec![1, 2]
+    );
+    assert_eq!(widgets[0].object_id, "5 0 obj");
+    assert_eq!(widgets[0].key, Some((5, 0)));
+    assert_eq!(widgets[1].object_id, "page 2 annot 0");
+    assert!(widgets[1].key.is_none());
+    assert!(w.is_empty());
+  }
+
+  #[test]
+  fn on_state_is_first_non_off_ap_key() {
+    let d = doc(vec![]);
+    let mut w = vec![];
+    let with_ja = dictionary! { "AP" => ap_n(&["Off", "Ja"]) };
+    assert_eq!(on_state_of(&with_ja, &d, &mut w), Some("Ja".into()));
+    let only_off = dictionary! { "AP" => ap_n(&["Off"]) };
+    assert_eq!(on_state_of(&only_off, &d, &mut w), None);
+    let no_ap = dictionary! { "Rect" => rect() };
+    assert_eq!(on_state_of(&no_ap, &d, &mut w), None);
+  }
+
+  #[test]
+  fn export_value_for_maps_indices_through_opt() {
+    let o = [
+      ChoiceOption {
+        export_value: "Red".into(),
+        display_value: "Red".into(),
+      },
+      ChoiceOption {
+        export_value: "Green".into(),
+        display_value: "Green".into(),
+      },
+    ];
+    assert_eq!(export_value_for("1", Some(&o)), "Green");
+    assert_eq!(export_value_for("Blue", Some(&o)), "Blue");
+    assert_eq!(export_value_for("1", None), "1");
+  }
+
+  fn checkbox(
+    with_ap: bool,
+    as_state: Option<&str>,
+    v: Option<&str>,
+  ) -> (FieldKind, FieldCommon, Vec<String>) {
+    let mut f =
+      widget_dict(dictionary! { "T" => Object::string_literal("agree"), "FT" => name("Btn") });
+    if with_ap {
+      f.set("AP", ap_n(&["Off", "Ja"]));
+    }
+    if let Some(a) = as_state {
+      f.set("AS", name(a));
+    }
+    if let Some(v) = v {
+      f.set("V", name(v));
+    }
+    resolve_single(f, vec![])
+  }
+
+  fn is_checked(kind: &FieldKind) -> bool {
+    match kind {
+      FieldKind::Checkbox { checked, .. } => *checked,
+      other => panic!("expected Checkbox, got {}", kind_label(other)),
+    }
+  }
+
+  fn kind_label(kind: &FieldKind) -> &'static str {
+    match kind {
+      FieldKind::Text { .. } => "Text",
+      FieldKind::Checkbox { .. } => "Checkbox",
+      FieldKind::Radio { .. } => "Radio",
+      FieldKind::ComboBox { .. } => "ComboBox",
+      FieldKind::ListBox { .. } => "ListBox",
+      FieldKind::PushButton {} => "PushButton",
+      FieldKind::Signature { .. } => "Signature",
+      FieldKind::Unknown {} => "Unknown",
+    }
+  }
+
+  #[test]
+  fn checkbox_checked_from_as_then_v_and_disagreement_is_visible() {
+    let (k, _, _) = checkbox(true, Some("Ja"), None);
+    assert!(is_checked(&k));
+    let (k, _, _) = checkbox(true, None, Some("Ja"));
+    assert!(is_checked(&k));
+    let (k, c, _) = checkbox(true, Some("Off"), Some("Ja"));
+    assert!(!is_checked(&k));
+    assert_eq!(c.value, Some("Ja".into()));
+    match k {
+      FieldKind::Checkbox {
+        on_state,
+        export_value,
+        ..
+      } => {
+        assert_eq!(on_state.as_deref(), Some("Ja"));
+        assert_eq!(export_value.as_deref(), Some("Ja"));
+      }
+      _ => unreachable!(),
+    }
+  }
+
+  #[test]
+  fn checkbox_without_appearance_has_no_state_names() {
+    let (k, c, w) = checkbox(false, None, Some("Ja"));
+    match &k {
+      FieldKind::Checkbox {
+        on_state,
+        export_value,
+        checked,
+      } => {
+        assert_eq!(*on_state, None);
+        assert_eq!(*export_value, None);
+        assert!(*checked);
+      }
+      _ => unreachable!(),
+    }
+    assert_eq!(c.value, Some("Ja".into()));
+    assert!(w.is_empty());
+    let (k, _, _) = checkbox(false, None, None);
+    assert!(!is_checked(&k));
+    let (k, _, _) = checkbox(false, None, Some("Off"));
+    assert!(!is_checked(&k));
+  }
+
+  /// Radio group (1,0) with `kids` widget dictionaries at (2,0), (3,0), …; returns per-widget
+  /// (kind, common) plus the warnings.
+  fn radio_group(
+    group_extra: Dictionary,
+    kids: Vec<Dictionary>,
+  ) -> (Vec<(FieldKind, FieldCommon)>, Vec<String>) {
+    let kid_ids: Vec<ObjectId> = (0..kids.len()).map(|k| (2 + k as u32, 0)).collect();
+    let mut group = dictionary! {
+      "T" => Object::string_literal("color"),
+      "FT" => name("Btn"),
+      "Ff" => Object::Integer(1 << 15),
+      "Kids" => refs(&kid_ids)
+    };
+    group.extend(&group_extra);
+    let mut objects = vec![((1, 0), group.into())];
+    for (id, kid) in kid_ids.iter().zip(&kids) {
+      let mut kd = widget_dict(kid.clone());
+      kd.set("Parent", Object::Reference((1, 0)));
+      objects.push((*id, kd.into()));
+    }
+    let d = doc(objects);
+    let tree = walk_root(&d, (1, 0));
+    let count = kids.len() as u32;
+    let mut warnings = vec![];
+    let mut out = vec![];
+    for (index, id) in kid_ids.iter().enumerate() {
+      let dict = d.get_dictionary(*id).unwrap().clone();
+      let w = PlacedWidget {
+        object_id: object_id_string(*id),
+        key: Some(*id),
+        page: 1,
+        rect: vec![],
+        dict,
+      };
+      let p = PlacementRef {
+        widget: &w,
+        index: index as u32,
+        count,
+      };
+      let kind = resolve_kind(&d, &tree, 0, Some(p), &mut warnings);
+      let common = common_for(&d, &tree, 0, p, &mut warnings);
+      out.push((kind, common));
+    }
+    (out, warnings)
+  }
+
+  fn radio_parts(kind: &FieldKind) -> (Option<String>, Option<String>, bool) {
+    match kind {
+      FieldKind::Radio {
+        on_state,
+        export_value,
+        selected,
+      } => (on_state.clone(), export_value.clone(), *selected),
+      other => panic!("expected Radio, got {}", kind_label(other)),
+    }
+  }
+
+  #[test]
+  fn radio_without_appearance_states_is_unselected_with_warning() {
+    let (out, w) = radio_group(
+      dictionary! { "V" => name("1") },
+      vec![Dictionary::new(), Dictionary::new()],
+    );
+    assert_eq!(
+      out
+        .iter()
+        .map(|(k, _)| radio_parts(k).2)
+        .collect::<Vec<_>>(),
+      vec![false, false]
+    );
+    assert_eq!(
+      w.iter().filter(|m| m.contains("appearance states")).count(),
+      2
+    );
+
+    let (out, w) = radio_group(dictionary! { "V" => name("On") }, vec![Dictionary::new()]);
+    assert!(radio_parts(&out[0].0).2);
+    assert!(w.is_empty());
+  }
+
+  #[test]
+  fn radio_keeps_state_name_and_export_value_apart() {
+    let opt = Object::Array(vec![
+      Object::string_literal("Red"),
+      Object::string_literal("Green"),
+      Object::string_literal("Blue"),
+    ]);
+    let kid = |state: &str, as_state: &str| {
+      dictionary! { "AP" => ap_n(&["Off", state]), "AS" => name(as_state) }
+    };
+    let (out, w) = radio_group(
+      dictionary! { "V" => name("1"), "Opt" => opt },
+      vec![kid("0", "Off"), kid("1", "1"), kid("2", "Off")],
+    );
+    let parts: Vec<_> = out.iter().map(|(k, _)| radio_parts(k)).collect();
+    assert_eq!(
+      parts
+        .iter()
+        .map(|p| p.0.clone().unwrap())
+        .collect::<Vec<_>>(),
+      vec!["0", "1", "2"]
+    );
+    assert_eq!(
+      parts
+        .iter()
+        .map(|p| p.1.clone().unwrap())
+        .collect::<Vec<_>>(),
+      vec!["Red", "Green", "Blue"]
+    );
+    assert_eq!(
+      parts.iter().map(|p| p.2).collect::<Vec<_>>(),
+      vec![false, true, false]
+    );
+    assert!(out.iter().all(|(_, c)| c.value.as_deref() == Some("Green")));
+    assert!(w.is_empty());
+  }
+
+  #[test]
+  fn choice_kinds_and_values() {
+    let combo = widget_dict(dictionary! {
+      "T" => Object::string_literal("country"),
+      "FT" => name("Ch"),
+      "Ff" => Object::Integer(1 << 17 | 1 << 18),
+      "Opt" => Object::Array(vec![Object::string_literal("US")]),
+      "V" => Object::string_literal("US")
+    });
+    let (k, c, _) = resolve_single(combo, vec![]);
+    match k {
+      FieldKind::ComboBox { options, editable } => {
+        assert!(editable);
+        assert_eq!(options.len(), 1);
+      }
+      other => panic!("expected ComboBox, got {}", kind_label(&other)),
+    }
+    assert_eq!(c.value, Some("US".into()));
+
+    let list = widget_dict(dictionary! {
+      "T" => Object::string_literal("tags"),
+      "FT" => name("Ch"),
+      "Ff" => Object::Integer(1 << 21),
+      "Opt" => Object::Array(vec![Object::string_literal("a"), Object::string_literal("b"), Object::string_literal("c")]),
+      "V" => Object::Array(vec![Object::string_literal("a"), Object::string_literal("c")])
+    });
+    let (k, c, _) = resolve_single(list, vec![]);
+    match k {
+      FieldKind::ListBox {
+        multi_select,
+        values,
+        ..
+      } => {
+        assert!(multi_select);
+        assert_eq!(values, Some(vec!["a".into(), "c".into()]));
+      }
+      other => panic!("expected ListBox, got {}", kind_label(&other)),
+    }
+    assert_eq!(c.value, Some("a".into()));
+  }
+
+  #[test]
+  fn signature_signed_only_when_v_resolves_to_a_dictionary() {
+    let sig = |v: Option<Object>| {
+      let mut f =
+        widget_dict(dictionary! { "T" => Object::string_literal("sig"), "FT" => name("Sig") });
+      if let Some(v) = v {
+        f.set("V", v);
+      }
+      f
+    };
+    let signed = |k: &FieldKind| match k {
+      FieldKind::Signature { signed } => *signed,
+      other => panic!("expected Signature, got {}", kind_label(other)),
+    };
+    let (k, c, w) = resolve_single(
+      sig(Some(Object::Reference((9, 0)))),
+      vec![((9, 0), dictionary! { "Type" => name("Sig") }.into())],
+    );
+    assert!(signed(&k));
+    assert_eq!(c.value, None);
+    assert!(w.is_empty());
+    let (k, _, _) = resolve_single(
+      sig(Some(Object::Reference((9, 0)))),
+      vec![((9, 0), Object::string_literal("x"))],
+    );
+    assert!(!signed(&k));
+    let (k, _, w) = resolve_single(sig(Some(Object::Reference((99, 0)))), vec![]);
+    assert!(!signed(&k));
+    assert_eq!(w.len(), 1);
+    let (k, c, _) = resolve_single(sig(None), vec![]);
+    assert!(!signed(&k));
+    assert_eq!(c.value, None);
+  }
+
+  #[test]
+  fn choice_values_resolve_indirect_arrays() {
+    let list = widget_dict(dictionary! {
+      "T" => Object::string_literal("tags"),
+      "FT" => name("Ch"),
+      "Ff" => Object::Integer(1 << 21),
+      "Opt" => Object::Reference((11, 0)),
+      "V" => Object::Reference((10, 0))
+    });
+    let (k, _, w) = resolve_single(
+      list,
+      vec![
+        (
+          (10, 0),
+          Object::Array(vec![
+            Object::string_literal("a"),
+            Object::string_literal("c"),
+          ]),
+        ),
+        (
+          (11, 0),
+          Object::Array(vec![
+            Object::string_literal("a"),
+            Object::string_literal("b"),
+            Object::string_literal("c"),
+          ]),
+        ),
+      ],
+    );
+    match k {
+      FieldKind::ListBox {
+        options, values, ..
+      } => {
+        assert_eq!(values, Some(vec!["a".into(), "c".into()]));
+        assert_eq!(options.len(), 3);
+      }
+      other => panic!("expected ListBox, got {}", kind_label(&other)),
+    }
+    assert!(w.is_empty());
+  }
+
+  #[test]
+  fn non_string_values_and_actions() {
+    let text = |v: Object| {
+      widget_dict(
+        dictionary! { "T" => Object::string_literal("amount"), "FT" => name("Tx"), "V" => v },
+      )
+    };
+    let (_, c, _) = resolve_single(text(Object::Integer(42)), vec![]);
+    assert_eq!(c.value, Some("42".into()));
+    let (_, c, _) = resolve_single(text(Object::Dictionary(Dictionary::new())), vec![]);
+    assert_eq!(c.value, None);
+    let mut with_action = text(Object::string_literal("x"));
+    with_action.set(
+      "A",
+      Object::Dictionary(dictionary! { "S" => name("ResetForm") }),
+    );
+    let (_, c, _) = resolve_single(with_action, vec![]);
+    assert!(c.has_actions);
+    let (_, c, _) = resolve_single(text(Object::string_literal("x")), vec![]);
+    assert!(!c.has_actions);
   }
 }
