@@ -12,8 +12,8 @@ mod types;
 
 // Public API types (appear in generated .d.ts)
 pub use types::{
-  BoxType, Capabilities, PageAnnotation, PageBox, PageImage, PageText, PdfDocument, PdfMeta,
-  StructuredPageText,
+  BoxType, Capabilities, ChoiceOption, FormInfo, PageAnnotation, PageBox, PageFormField, PageImage,
+  PageText, PdfDocument, PdfMeta, StructuredPageText, UnplacedFormField,
 };
 
 #[cfg(feature = "ocr")]

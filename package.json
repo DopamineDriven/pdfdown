@@ -101,7 +101,8 @@
       "aarch64-pc-windows-msvc",
       "armv7-linux-androideabi",
       "wasm32-wasip1-threads"
-    ]
+    ],
+    "dtsHeaderFile": "types/dts-header.ts"
   },
   "ava": {
     "environmentVariables": {

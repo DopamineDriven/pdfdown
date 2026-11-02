@@ -326,3 +326,6 @@ impl From<RawPdfDocumentOcr> for PdfDocumentOcr {
     }
   }
 }
+
+mod forms;
+pub use forms::*;
