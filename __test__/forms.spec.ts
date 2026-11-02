@@ -7,12 +7,18 @@ import {
   extractAnnotationsPerPage,
   extractFormFieldsPerPage,
   extractFormFieldsPerPageAsync,
+  pdfDocument,
+  pdfDocumentAsync,
+  pdfMetadata,
   PdfDown
 } from "../index";
 import type { FormFieldType, PageFormField } from "../index";
 
 const FIXTURES = join(import.meta.dirname, "fixtures", "forms");
 const fixture = (name: string) => readFileSync(join(FIXTURES, name));
+const scan = () => readFileSync(join(import.meta.dirname, "fixtures", "ascii85-dct-scan.pdf"));
+const whmcs = () =>
+  readFileSync(join(import.meta.dirname, "fixtures", "invoices", "Downloadable-PDF-Invoices-Add-On-Samples.pdf"));
 
 type Variant<K extends FormFieldType> = Extract<PageFormField, { type: K }>;
 
@@ -209,4 +215,83 @@ test("sync, async and class agree", async (t) => {
     t.deepEqual(pdf.formFieldsPerPage(), sync);
     t.deepEqual(await pdf.formFieldsPerPageAsync(), sync);
   }
+});
+
+test("pdfMetadata: form info present on forms, absent otherwise", (t) => {
+  const basic = pdfMetadata(fixture("acroform-basic.pdf")).form;
+  if (!basic) throw new Error("basic fixture must report form info");
+  t.true(basic.hasAcroForm);
+  t.true(basic.needAppearances);
+  t.is(basic.fieldCount, 9);
+  t.is(basic.widgetCount, 11);
+  t.deepEqual(basic.unplacedFields, []);
+  t.false(basic.truncated);
+  t.deepEqual(basic.warnings, []);
+
+  const inherited = pdfMetadata(fixture("acroform-inherited.pdf")).form;
+  if (!inherited) throw new Error("inherited fixture must report form info");
+  t.is(inherited.fieldCount, 12);
+  t.is(inherited.widgetCount, 10);
+  t.deepEqual(
+    inherited.unplacedFields.map((u) => u.name),
+    ["hidden", "inlinekid", "sigdata"]
+  );
+  const [hidden, inlinekid, sigdata] = inherited.unplacedFields;
+  t.is(hidden.type, "Text");
+  t.is(hidden.value, "secret");
+  t.false(hidden.signed);
+  t.regex(inlinekid.fieldObjectId, /^\d+ \d+ obj$/);
+  t.is(sigdata.type, "Signature");
+  t.true(sigdata.signed);
+
+  const orphans = pdfMetadata(fixture("acroform-orphans.pdf")).form;
+  if (!orphans) throw new Error("orphan widgets must report form info");
+  t.false(orphans.hasAcroForm);
+  t.is(orphans.fieldCount, 0);
+  t.is(orphans.widgetCount, 2);
+
+  t.is(pdfMetadata(scan()).form, undefined);
+});
+
+test("real world: WHMCS invoice with an empty /AcroForm", (t) => {
+  const doc = pdfDocument(whmcs());
+  if (!doc.form) throw new Error("an /AcroForm dictionary must report form info even with no fields");
+  t.true(doc.form.hasAcroForm);
+  t.is(doc.form.fieldCount, 0);
+  t.is(doc.form.widgetCount, 0);
+  t.deepEqual(doc.formFields, []);
+  t.deepEqual(doc.formFieldPages, []);
+  t.is(doc.totalFormFields, 0);
+});
+
+test("pdfDocument: aggregates mirror images and annotations", (t) => {
+  const buf = fixture("acroform-inherited.pdf");
+  const doc = pdfDocument(buf);
+  t.is(doc.totalFormFields, 10);
+  t.is(doc.formFields.length, 10);
+  t.deepEqual(doc.formFieldPages, [1, 2, 3]);
+  t.deepEqual(doc.form, pdfMetadata(buf).form);
+  t.deepEqual(doc.formFields, extractFormFieldsPerPage(buf));
+
+  const none = pdfDocument(scan());
+  t.deepEqual(none.formFields, []);
+  t.is(none.totalFormFields, 0);
+  t.deepEqual(none.formFieldPages, []);
+  t.is(none.form, undefined);
+});
+
+test("pdfDocumentAsync and PdfDown.document agree on form data", async (t) => {
+  const buf = fixture("acroform-basic.pdf");
+  const sync = pdfDocument(buf);
+  if (!sync.form) throw new Error("sync pdfDocument must carry form info");
+  t.is(sync.formFields.length, 11);
+  const viaAsync = await pdfDocumentAsync(buf);
+  t.deepEqual(viaAsync.form, sync.form);
+  t.deepEqual(viaAsync.formFields, sync.formFields);
+  t.is(viaAsync.totalFormFields, sync.totalFormFields);
+  const pdf = new PdfDown(buf);
+  t.deepEqual(pdf.document().formFields, sync.formFields);
+  t.deepEqual((await pdf.documentAsync()).form, sync.form);
+  t.deepEqual(pdf.metadata().form, sync.form);
+  t.deepEqual((await pdf.metadataAsync()).form, sync.form);
 });

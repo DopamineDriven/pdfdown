@@ -234,6 +234,10 @@ export interface PdfDocument {
   structuredText: Array<StructuredPageText>
   images: Array<PageImage>
   annotations: Array<PageAnnotation>
+  form?: FormInfo
+  formFields: Array<PageFormField>
+  totalFormFields: number
+  formFieldPages: Array<number>
 }
 
 export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>
@@ -247,6 +251,8 @@ export interface PdfMeta {
   creationDate?: string
   modificationDate?: string
   pageBoxes: Array<PageBox>
+  /** AcroForm facts; present when `/AcroForm` exists or orphan widgets were found. */
+  form?: FormInfo
 }
 
 export declare function pdfMetadata(buffer: Buffer): PdfMeta

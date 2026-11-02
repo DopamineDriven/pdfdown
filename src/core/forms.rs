@@ -784,7 +784,6 @@ pub(crate) fn common_for(
 // ── Extraction entry point ───────────────────────────────────────
 
 /// Everything the forms module produces for one document.
-#[allow(dead_code)] // `info` is consumed by PdfMeta / PdfDocument wiring (plan Task 7)
 pub(crate) struct FormsExtraction {
   /// Present when `/AcroForm` exists or any widget was found.
   pub info: Option<FormInfo>,
@@ -1053,7 +1052,6 @@ pub(crate) fn sort_fields(fields: &mut [PageFormField]) {
 }
 
 /// Sorted unique page numbers of the given placements (mirrors `imagePages`).
-#[allow(dead_code)] // consumed by the PdfDocument aggregates (plan Task 7)
 pub(crate) fn form_field_pages(fields: &[PageFormField]) -> Vec<u32> {
   fields
     .iter()

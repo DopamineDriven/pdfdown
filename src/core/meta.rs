@@ -1,4 +1,5 @@
-use crate::types::{BoxType, PageBox, PdfMeta};
+use crate::core::forms::extract_forms;
+use crate::types::{BoxType, FormInfo, PageBox, PdfMeta};
 use lopdf::{Document, Object, ObjectId};
 use std::collections::{BTreeMap, HashMap};
 
@@ -217,7 +218,13 @@ pub(crate) fn extract_page_boxes(doc: &Document, pages: &BTreeMap<u32, ObjectId>
     .collect()
 }
 
+/// Document metadata including AcroForm facts (runs the form scan).
 pub(crate) fn extract_metadata(doc: &Document) -> PdfMeta {
+  extract_metadata_with_form(doc, extract_forms(doc).info)
+}
+
+/// Document metadata with a form scan result the caller already has (avoids scanning twice).
+pub(crate) fn extract_metadata_with_form(doc: &Document, form: Option<FormInfo>) -> PdfMeta {
   let pages = doc.get_pages();
   let page_count = pages.len() as u32;
   let version = doc.version.clone();
@@ -249,6 +256,7 @@ pub(crate) fn extract_metadata(doc: &Document) -> PdfMeta {
     creation_date,
     modification_date,
     page_boxes,
+    form,
   }
 }
 
