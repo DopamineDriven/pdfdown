@@ -34,6 +34,8 @@ struct Pdf {
   indirect_annots: Vec<bool>,
   /// Extra catalog entries (`/Names`, `/AF`, …) merged in by `finish`.
   catalog_extra: Dictionary,
+  /// Extra entries per page (`/Contents`, `/Resources`, `/Rotate`, …) merged in by `finish`.
+  page_extra: Vec<Dictionary>,
 }
 
 impl Pdf {
@@ -48,7 +50,13 @@ impl Pdf {
       page_annots: vec![Vec::new(); page_count],
       indirect_annots: vec![false; page_count],
       catalog_extra: Dictionary::new(),
+      page_extra: vec![Dictionary::new(); page_count],
     }
+  }
+
+  /// Set one entry on page `page` (0-based); written out by `finish`.
+  fn set_page(&mut self, page: usize, key: &str, value: Object) {
+    self.page_extra[page].set(key, value);
   }
 
   fn reserve(&mut self) -> ObjectId {
@@ -117,15 +125,15 @@ impl Pdf {
         annots
       };
       let pages_id = self.pages_id;
-      self.put(
-        pid,
-        dictionary! {
-          "Type" => n("Page"),
-          "Parent" => Object::Reference(pages_id),
-          "MediaBox" => rect(0, 0, 612, 792),
-          "Annots" => annots
-        },
-      );
+      let mut page = dictionary! {
+        "Type" => n("Page"),
+        "Parent" => Object::Reference(pages_id),
+        "MediaBox" => rect(0, 0, 612, 792),
+        "Annots" => annots
+      };
+      let extra = std::mem::take(&mut self.page_extra[k]);
+      page.extend(&extra);
+      self.put(pid, page);
     }
     let count = page_ids.len() as i64;
     let pages_id = self.pages_id;
@@ -598,6 +606,74 @@ fn einvoice_broken(out: &Path) {
   p.finish(None, &out.join("einvoice-broken.pdf"));
 }
 
+// ── Layout ───────────────────────────────────────────────────────
+
+/// `__test__/layout.spec.ts` asserts the exact reading order and boxes below.
+/// Page 1 is painted deliberately out of order (footer first, title second) with
+/// Helvetica / Helvetica-Bold, a `TJ` array with kerning, `Tw` word spacing, a
+/// form XObject placed through `/Matrix` + `cm`, and a 2×2 image XObject. Page 2
+/// carries `/Rotate 90` and a CropBox smaller than its MediaBox.
+fn layout_sample(out: &Path) {
+  let mut p = Pdf::new(2);
+  let helv = p.doc.add_object(dictionary! {
+    "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => "WinAnsiEncoding",
+  });
+  let helv_bold = p.doc.add_object(dictionary! {
+    "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica-Bold", "Encoding" => "WinAnsiEncoding",
+  });
+  let form = p.doc.add_object(Stream::new(
+    dictionary! {
+      "Type" => "XObject", "Subtype" => "Form",
+      "BBox" => vec![0.into(), 0.into(), 200.into(), 30.into()],
+      "Matrix" => vec![1.into(), 0.into(), 0.into(), 1.into(), 20.into(), 10.into()],
+      "Resources" => Object::Dictionary(dictionary! {
+        "Font" => Object::Dictionary(dictionary! { "F1" => Object::Reference(helv) }),
+      }),
+    },
+    b"BT /F1 11 Tf 0 0 Td (Inside a form XObject) Tj ET".to_vec(),
+  ));
+  let image = p.doc.add_object(Stream::new(
+    dictionary! {
+      "Type" => "XObject", "Subtype" => "Image", "Width" => 2, "Height" => 2,
+      "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8,
+    },
+    vec![0, 255, 255, 0],
+  ));
+  let resources = dictionary! {
+    "Font" => Object::Dictionary(dictionary! {
+      "F1" => Object::Reference(helv), "F2" => Object::Reference(helv_bold),
+    }),
+    "XObject" => Object::Dictionary(dictionary! {
+      "Fx" => Object::Reference(form), "Im1" => Object::Reference(image),
+    }),
+  };
+  let page1 = concat!(
+    "BT /F1 9 Tf 50 30 Td (Page 1 of 2) Tj ET\n",
+    "BT /F2 18 Tf 50 740 Td (Layout Sample) Tj ET\n",
+    "BT /F2 10 Tf 50 600 Td (Item) Tj 250 0 Td (Qty) Tj 150 0 Td (Amount) Tj ET\n",
+    "BT /F1 10 Tf 50 580 Td [(W) 40 (idget)] TJ 250 0 Td (2) Tj 150 0 Td (10,00) Tj ET\n",
+    "BT /F1 10 Tf 50 560 Td (Gadget) Tj 250 0 Td (5) Tj 150 0 Td (25,00) Tj ET\n",
+    "BT /F1 10 Tf 2 Tw 50 500 Td (Word spacing applies here) Tj ET\n",
+    "q 1 0 0 1 300 400 cm /Fx Do Q\n",
+    "q 100 0 0 50 400 650 cm /Im1 Do Q\n",
+  );
+  let page2 = "BT /F1 12 Tf 20 450 Td (Rotated page) Tj ET";
+  for (i, content) in [page1, page2].into_iter().enumerate() {
+    let cid = p
+      .doc
+      .add_object(Stream::new(dictionary! {}, content.as_bytes().to_vec()));
+    p.set_page(i, "Contents", Object::Reference(cid));
+    p.set_page(i, "Resources", Object::Dictionary(resources.clone()));
+  }
+  p.set_page(1, "Rotate", 90.into());
+  p.set_page(
+    1,
+    "CropBox",
+    Object::Array(vec![0.into(), 0.into(), 300.into(), 500.into()]),
+  );
+  p.finish(None, &out.join("layout-sample.pdf"));
+}
+
 fn main() {
   let out = PathBuf::from(
     std::env::args()
@@ -622,4 +698,11 @@ fn main() {
   facturx_minimal(&einvoice);
   ubl_attachments(&einvoice);
   einvoice_broken(&einvoice);
+
+  let layout = out
+    .parent()
+    .unwrap_or_else(|| Path::new("__test__/fixtures"))
+    .join("layout");
+  std::fs::create_dir_all(&layout).expect("layout fixture dir");
+  layout_sample(&layout);
 }

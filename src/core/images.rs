@@ -20,6 +20,19 @@ pub(crate) fn extract_images_raw(doc: &Document) -> Vec<RawPageImage> {
 /// Used by OCR to avoid the PNG encode→decode roundtrip and by render for empty page detection.
 #[cfg(any(feature = "ocr", feature = "render"))]
 pub(crate) fn collect_page_decoded_images(doc: &Document, page_id: ObjectId) -> Vec<DynamicImage> {
+  collect_page_decoded_images_named(doc, page_id)
+    .into_iter()
+    .map(|(_, img)| img)
+    .collect()
+}
+
+/// Like [`collect_page_decoded_images`], keyed by the XObject resource name so
+/// callers can match each image to where the content stream painted it.
+#[cfg(any(feature = "ocr", feature = "render"))]
+pub(crate) fn collect_page_decoded_images_named(
+  doc: &Document,
+  page_id: ObjectId,
+) -> Vec<(String, DynamicImage)> {
   let mut decoded = Vec::new();
 
   let xobjects = match get_page_xobjects(doc, page_id) {
@@ -81,7 +94,7 @@ pub(crate) fn collect_page_decoded_images(doc: &Document, page_id: ObjectId) -> 
     if let Some(img) =
       decode_xobject_to_dynamic_image(&content, width, height, bpc, &color_space, &filter, None)
     {
-      decoded.push(img);
+      decoded.push((String::from_utf8_lossy(name).to_string(), img));
     }
   }
 
@@ -201,7 +214,10 @@ fn get_page_xobjects(doc: &Document, page_id: ObjectId) -> Option<lopdf::Diction
   resolve_to_dict(doc, xobject_obj)
 }
 
-fn get_inherited_resources(doc: &Document, page_id: ObjectId) -> Option<lopdf::Dictionary> {
+pub(crate) fn get_inherited_resources(
+  doc: &Document,
+  page_id: ObjectId,
+) -> Option<lopdf::Dictionary> {
   let mut current_id = Some(page_id);
   while let Some(id) = current_id {
     let dict = doc.get_dictionary(id).ok()?;

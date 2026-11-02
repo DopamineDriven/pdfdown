@@ -1,6 +1,9 @@
-use crate::core::images::collect_page_decoded_images;
+use crate::core::images::{collect_page_decoded_images, collect_page_decoded_images_named};
+use crate::core::layout::words::{Word, words_to_lines};
+use crate::core::layout::{page_geometry, page_layout};
 use crate::core::text::{detect_headers_footers, strip_footer_artifacts};
 use crate::types::{OcrPageText, OcrStructuredPageText, PageText, TextSource};
+use crate::types::{PageLayout, PlacedImage};
 use image::DynamicImage;
 use lopdf::{Document, ObjectId};
 use napi::Result;
@@ -261,12 +264,280 @@ pub(crate) fn detect_headers_footers_ocr(pages: &[OcrPageText]) -> Vec<OcrStruct
       header: s.header,
       body: s.body,
       footer: s.footer,
-      source: match ocr.source {
-        TextSource::Native => TextSource::Native,
-        TextSource::Ocr => TextSource::Ocr,
-        #[cfg(feature = "render")]
-        TextSource::Rendered => TextSource::Rendered,
-      },
+      source: ocr.source,
     })
     .collect()
+}
+
+// ── Positioned OCR (phase III) ──────────────────────────────────
+
+/// One Tesseract word in image pixel space (origin top-left).
+struct OcrWord {
+  text: String,
+  left: i32,
+  top: i32,
+  right: i32,
+  bottom: i32,
+  confidence: f32,
+}
+
+/// OCR an image and return every recognised word with its pixel box.
+fn ocr_dynamic_image_words(img: &DynamicImage, lang: &str, ppi: Option<i32>) -> Vec<OcrWord> {
+  use tesseract_rs::TessPageIteratorLevel;
+
+  let datapath = get_tessdata_prefix().unwrap_or("");
+  let rgb = img.to_rgb8();
+  let (w, h) = rgb.dimensions();
+  let pixels = rgb.as_raw();
+
+  let tess = tesseract_rs::TesseractAPI::new();
+  if tess.init(datapath, lang).is_err()
+    || tess
+      .set_image(pixels, w as i32, h as i32, 3, (w * 3) as i32)
+      .is_err()
+  {
+    return Vec::new();
+  }
+  if let Some(ppi) = ppi {
+    let _ = tess.set_source_resolution(ppi);
+  }
+  if tess.recognize().is_err() {
+    return Vec::new();
+  }
+  let Ok(it) = tess.get_iterator() else {
+    return Vec::new();
+  };
+  let mut out = Vec::new();
+  loop {
+    if let Ok((text, left, top, right, bottom, confidence)) = it.get_word_with_bounds()
+      && !text.trim().is_empty()
+    {
+      out.push(OcrWord {
+        text: text.trim().to_string(),
+        left,
+        top,
+        right,
+        bottom,
+        confidence,
+      });
+    }
+    match it.next(TessPageIteratorLevel::RIL_WORD) {
+      Ok(true) => continue,
+      _ => break,
+    }
+  }
+  out
+}
+
+/// Map pixel boxes of an image of `img_w`×`img_h` pixels onto the user-space
+/// rectangle `dest = [x0, y0, x1, y1]` the image covers (y up).
+fn map_ocr_words(words: Vec<OcrWord>, img_w: u32, img_h: u32, dest: [f64; 4]) -> Vec<Word> {
+  let (iw, ih) = (f64::from(img_w.max(1)), f64::from(img_h.max(1)));
+  let (dw, dh) = (dest[2] - dest[0], dest[3] - dest[1]);
+  words
+    .into_iter()
+    .map(|w| {
+      let x0 = dest[0] + f64::from(w.left) / iw * dw;
+      let x1 = dest[0] + f64::from(w.right) / iw * dw;
+      let y1 = dest[1] + (1.0 - f64::from(w.top) / ih) * dh;
+      let y0 = dest[1] + (1.0 - f64::from(w.bottom) / ih) * dh;
+      Word {
+        text: w.text,
+        x0,
+        y0,
+        x1,
+        y1,
+        baseline: y0,
+        font_size: None,
+        font: None,
+        confidence: Some((f64::from(w.confidence) / 100.0).clamp(0.0, 1.0)),
+      }
+    })
+    .collect()
+}
+
+/// Tier 2: OCR the page's embedded raster images and place each word through
+/// the image's `Do` placement from the native pass.
+fn ocr_page_image_words(
+  doc: &Document,
+  page_id: ObjectId,
+  lang: &str,
+  placements: &[PlacedImage],
+  warnings: &mut Vec<String>,
+) -> Vec<Word> {
+  let mut out = Vec::new();
+  for (name, img) in collect_page_decoded_images_named(doc, page_id) {
+    let placed: Vec<&PlacedImage> = placements
+      .iter()
+      .filter(|p| p.xobject_name == name)
+      .collect();
+    let Some(first) = placed.first() else {
+      warnings.push(format!(
+        "image {name}: no placement found; its OCR words were skipped"
+      ));
+      continue;
+    };
+    if placed.len() > 1 {
+      warnings.push(format!(
+        "image {name}: painted {} times; OCR words use the first placement",
+        placed.len()
+      ));
+    }
+    let words = ocr_dynamic_image_words(&img, lang, None);
+    out.extend(map_ocr_words(
+      words,
+      img.width(),
+      img.height(),
+      [first.x0, first.y0, first.x1, first.y1],
+    ));
+  }
+  out
+}
+
+/// Tier 3: rasterise the page and place each OCR word on the page box.
+#[cfg(feature = "render")]
+fn render_page_words(
+  pdf_bytes: &[u8],
+  page_num: u32,
+  dpi: u32,
+  lang: &str,
+  geo: &crate::core::layout::PageGeometry,
+  warnings: &mut Vec<String>,
+) -> Option<Vec<Word>> {
+  if !render::is_pdfium_available() {
+    return None;
+  }
+  let page_index = (page_num - 1) as u16;
+  let img = render::render_page_to_image_from_bytes(pdf_bytes, page_index, dpi)?;
+  if geo.rotate != 0 {
+    warnings.push(format!(
+      "page {page_num}: /Rotate {}; rendered OCR coordinates are in displayed orientation",
+      geo.rotate
+    ));
+  }
+  let words = ocr_dynamic_image_words(&img, lang, Some(dpi as i32));
+  Some(map_ocr_words(words, img.width(), img.height(), geo.bbox))
+}
+
+fn finish_ocr_layout(mut layout: PageLayout, words: Vec<Word>, source: TextSource) -> PageLayout {
+  let (words, lines) = words_to_lines(words, &[]);
+  layout.words = words;
+  layout.lines = lines;
+  layout.source = source;
+  layout
+}
+
+fn non_ws_chars(layout: &PageLayout) -> usize {
+  layout
+    .words
+    .iter()
+    .map(|w| w.text.chars().filter(|c| !c.is_whitespace()).count())
+    .sum()
+}
+
+/// Positioned text with the same three-tier cascade as [`extract_text_with_ocr`]:
+/// native glyph placement, then OCR of embedded images mapped through their
+/// placements, then (with `render`) OCR of the rasterised page.
+pub(crate) fn extract_layout_with_ocr(
+  doc: &Document,
+  pdf_bytes: &[u8],
+  lang: &str,
+  min_len: u32,
+  max_threads: u32,
+  render_dpi: u32,
+  render_mode: u8,
+) -> Result<Vec<PageLayout>> {
+  let pages = doc.get_pages();
+  let page_entries: Vec<(u32, ObjectId)> = pages.iter().map(|(&k, &v)| (k, v)).collect();
+  let pool = get_ocr_pool(max_threads as usize);
+
+  #[cfg(feature = "render")]
+  let pdf_arc: Arc<Vec<u8>> = Arc::new(pdf_bytes.to_vec());
+  #[cfg(not(feature = "render"))]
+  let _ = (pdf_bytes, render_dpi, render_mode);
+
+  let mut results: Vec<PageLayout> = pool.install(|| {
+    page_entries
+      .par_iter()
+      .map(|&(page_num, page_id)| {
+        // Tier 1: native glyph placement (also yields image placements for tier 2).
+        let native = page_layout(doc, page_num, page_id);
+        let mut warnings = Vec::new();
+
+        #[cfg(feature = "render")]
+        if render_mode == RENDER_MODE_ALWAYS {
+          let geo = page_geometry(doc, page_id);
+          if let Some(words) =
+            render_page_words(&pdf_arc, page_num, render_dpi, lang, &geo, &mut warnings)
+            && !words.is_empty()
+          {
+            let mut out = finish_ocr_layout(native, words, TextSource::Rendered);
+            out.warnings.extend(warnings);
+            return out;
+          }
+        }
+
+        if non_ws_chars(&native) >= min_len as usize {
+          return native;
+        }
+
+        // Tier 2: OCR embedded raster images.
+        let words = ocr_page_image_words(doc, page_id, lang, &native.images, &mut warnings);
+        if !words.is_empty() {
+          let mut out = finish_ocr_layout(native, words, TextSource::Ocr);
+          out.warnings.extend(warnings);
+          return out;
+        }
+
+        // Tier 3: render + OCR.
+        #[cfg(feature = "render")]
+        if render_mode != RENDER_MODE_NEVER {
+          let should_render = page_has_form_xobjects(doc, page_id)
+            || page_has_image_xobjects(doc, page_id)
+            || page_has_vector_content(doc, page_id);
+          if should_render {
+            let geo = page_geometry(doc, page_id);
+            if let Some(words) =
+              render_page_words(&pdf_arc, page_num, render_dpi, lang, &geo, &mut warnings)
+              && !words.is_empty()
+            {
+              let mut out = finish_ocr_layout(native, words, TextSource::Rendered);
+              out.warnings.extend(warnings);
+              return out;
+            }
+          }
+        }
+
+        let mut out = finish_ocr_layout(native, Vec::new(), TextSource::Ocr);
+        out.warnings.extend(warnings);
+        out
+      })
+      .collect()
+  });
+  results.sort_unstable_by_key(|r| r.page);
+  Ok(results)
+}
+
+#[cfg(test)]
+mod layout_tests {
+  use super::*;
+
+  #[test]
+  fn pixel_boxes_map_onto_the_destination_rectangle() {
+    let words = vec![OcrWord {
+      text: "Hi".into(),
+      left: 0,
+      top: 0,
+      right: 50,
+      bottom: 10,
+      confidence: 87.5,
+    }];
+    // 100×100 px image painted on [10, 20, 110, 220]: 1 px = 1 pt wide, 2 pt tall.
+    let mapped = map_ocr_words(words, 100, 100, [10.0, 20.0, 110.0, 220.0]);
+    let w = &mapped[0];
+    assert_eq!((w.x0, w.x1), (10.0, 60.0));
+    assert_eq!((w.y0, w.y1), (200.0, 220.0));
+    assert_eq!(w.confidence, Some(0.875));
+    assert_eq!(w.baseline, 200.0);
+  }
 }

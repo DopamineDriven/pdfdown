@@ -17,21 +17,6 @@ pub struct StructuredPageText {
   pub footer: String,
 }
 
-#[cfg(all(feature = "ocr", not(feature = "render")))]
-#[napi(string_enum)]
-pub enum TextSource {
-  Native,
-  Ocr,
-}
-
-#[cfg(all(feature = "ocr", feature = "render"))]
-#[napi(string_enum)]
-pub enum TextSource {
-  Native,
-  Ocr,
-  Rendered,
-}
-
 #[cfg(feature = "ocr")]
 #[napi(object)]
 pub struct OcrPageText {
@@ -353,5 +338,7 @@ impl From<RawPdfDocumentOcr> for PdfDocumentOcr {
 
 mod forms;
 mod invoice;
+mod layout;
 pub use forms::*;
 pub use invoice::*;
+pub use layout::*;

@@ -28,6 +28,7 @@ export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>;
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>;
 export declare function attachments(buffer: Buffer): Array<Attachment>;
 export declare function extractInvoice(buffer: Buffer, opts?: InvoiceOptions): InvoiceResult;
+export declare function layoutPerPage(buffer: Buffer): Array<PageLayout>;
 export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>;
 export declare function pdfMetadata(buffer: Buffer): PdfMeta;
 export declare function pdfDocument(buffer: Buffer): PdfDocument;
@@ -44,6 +45,7 @@ export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array
 export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>;
 export declare function attachmentsAsync(buffer: Buffer): Promise<Array<Attachment>>;
 export declare function extractInvoiceAsync(buffer: Buffer, opts?: InvoiceOptions): Promise<InvoiceResult>;
+export declare function layoutPerPageAsync(buffer: Buffer): Promise<Array<PageLayout>>;
 export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>;
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>;
 export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>;
@@ -62,6 +64,7 @@ export declare class PdfDown {
   annotationsPerPage(): Array<PageAnnotation>;
   attachments(): Array<Attachment>;
   invoice(opts?: InvoiceOptions): InvoiceResult;
+  layout(): Array<PageLayout>;
   structuredText(): Array<StructuredPageText>;
   metadata(): PdfMeta;
   document(): PdfDocument;
@@ -70,6 +73,7 @@ export declare class PdfDown {
   annotationsPerPageAsync(): Promise<Array<PageAnnotation>>;
   attachmentsAsync(): Promise<Array<Attachment>>;
   invoiceAsync(opts?: InvoiceOptions): Promise<InvoiceResult>;
+  layoutAsync(): Promise<Array<PageLayout>>;
   structuredTextAsync(): Promise<Array<StructuredPageText>>;
   metadataAsync(): Promise<PdfMeta>;
   documentAsync(): Promise<PdfDocument>;
@@ -92,6 +96,55 @@ export interface StructuredPageText {
   body: string;
   footer: string;
 }
+
+// Positioned text. All coordinates are PDF user space in points, y up,
+// exactly as the content stream placed them (not shifted to the CropBox
+// origin, not rotated by /Rotate).
+export interface PageLayout {
+  page: number;
+  width: number; // CropBox (fallback MediaBox) size in points
+  height: number;
+  rotate: number; // /Rotate, reported and not applied
+  source: TextSource; // "Native" here; "Ocr" | "Rendered" from the OCR package
+  words: Array<TextWord>;
+  lines: Array<TextLine>;
+  images: Array<PlacedImage>;
+  warnings: Array<string>;
+}
+
+export interface TextWord {
+  text: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  line: number; // index into PageLayout.lines
+  fontSize?: number; // native only: size in points after the CTM
+  fontName?: string; // native only: base font, subset prefix stripped
+  bold?: boolean; // native only: name, ForceBold flag or FontWeight >= 600
+  italic?: boolean;
+  confidence?: number; // OCR only: 0..1
+}
+
+export interface TextLine {
+  text: string; // words joined by single spaces
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  firstWord: number; // PageLayout.words[firstWord .. firstWord + wordCount) are this line's words
+  wordCount: number;
+}
+
+export interface PlacedImage {
+  xobjectName: string; // matches PageImage.xobjectName
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export type TextSource = "Native" | "Ocr" | "Rendered";
 
 export interface PageImage {
   page: number;
@@ -733,6 +786,41 @@ const chunks = pages
   .filter((c) => c.content.length > 0);
 ```
 
+### Positioned text: words and lines with boxes
+
+`extractTextPerPage` returns text in content-stream order, which is whatever order the generator happened to paint it in (a header drawn last comes out last). `layoutPerPage` interprets the content stream instead: it tracks the graphics and text state, measures each glyph with the font's `/Widths` (or built-in Standard 14 metrics), groups glyphs into words and words into baseline-clustered lines, and returns everything top-to-bottom, left-to-right with boxes in points. Form XObjects are entered through their `/Matrix`, and image XObjects report where they were painted so a scan's OCR words can be mapped back onto the page.
+
+```typescript
+import { readFileSync } from "fs";
+import { layoutPerPage } from "@d0paminedriven/pdfdown";
+
+const [page] = layoutPerPage(readFileSync("invoice.pdf"));
+
+// Reading order, regardless of how the generator ordered the stream.
+for (const line of page.lines) {
+  console.log(`${line.y1.toFixed(0).padStart(4)}  ${line.text}`);
+}
+
+// Key/value anchoring: the value to the right of a label on the same line.
+const labelled = (label: string) => {
+  const anchor = page.words.find((w) => w.text === label);
+  if (!anchor) return undefined;
+  return page.words
+    .filter((w) => w.line === anchor.line && w.x0 > anchor.x1)
+    .map((w) => w.text)
+    .join(" ");
+};
+console.log(labelled("Invoice"), labelled("Total"));
+
+// Column detection: words whose left edge lines up with a header cell.
+const amountHeader = page.words.find((w) => w.text === "Amount" && w.bold);
+const amounts = amountHeader
+  ? page.words.filter((w) => Math.abs(w.x0 - amountHeader.x0) < 2 && w.y1 < amountHeader.y0)
+  : [];
+```
+
+Runs in the same order of time as `extractTextPerPage` (single-digit milliseconds for a typical invoice page). For scanned pages use `extractLayoutWithOcrPerPage` from the OCR package, which fills the same shape from Tesseract word boxes.
+
 ## Parallelism
 
 All extraction functions use [rayon](https://github.com/rayon-rs/rayon) for automatic multi-core parallelism. Per-page text extraction, image decoding, and annotation parsing run concurrently across CPU cores. The `pdfDocument` / `document()` call additionally runs text, image, and annotation extraction concurrently via nested `rayon::join`. This is internal to the native addon — the Node.js API surface is unchanged.
@@ -766,6 +854,8 @@ UV_THREADPOOL_SIZE=8 node app.js
 8-bit and 16-bit BitsPerComponent are both supported (16-bit downscaled to 8-bit for PNG output).
 
 ## How it works
+
+**Layout** (`layoutPerPage`): a content-stream interpreter tracks `q`/`Q`, `cm`, the text object and text state (`BT`/`ET`, `Tm`, `Td`, `TD`, `T*`, `TL`, `Tf`, `Tc`, `Tw`, `Tz`, `Ts`) and the show operators (`Tj`, `TJ`, `'`, `"`), placing each glyph with the text rendering matrix. Advances come from `/Widths` (simple fonts), `/W` + `/DW` (Type0 composite fonts, two-byte codes), `/FontMatrix` (Type3) or Standard 14 metrics when the file omits widths; ascent/descent from the font descriptor. Glyphs become words at space glyphs, `Tw` gaps, `TJ` adjustments of 200/1000 em or more, baseline changes and horizontal gaps over 0.25 em; words become lines by baseline clustering within half the median word height. Form XObjects are recursed with a depth cap; images are recorded as the unit square under the CTM at `Do`.
 
 Built with [lopdf](https://github.com/J-F-Liu/lopdf) (pure Rust PDF parser), [image](https://github.com/image-rs/image) (PNG/JPEG encoding), [hayro-jpeg2000](https://crates.io/crates/hayro-jpeg2000) (JPEG 2000 decoding), and [rayon](https://github.com/rayon-rs/rayon) (data parallelism). Compiled to a native Node.js addon via [napi-rs](https://napi.rs) with prebuilt binaries for:
 

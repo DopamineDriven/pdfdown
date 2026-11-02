@@ -1,0 +1,123 @@
+//! Advance widths for the standard 14 fonts that PDFs may use without
+//! embedding `/Widths` (ISO 32000-1 §9.6.2.2). Values are the Adobe Core 14
+//! AFM metrics in 1/1000 em for character codes 32..=126 in WinAnsi /
+//! Standard encoding order. Courier is monospaced at 600.
+
+pub(crate) struct Standard14 {
+  pub widths: &'static [u16; 95],
+  pub ascent: f64,
+  pub descent: f64,
+}
+
+#[rustfmt::skip]
+static HELVETICA: [u16; 95] = [
+  278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+  1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+  333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+  556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+];
+
+#[rustfmt::skip]
+static HELVETICA_BOLD: [u16; 95] = [
+  278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611,
+  975, 722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778,
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 333, 278, 333, 584, 556,
+  333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611,
+  611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
+];
+
+#[rustfmt::skip]
+static TIMES_ROMAN: [u16; 95] = [
+  250, 333, 408, 500, 500, 833, 778, 180, 333, 333, 500, 564, 250, 333, 250, 278,
+  500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 278, 278, 564, 564, 564, 444,
+  921, 722, 667, 667, 722, 611, 556, 722, 722, 333, 389, 722, 611, 889, 722, 722,
+  556, 722, 667, 556, 611, 722, 722, 944, 722, 722, 611, 333, 278, 333, 469, 500,
+  333, 444, 500, 444, 500, 444, 333, 500, 500, 278, 278, 500, 278, 778, 500, 500,
+  500, 500, 333, 389, 278, 500, 500, 722, 500, 500, 444, 480, 200, 480, 541,
+];
+
+#[rustfmt::skip]
+static TIMES_BOLD: [u16; 95] = [
+  250, 333, 555, 500, 500, 1000, 833, 278, 333, 333, 500, 570, 250, 333, 250, 278,
+  500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 333, 333, 570, 570, 570, 500,
+  930, 722, 667, 722, 722, 667, 611, 778, 778, 389, 500, 778, 667, 944, 722, 778,
+  611, 778, 722, 556, 667, 722, 722, 1000, 722, 722, 667, 333, 278, 333, 581, 500,
+  333, 500, 556, 444, 556, 444, 333, 500, 556, 278, 333, 556, 278, 833, 556, 500,
+  556, 556, 444, 389, 333, 556, 500, 722, 500, 500, 444, 394, 220, 394, 520,
+];
+
+static COURIER: [u16; 95] = [600; 95];
+
+/// Pick metrics by base font name. Anything unrecognised maps to Helvetica,
+/// which is also what viewers substitute.
+pub(crate) fn lookup(base_font: &str, bold: bool) -> Standard14 {
+  let lower = base_font.to_ascii_lowercase();
+  if lower.contains("courier") || lower.contains("mono") {
+    Standard14 {
+      widths: &COURIER,
+      ascent: 0.629,
+      descent: -0.157,
+    }
+  } else if lower.contains("times") || lower.contains("serif") || lower.contains("georgia") {
+    if bold {
+      Standard14 {
+        widths: &TIMES_BOLD,
+        ascent: 0.676,
+        descent: -0.205,
+      }
+    } else {
+      Standard14 {
+        widths: &TIMES_ROMAN,
+        ascent: 0.683,
+        descent: -0.217,
+      }
+    }
+  } else if bold {
+    Standard14 {
+      widths: &HELVETICA_BOLD,
+      ascent: 0.718,
+      descent: -0.207,
+    }
+  } else {
+    Standard14 {
+      widths: &HELVETICA,
+      ascent: 0.718,
+      descent: -0.207,
+    }
+  }
+}
+
+impl Standard14 {
+  /// Width in text-space units (em fractions) for a single-byte code.
+  pub fn width(&self, code: u32) -> Option<f64> {
+    if (32..=126).contains(&code) {
+      Some(f64::from(self.widths[(code - 32) as usize]) / 1000.0)
+    } else {
+      None
+    }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn tables_cover_the_printable_ascii_range() {
+    let h = lookup("Helvetica", false);
+    assert_eq!(h.width(32), Some(0.278));
+    assert_eq!(h.width(b'H' as u32), Some(0.722));
+    assert_eq!(h.width(b'~' as u32), Some(0.584));
+    assert_eq!(h.width(31), None);
+    assert_eq!(lookup("Arial,Bold", true).width(b'A' as u32), Some(0.722));
+    assert_eq!(lookup("Times-Roman", false).width(b'A' as u32), Some(0.722));
+    assert_eq!(
+      lookup("TimesNewRoman,Bold", true).width(b'W' as u32),
+      Some(1.0)
+    );
+    assert_eq!(lookup("Courier", false).width(b'i' as u32), Some(0.6));
+  }
+}

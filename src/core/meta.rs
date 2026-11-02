@@ -83,7 +83,11 @@ fn parse_page_box(obj: &Object) -> Option<[f64; 4]> {
 
 /// Walk the page tree to find an inheritable page box (e.g., /MediaBox, /CropBox).
 /// Resolves indirect references — some PDFs store the box array via `Object::Reference`.
-fn get_inherited_page_box(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64; 4]> {
+pub(crate) fn get_inherited_page_box(
+  doc: &Document,
+  page_id: ObjectId,
+  key: &[u8],
+) -> Option<[f64; 4]> {
   let mut current_id = Some(page_id);
   while let Some(id) = current_id {
     let dict = doc.get_dictionary(id).ok()?;
