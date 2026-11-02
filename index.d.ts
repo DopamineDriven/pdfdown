@@ -93,6 +93,10 @@ export declare class PdfDown {
   metadata(): PdfMeta;
   formFieldsPerPage(): Array<PageFormField>;
   formFieldsPerPageAsync(): Promise<Array<PageFormField>>;
+  attachments(): Array<Attachment>;
+  attachmentsAsync(): Promise<Array<Attachment>>;
+  invoice(opts?: InvoiceOptions | undefined | null): InvoiceResult;
+  invoiceAsync(opts?: InvoiceOptions | undefined | null): Promise<InvoiceResult>;
   textPerPageAsync(): Promise<Array<PageText>>;
   imagesPerPageAsync(): Promise<Array<PageImage>>;
   annotationsPerPageAsync(): Promise<Array<PageAnnotation>>;
@@ -103,6 +107,39 @@ export declare class PdfDown {
   structuredTextAsync(): Promise<Array<StructuredPageText>>;
   renderPagesAsync(opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>;
 }
+
+/** `value` is `lines` joined with `
+`. */
+export interface AddressField {
+  value: string;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+  lines: Array<string>;
+}
+
+/**
+ * A file embedded in the PDF: a `/Names /EmbeddedFiles` entry, a catalog
+ * `/AF` associated file, or a page-level `/FileAttachment` annotation.
+ */
+export interface Attachment {
+  name: string;
+  /** From the embedded file stream's `/Subtype`, e.g. `text/xml`. */
+  mimeType?: string;
+  /** Decoded payload size in bytes. */
+  size: number;
+  /** `/AFRelationship`: `Source`, `Data`, `Alternative`, `Supplement`, ... */
+  relationship?: string;
+  description?: string;
+  /** 1-based page for a `/FileAttachment` annotation; absent for document-level files. */
+  page?: number;
+  data: Buffer;
+}
+
+/** Every embedded file: `/Names /EmbeddedFiles`, catalog `/AF`, and page `/FileAttachment` annotations. */
+export declare function attachments(buffer: Buffer): Array<Attachment>;
+
+export declare function attachmentsAsync(buffer: Buffer): Promise<Array<Attachment>>;
 
 export type BoxType = "CropBox" | "MediaBox" | "Unknown";
 
@@ -122,6 +159,29 @@ export interface ChoiceOption {
   displayValue: string;
 }
 
+/** `value` is an ISO 8601 calendar date, `YYYY-MM-DD`. */
+export interface DateField {
+  value: string;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+}
+
+export type DateOrder = "Auto" | "MDY" | "DMY" | "YMD";
+
+export type EInvoiceStandard = "FacturX" | "ZUGFeRD" | "XRechnung" | "UBL" | "Unknown";
+
+export interface EmbeddedInvoiceXml {
+  filename: string;
+  standard: EInvoiceStandard;
+  /**
+   * The guideline / customization identifier, e.g.
+   * `urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic`.
+   */
+  profile?: string;
+  xml: string;
+}
+
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>;
 
 export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>;
@@ -135,6 +195,17 @@ export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>;
 
 export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array<PageImage>>;
 
+/**
+ * Structured invoice data. This version reads embedded Factur-X / ZUGFeRD /
+ * XRechnung / UBL XML; documents without it return `source: "None"`.
+ */
+export declare function extractInvoice(buffer: Buffer, opts?: InvoiceOptions | undefined | null): InvoiceResult;
+
+export declare function extractInvoiceAsync(
+  buffer: Buffer,
+  opts?: InvoiceOptions | undefined | null
+): Promise<InvoiceResult>;
+
 export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>;
 
 export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>;
@@ -142,6 +213,15 @@ export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promi
 export declare function extractTextPerPage(buffer: Buffer): Array<PageText>;
 
 export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<PageText>>;
+
+/** Where a field was read from, in PDF user space on a 1-based page. */
+export interface FieldSpan {
+  page: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
 
 /**
  * Document-level form facts. Present when the catalog has `/AcroForm` or any
@@ -161,6 +241,116 @@ export interface FormInfo {
   /** The `/Kids` depth cap was hit; some fields were not visited. */
   truncated: boolean;
   warnings: Array<string>;
+}
+
+export type InvoiceDocumentType = "Invoice" | "CreditNote" | "Unknown";
+
+/**
+ * Field names mirror the de-facto vocabulary of common invoice extractors so
+ * consumers can swap sources with a thin mapper. Naming only: nothing here
+ * talks to any service.
+ */
+export interface InvoiceFields {
+  vendorName?: StringField;
+  vendorAddress?: AddressField;
+  vendorTaxId?: StringField;
+  vendorEmail?: StringField;
+  vendorPhone?: StringField;
+  vendorWebsite?: StringField;
+  customerName?: StringField;
+  customerId?: StringField;
+  customerAddress?: AddressField;
+  customerTaxId?: StringField;
+  billingAddress?: AddressField;
+  shippingAddress?: AddressField;
+  remittanceAddress?: AddressField;
+  invoiceId?: StringField;
+  invoiceDate?: DateField;
+  dueDate?: DateField;
+  purchaseOrder?: StringField;
+  paymentTerm?: StringField;
+  serviceStartDate?: DateField;
+  serviceEndDate?: DateField;
+  currencyCode?: string;
+  subTotal?: MoneyField;
+  totalDiscount?: MoneyField;
+  totalTax?: MoneyField;
+  shippingCost?: MoneyField;
+  invoiceTotal?: MoneyField;
+  amountDue?: MoneyField;
+  previousUnpaidBalance?: MoneyField;
+  taxDetails: Array<TaxDetail>;
+  paymentDetails: Array<PaymentDetail>;
+  items: Array<InvoiceItem>;
+}
+
+export interface InvoiceItem {
+  description?: StringField;
+  productCode?: StringField;
+  quantity?: NumberField;
+  unit?: StringField;
+  unitPrice?: MoneyField;
+  taxRate?: NumberField;
+  tax?: MoneyField;
+  discount?: MoneyField;
+  date?: DateField;
+  amount?: MoneyField;
+  /** Absent when the item came from embedded XML (no page geometry). */
+  span?: FieldSpan;
+}
+
+/**
+ * Options accepted by every invoice entry point. In this version only
+ * `preferEmbeddedXml` changes behaviour; the rest are reserved for the
+ * layout-based extractor and are accepted so callers can set them now.
+ */
+export interface InvoiceOptions {
+  /** Label lexicons to enable; default `["en"]`. */
+  languages?: Array<string>;
+  /** ISO 4217 hint when the page shows only symbols. */
+  currency?: string;
+  dateOrder?: DateOrder;
+  decimalSeparator?: "Auto" | "." | ",";
+  /** Default `true`. Embedded Factur-X / ZUGFeRD / XRechnung / UBL XML is used when present. */
+  preferEmbeddedXml?: boolean;
+  includeLayout?: boolean;
+  includeCandidates?: boolean;
+}
+
+export interface InvoiceResult {
+  source: InvoiceSource;
+  documentType: InvoiceDocumentType;
+  /** Document-level confidence, 0..1. */
+  confidence: number;
+  fields: InvoiceFields;
+  warnings: Array<string>;
+  embeddedXml?: EmbeddedInvoiceXml;
+}
+
+/**
+ * Which extraction path produced the result. `None` means no path could
+ * (no embedded XML, and layout-based extraction is not available yet).
+ */
+export type InvoiceSource = "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "None";
+
+/**
+ * Money as a JS number plus the exact printed text; `text` is authoritative
+ * when cents matter.
+ */
+export interface MoneyField {
+  value: number;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+  currencyCode?: string;
+  currencySymbol?: string;
+}
+
+export interface NumberField {
+  value: number;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
 }
 
 export interface PageAnnotation {
@@ -379,6 +569,14 @@ export interface PageText {
   text: string;
 }
 
+export interface PaymentDetail {
+  iban?: StringField;
+  swift?: StringField;
+  bankName?: StringField;
+  accountNumber?: StringField;
+  routingNumber?: StringField;
+}
+
 export declare function pdfDocument(buffer: Buffer): PdfDocument;
 
 export interface PdfDocument {
@@ -443,11 +641,26 @@ export declare function renderPagesAsync(
   opts?: RenderOptions | undefined | null
 ): Promise<Array<RenderedPage>>;
 
+export interface StringField {
+  value: string;
+  /** The exact source text the value was derived from. */
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+}
+
 export interface StructuredPageText {
   page: number;
   header: string;
   body: string;
   footer: string;
+}
+
+export interface TaxDetail {
+  rate?: NumberField;
+  amount?: MoneyField;
+  base?: MoneyField;
+  category?: StringField;
 }
 
 /**

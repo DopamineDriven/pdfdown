@@ -27,6 +27,8 @@ export declare function extractTextPerPage(buffer: Buffer): Array<PageText>;
 export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>;
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>;
 export declare function extractFormFieldsPerPage(buffer: Buffer): Array<PageFormField>;
+export declare function attachments(buffer: Buffer): Array<Attachment>;
+export declare function extractInvoice(buffer: Buffer, opts?: InvoiceOptions): InvoiceResult;
 export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>;
 export declare function pdfMetadata(buffer: Buffer): PdfMeta;
 export declare function pdfDocument(buffer: Buffer): PdfDocument;
@@ -41,6 +43,8 @@ export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<P
 export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array<PageImage>>;
 export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>;
 export declare function extractFormFieldsPerPageAsync(buffer: Buffer): Promise<Array<PageFormField>>;
+export declare function attachmentsAsync(buffer: Buffer): Promise<Array<Attachment>>;
+export declare function extractInvoiceAsync(buffer: Buffer, opts?: InvoiceOptions): Promise<InvoiceResult>;
 export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>;
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>;
 export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>;
@@ -57,6 +61,8 @@ export declare class PdfDown {
   imagesPerPage(): Array<PageImage>;
   annotationsPerPage(): Array<PageAnnotation>;
   formFieldsPerPage(): Array<PageFormField>;
+  attachments(): Array<Attachment>;
+  invoice(opts?: InvoiceOptions): InvoiceResult;
   structuredText(): Array<StructuredPageText>;
   metadata(): PdfMeta;
   document(): PdfDocument;
@@ -64,6 +70,8 @@ export declare class PdfDown {
   imagesPerPageAsync(): Promise<Array<PageImage>>;
   annotationsPerPageAsync(): Promise<Array<PageAnnotation>>;
   formFieldsPerPageAsync(): Promise<Array<PageFormField>>;
+  attachmentsAsync(): Promise<Array<Attachment>>;
+  invoiceAsync(opts?: InvoiceOptions): Promise<InvoiceResult>;
   structuredTextAsync(): Promise<Array<StructuredPageText>>;
   metadataAsync(): Promise<PdfMeta>;
   documentAsync(): Promise<PdfDocument>;
@@ -235,6 +243,152 @@ export interface UnplacedFormField {
 // Derived in the declaration header (see "Utility types" below)
 export type FormFieldType = PageFormField["type"];
 export type FormFieldByType = UTR<PageFormField, "type", true>; // { Text: {...}, Checkbox: {...}, ... } without `type`
+
+// ── Attachments ──
+export interface Attachment {
+  name: string;
+  mimeType?: string; // from the embedded file stream's /Subtype, e.g. "text/xml"
+  size: number; // decoded bytes
+  relationship?: string; // /AFRelationship: "Source", "Data", "Alternative", "Supplement", ...
+  description?: string;
+  page?: number; // 1-based page of a /FileAttachment annotation; absent for document-level files
+  data: Buffer;
+}
+
+// ── Invoice ──
+// Every field carries the parsed value, the exact source text, a 0..1 confidence and,
+// when it came from a page, the span it was read from. Embedded XML has no spans.
+export interface FieldSpan {
+  page: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+export interface StringField {
+  value: string;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+}
+export interface NumberField {
+  value: number;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+}
+export interface DateField {
+  value: string;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+} // value is YYYY-MM-DD
+export interface MoneyField {
+  value: number;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+  currencyCode?: string;
+  currencySymbol?: string;
+}
+export interface AddressField {
+  value: string;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+  lines: Array<string>;
+}
+
+export interface InvoiceItem {
+  description?: StringField;
+  productCode?: StringField;
+  quantity?: NumberField;
+  unit?: StringField;
+  unitPrice?: MoneyField;
+  taxRate?: NumberField;
+  tax?: MoneyField;
+  discount?: MoneyField;
+  date?: DateField;
+  amount?: MoneyField;
+  span?: FieldSpan;
+}
+export interface TaxDetail {
+  rate?: NumberField;
+  amount?: MoneyField;
+  base?: MoneyField;
+  category?: StringField;
+}
+export interface PaymentDetail {
+  iban?: StringField;
+  swift?: StringField;
+  bankName?: StringField;
+  accountNumber?: StringField;
+  routingNumber?: StringField;
+}
+
+export interface InvoiceFields {
+  vendorName?: StringField;
+  vendorAddress?: AddressField;
+  vendorTaxId?: StringField;
+  vendorEmail?: StringField;
+  vendorPhone?: StringField;
+  vendorWebsite?: StringField;
+  customerName?: StringField;
+  customerId?: StringField;
+  customerAddress?: AddressField;
+  customerTaxId?: StringField;
+  billingAddress?: AddressField;
+  shippingAddress?: AddressField;
+  remittanceAddress?: AddressField;
+  invoiceId?: StringField;
+  invoiceDate?: DateField;
+  dueDate?: DateField;
+  purchaseOrder?: StringField;
+  paymentTerm?: StringField;
+  serviceStartDate?: DateField;
+  serviceEndDate?: DateField;
+  currencyCode?: string;
+  subTotal?: MoneyField;
+  totalDiscount?: MoneyField;
+  totalTax?: MoneyField;
+  shippingCost?: MoneyField;
+  invoiceTotal?: MoneyField;
+  amountDue?: MoneyField;
+  previousUnpaidBalance?: MoneyField;
+  taxDetails: Array<TaxDetail>;
+  paymentDetails: Array<PaymentDetail>;
+  items: Array<InvoiceItem>;
+}
+
+export type InvoiceSource = "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "None";
+export type EInvoiceStandard = "FacturX" | "ZUGFeRD" | "XRechnung" | "UBL" | "Unknown";
+export type InvoiceDocumentType = "Invoice" | "CreditNote" | "Unknown";
+
+export interface EmbeddedInvoiceXml {
+  filename: string;
+  standard: EInvoiceStandard;
+  profile?: string; // guideline / customization URN, e.g. "urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic"
+  xml: string;
+}
+
+export interface InvoiceResult {
+  source: InvoiceSource; // "None" when no extraction path applied
+  documentType: InvoiceDocumentType;
+  confidence: number; // document-level, 0..1
+  fields: InvoiceFields;
+  warnings: Array<string>;
+  embeddedXml?: EmbeddedInvoiceXml;
+}
+
+export interface InvoiceOptions {
+  languages?: Array<string>; // default ["en"]; reserved for the layout extractor
+  currency?: string; // ISO 4217 hint; reserved
+  dateOrder?: "Auto" | "MDY" | "DMY" | "YMD"; // reserved
+  decimalSeparator?: "Auto" | "." | ","; // reserved
+  preferEmbeddedXml?: boolean; // default true
+  includeLayout?: boolean; // reserved
+  includeCandidates?: boolean; // reserved
+}
 ```
 
 ## Usage
@@ -400,6 +554,34 @@ const form = pdfMetadata(buf).form;
 if (form?.hasXfa) console.warn("XFA form: only the AcroForm part was read");
 for (const u of form?.unplacedFields ?? []) console.log(`unplaced ${u.type} ${u.name} = ${u.value ?? ""}`);
 ```
+
+#### Attachments and embedded e-invoices
+
+`attachments()` lists every embedded file: the `/Names /EmbeddedFiles` tree, PDF/A-3 `/AF` associated files, and `/FileAttachment` annotations, each decoded once. `extractInvoice()` turns an invoice PDF into typed fields with confidence and provenance. In this version the data comes from embedded Factur-X, ZUGFeRD, XRechnung (CII or UBL) or plain UBL XML, which is exact, so every field reports confidence 1 and no page span. PDFs without such XML return `source: "None"` and a warning; layout-based extraction for those arrives in a later release behind the same result shape.
+
+```typescript
+import { readFile } from "fs/promises";
+import { attachments, extractInvoiceAsync } from "@d0paminedriven/pdfdown";
+
+const buf = await readFile("invoice.pdf");
+
+for (const a of attachments(buf)) {
+  console.log(a.name, a.mimeType, a.relationship ?? "-", `${a.size} bytes`, a.page ? `(page ${a.page})` : "");
+}
+
+const invoice = await extractInvoiceAsync(buf);
+if (invoice.source === "EmbeddedXml") {
+  const { fields: f } = invoice;
+  console.log(`${f.vendorName?.value} -> ${f.customerName?.value}`);
+  console.log(`${f.invoiceId?.value} dated ${f.invoiceDate?.value}, due ${f.dueDate?.value}`);
+  console.log(`total ${f.invoiceTotal?.text} ${f.currencyCode}, ${f.items.length} line item(s)`);
+  console.log(`standard ${invoice.embeddedXml?.standard}, profile ${invoice.embeddedXml?.profile}`);
+} else {
+  console.warn(invoice.warnings.join("\n"));
+}
+```
+
+Money fields expose both `value` (a JS number) and `text` (the exact printed string). Use `text` when cents must survive.
 
 #### Utility types
 
