@@ -122,6 +122,8 @@ pub struct PdfMeta {
   pub creation_date: Option<String>,
   pub modification_date: Option<String>,
   pub page_boxes: Vec<PageBox>,
+  /// Present when the document has `/AcroForm` or any widget annotation.
+  pub form: Option<FormInfo>,
 }
 
 #[napi(string_enum)]
@@ -172,7 +174,7 @@ pub struct PageAnnotation {
   pub content: Option<String>,
 }
 
-#[napi(object)]
+#[napi(object, object_from_js = false)]
 pub struct PdfDocument {
   pub version: String,
   pub is_linearized: bool,
@@ -190,6 +192,10 @@ pub struct PdfDocument {
   pub structured_text: Vec<StructuredPageText>,
   pub images: Vec<PageImage>,
   pub annotations: Vec<PageAnnotation>,
+  pub form: Option<FormInfo>,
+  pub form_fields: Vec<PageFormField>,
+  pub total_form_fields: u32,
+  pub form_field_pages: Vec<u32>,
 }
 
 #[cfg(feature = "ocr")]
@@ -203,7 +209,7 @@ pub struct OcrStructuredPageText {
 }
 
 #[cfg(feature = "ocr")]
-#[napi(object)]
+#[napi(object, object_from_js = false)]
 pub struct PdfDocumentOcr {
   pub version: String,
   pub is_linearized: bool,
@@ -221,6 +227,10 @@ pub struct PdfDocumentOcr {
   pub structured_text: Vec<OcrStructuredPageText>,
   pub images: Vec<PageImage>,
   pub annotations: Vec<PageAnnotation>,
+  pub form: Option<FormInfo>,
+  pub form_fields: Vec<PageFormField>,
+  pub total_form_fields: u32,
+  pub form_field_pages: Vec<u32>,
 }
 
 // ── Internal type — no napi types, safe for any thread ──
@@ -263,6 +273,8 @@ pub struct RawPdfDocument {
   pub annotations: Vec<PageAnnotation>,
   pub image_pages: Vec<u32>,
   pub annotation_pages: Vec<u32>,
+  pub form_fields: Vec<PageFormField>,
+  pub form_field_pages: Vec<u32>,
 }
 
 impl From<RawPdfDocument> for PdfDocument {
@@ -286,6 +298,10 @@ impl From<RawPdfDocument> for PdfDocument {
       structured_text: r.structured_text,
       images: r.images.into_iter().map(PageImage::from).collect(),
       annotations: r.annotations,
+      form: r.meta.form,
+      total_form_fields: r.form_fields.len() as u32,
+      form_fields: r.form_fields,
+      form_field_pages: r.form_field_pages,
     }
   }
 }
@@ -299,6 +315,8 @@ pub struct RawPdfDocumentOcr {
   pub annotations: Vec<PageAnnotation>,
   pub image_pages: Vec<u32>,
   pub annotation_pages: Vec<u32>,
+  pub form_fields: Vec<PageFormField>,
+  pub form_field_pages: Vec<u32>,
 }
 
 #[cfg(feature = "ocr")]
@@ -323,6 +341,13 @@ impl From<RawPdfDocumentOcr> for PdfDocumentOcr {
       structured_text: r.structured_text,
       images: r.images.into_iter().map(PageImage::from).collect(),
       annotations: r.annotations,
+      form: r.meta.form,
+      total_form_fields: r.form_fields.len() as u32,
+      form_fields: r.form_fields,
+      form_field_pages: r.form_field_pages,
     }
   }
 }
+
+mod forms;
+pub use forms::*;

@@ -34,15 +34,17 @@
     "build:debug": "napi build --platform --no-const-enum --features render",
     "build:ocr": "napi build --platform --release --no-const-enum --features ocr,render --package-json-path ocr/package.json --output-dir ocr",
     "create-npm-dirs:ocr": "napi create-npm-dirs --package-json-path ocr/package.json --npm-dir ocr/npm",
-    "format": "run-p format:prettier format:rs format:toml",
+    "format": "run-p format:oxfmt format:rs format:toml",
     "format:prettier": "prettier . -w",
     "format:toml": "taplo format",
+    "format:oxfmt": "oxfmt",
     "format:rs": "cargo fmt",
     "lint": "oxlint .",
     "lint:rs": "cargo fmt -- --check && cargo clippy --all-features -- -D warnings",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
     "test:ocr": "ava --config ocr/ava.config.mjs",
+    "typecheck": "tsc --noEmit --strict --module esnext --moduleResolution bundler --types node --ignoreConfig __test__/forms.types.ts ocr/__test__/forms.types.ts",
     "preversion": "napi build --platform --no-const-enum && git add .",
     "version": "napi version",
     "prepare": "husky"
@@ -84,6 +86,7 @@
   },
   "napi": {
     "binaryName": "pdfdown",
+    "dtsHeaderFile": "types/dts-header.ts",
     "targets": [
       "x86_64-pc-windows-msvc",
       "x86_64-apple-darwin",
@@ -100,13 +103,6 @@
       "armv7-linux-androideabi",
       "wasm32-wasip1-threads"
     ]
-  },
-  "prettier": {
-    "arrowParens": "always",
-    "printWidth": 120,
-    "semi": false,
-    "singleQuote": true,
-    "trailingComma": "all"
   },
   "ava": {
     "environmentVariables": {

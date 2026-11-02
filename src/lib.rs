@@ -12,8 +12,8 @@ mod types;
 
 // Public API types (appear in generated .d.ts)
 pub use types::{
-  BoxType, Capabilities, PageAnnotation, PageBox, PageImage, PageText, PdfDocument, PdfMeta,
-  StructuredPageText,
+  BoxType, Capabilities, ChoiceOption, FormInfo, PageAnnotation, PageBox, PageFormField, PageImage,
+  PageText, PdfDocument, PdfMeta, StructuredPageText, UnplacedFormField,
 };
 
 #[cfg(feature = "ocr")]
@@ -39,6 +39,7 @@ const _: () = {
 // ── Shared helpers ──────────────────────────────────────────────
 
 use crate::core::document::{extract_all, extract_annotations};
+use crate::core::forms::extract_forms;
 use crate::core::images::extract_images_raw;
 use crate::core::meta::extract_metadata;
 use crate::core::text::{extract_structured_text, extract_text};
@@ -113,6 +114,13 @@ pub fn pdf_metadata(buffer: Buffer) -> Result<PdfMeta> {
 pub fn extract_annotations_per_page(buffer: Buffer) -> Result<Vec<PageAnnotation>> {
   let doc = load_doc(buffer.as_ref())?;
   Ok(extract_annotations(&doc))
+}
+
+/// Every placed AcroForm widget, one entry per page placement, in reading order.
+#[napi]
+pub fn extract_form_fields_per_page(buffer: Buffer) -> Result<Vec<PageFormField>> {
+  let doc = load_doc(buffer.as_ref())?;
+  Ok(extract_forms(&doc).fields)
 }
 
 #[napi]
@@ -385,6 +393,28 @@ pub fn extract_annotations_per_page_async(buffer: Buffer) -> AsyncTask<ExtractAn
   AsyncTask::new(ExtractAnnotationsTask(buffer.to_vec()))
 }
 
+pub struct ExtractFormFieldsTask(Vec<u8>);
+
+#[napi]
+impl Task for ExtractFormFieldsTask {
+  type Output = Vec<PageFormField>;
+  type JsValue = Vec<PageFormField>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let doc = load_doc(&self.0)?;
+    Ok(extract_forms(&doc).fields)
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+pub fn extract_form_fields_per_page_async(buffer: Buffer) -> AsyncTask<ExtractFormFieldsTask> {
+  AsyncTask::new(ExtractFormFieldsTask(buffer.to_vec()))
+}
+
 #[napi]
 pub fn pdf_metadata_async(buffer: Buffer) -> AsyncTask<PdfMetaTask> {
   AsyncTask::new(PdfMetaTask(buffer.to_vec()))
@@ -599,6 +629,22 @@ impl Task for SharedExtractAnnotationsTask {
 
   fn compute(&mut self) -> Result<Self::Output> {
     Ok(extract_annotations(&self.0))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+pub struct SharedFormFieldsTask(Arc<Document>);
+
+#[napi]
+impl Task for SharedFormFieldsTask {
+  type Output = Vec<PageFormField>;
+  type JsValue = Vec<PageFormField>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(extract_forms(&self.0).fields)
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -837,6 +883,16 @@ impl PdfDown {
   #[napi]
   pub fn metadata(&self) -> PdfMeta {
     extract_metadata(&self.doc)
+  }
+
+  #[napi]
+  pub fn form_fields_per_page(&self) -> Vec<PageFormField> {
+    extract_forms(&self.doc).fields
+  }
+
+  #[napi]
+  pub fn form_fields_per_page_async(&self) -> AsyncTask<SharedFormFieldsTask> {
+    AsyncTask::new(SharedFormFieldsTask(Arc::clone(&self.doc)))
   }
 
   #[napi]

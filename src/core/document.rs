@@ -1,5 +1,6 @@
+use crate::core::forms::{extract_forms, form_field_pages};
 use crate::core::images::extract_images_raw;
-use crate::core::meta::extract_metadata;
+use crate::core::meta::extract_metadata_with_form;
 use crate::core::text::{detect_headers_footers, extract_text};
 use crate::types::{PageAnnotation, RawPdfDocument};
 use lopdf::{Document, Object, ObjectId};
@@ -109,11 +110,17 @@ pub(crate) fn extract_annotations(doc: &Document) -> Vec<PageAnnotation> {
 }
 
 pub(crate) fn extract_all(doc: &Document) -> Result<RawPdfDocument> {
-  let meta = extract_metadata(doc);
-  let ((text, images), annotations) = rayon::join(
-    || rayon::join(|| extract_text(doc), || extract_images_raw(doc)),
-    || extract_annotations(doc),
+  let (((text, images), annotations), forms) = rayon::join(
+    || {
+      rayon::join(
+        || rayon::join(|| extract_text(doc), || extract_images_raw(doc)),
+        || extract_annotations(doc),
+      )
+    },
+    || extract_forms(doc),
   );
+  let meta = extract_metadata_with_form(doc, forms.info);
+  let form_field_pages = form_field_pages(&forms.fields);
   let text = text?;
   let structured_text = detect_headers_footers(&text);
 
@@ -141,6 +148,8 @@ pub(crate) fn extract_all(doc: &Document) -> Result<RawPdfDocument> {
     annotations,
     image_pages,
     annotation_pages,
+    form_fields: forms.fields,
+    form_field_pages,
   })
 }
 
@@ -154,8 +163,7 @@ pub(crate) fn extract_all_with_ocr(
   render_dpi: u32,
   render_mode: u8,
 ) -> Result<RawPdfDocumentOcr> {
-  let meta = extract_metadata(doc);
-  let (text, (images, annotations)) = rayon::join(
+  let (text, ((images, annotations), forms)) = rayon::join(
     || {
       extract_text_with_ocr(
         doc,
@@ -167,8 +175,15 @@ pub(crate) fn extract_all_with_ocr(
         render_mode,
       )
     },
-    || rayon::join(|| extract_images_raw(doc), || extract_annotations(doc)),
+    || {
+      rayon::join(
+        || rayon::join(|| extract_images_raw(doc), || extract_annotations(doc)),
+        || extract_forms(doc),
+      )
+    },
   );
+  let meta = extract_metadata_with_form(doc, forms.info);
+  let form_field_pages = form_field_pages(&forms.fields);
   let text = text?;
   let structured_text = detect_headers_footers_ocr(&text);
 
@@ -196,5 +211,7 @@ pub(crate) fn extract_all_with_ocr(
     annotations,
     image_pages,
     annotation_pages,
+    form_fields: forms.fields,
+    form_field_pages,
   })
 }
