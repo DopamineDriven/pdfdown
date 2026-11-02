@@ -131,3 +131,4 @@ Cargo.lock
 /ocr/npm
 
 notes.md
+ocr/__test__/fixtures/private/*

@@ -6,18 +6,21 @@ import { extractFormFieldsPerPage } from "../index";
 
 // ── Shape ────────────────────────────────────────────────────────────────────
 
-const _types: IsExact<
+const _types = true satisfies IsExact<
   FormFieldType,
   "Text" | "Checkbox" | "Radio" | "ComboBox" | "ListBox" | "PushButton" | "Signature" | "Unknown"
-> = true;
+>;
 
-const _keys: IsExact<keyof FormFieldByType, FormFieldType> = true;
+const _keys = true satisfies IsExact<keyof FormFieldByType, FormFieldType>;
 
-const _checkbox: IsExact<FormFieldByType["Checkbox"], Rm<Extract<PageFormField, { type: "Checkbox" }>, "type">> = true;
+const _checkbox = true satisfies IsExact<
+  FormFieldByType["Checkbox"],
+  Rm<Extract<PageFormField, { type: "Checkbox" }>, "type">
+>;
 
-const _noType: "type" extends keyof FormFieldByType["Text"] ? false : true = true;
+const _noType = true satisfies "type" extends keyof FormFieldByType["Text"] ? false : true;
 
-const _unplacedType: IsExact<UnplacedFormField["type"], FormFieldType> = true;
+const _unplacedType = true satisfies IsExact<UnplacedFormField["type"], FormFieldType>;
 
 // ── Narrowing ────────────────────────────────────────────────────────────────
 

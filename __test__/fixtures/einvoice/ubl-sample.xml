@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0</cbc:CustomizationID>
+  <cbc:ID>UBL-77</cbc:ID>
+  <cbc:IssueDate>2026-10-15</cbc:IssueDate>
+  <cbc:DueDate>2026-11-14</cbc:DueDate>
+  <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>USD</cbc:DocumentCurrencyCode>
+  <cac:OrderReference><cbc:ID>PO-9</cbc:ID></cac:OrderReference>
+  <cac:AccountingSupplierParty><cac:Party>
+    <cac:PartyName><cbc:Name>Sliced Aero LLC</cbc:Name></cac:PartyName>
+    <cac:PostalAddress><cbc:StreetName>1 Hangar Way</cbc:StreetName><cbc:CityName>Wichita</cbc:CityName><cbc:PostalZone>67209</cbc:PostalZone><cac:Country><cbc:IdentificationCode>US</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
+    <cac:PartyTaxScheme><cbc:CompanyID>US12-3456789</cbc:CompanyID></cac:PartyTaxScheme>
+    <cac:Contact><cbc:ElectronicMail>ar@slicedaero.example</cbc:ElectronicMail><cbc:Telephone>+1 316 555 0100</cbc:Telephone></cac:Contact>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    <cac:PartyIdentification><cbc:ID>JSSI-01</cbc:ID></cac:PartyIdentification>
+    <cac:PartyName><cbc:Name>JSSI</cbc:Name></cac:PartyName>
+    <cac:PostalAddress><cbc:StreetName>180 N Stetson Ave</cbc:StreetName><cbc:CityName>Chicago</cbc:CityName><cbc:PostalZone>60606</cbc:PostalZone><cac:Country><cbc:IdentificationCode>US</cbc:IdentificationCode></cac:Country></cac:PostalAddress>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:PaymentMeans><cbc:PaymentMeansCode>30</cbc:PaymentMeansCode><cac:PayeeFinancialAccount><cbc:ID>US64SVBKUS6S3300958879</cbc:ID><cbc:Name>Sliced Aero Operating</cbc:Name><cac:FinancialInstitutionBranch><cbc:ID>SVBKUS6S</cbc:ID></cac:FinancialInstitutionBranch></cac:PayeeFinancialAccount></cac:PaymentMeans>
+  <cac:PaymentTerms><cbc:Note>Net 30</cbc:Note></cac:PaymentTerms>
+  <cac:TaxTotal><cbc:TaxAmount currencyID="USD">8.00</cbc:TaxAmount>
+    <cac:TaxSubtotal><cbc:TaxableAmount currencyID="USD">100.00</cbc:TaxableAmount><cbc:TaxAmount currencyID="USD">8.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>8</cbc:Percent></cac:TaxCategory></cac:TaxSubtotal>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount currencyID="USD">100.00</cbc:LineExtensionAmount><cbc:TaxExclusiveAmount currencyID="USD">100.00</cbc:TaxExclusiveAmount><cbc:TaxInclusiveAmount currencyID="USD">108.00</cbc:TaxInclusiveAmount><cbc:PayableAmount currencyID="USD">108.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+  <cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:InvoicedQuantity unitCode="EA">10</cbc:InvoicedQuantity><cbc:LineExtensionAmount currencyID="USD">100.00</cbc:LineExtensionAmount>
+    <cac:Item><cbc:Name>Widget</cbc:Name><cac:SellersItemIdentification><cbc:ID>W-1</cbc:ID></cac:SellersItemIdentification><cac:ClassifiedTaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>8</cbc:Percent></cac:ClassifiedTaxCategory></cac:Item>
+    <cac:Price><cbc:PriceAmount currencyID="USD">10.00</cbc:PriceAmount></cac:Price>
+  </cac:InvoiceLine>
+</Invoice>

@@ -9,6 +9,8 @@ import {
   extractTextPerPage,
   extractImagesPerPage,
   extractFormFieldsPerPage,
+  attachments,
+  extractInvoice,
   pdfDocumentOcr,
   PdfDown,
   capabilities
@@ -240,6 +242,15 @@ test("base API: extractFormFieldsPerPage and documentOcr form aggregates work th
   t.deepEqual(doc.formFieldPages, [1]);
   t.is(doc.form?.fieldCount, 9);
   t.is(new PdfDown(basic).formFieldsPerPage().length, 11);
+});
+
+test("base API: attachments and extractInvoice work through OCR package", (t) => {
+  const facturx = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/einvoice/facturx-minimal.pdf"));
+  t.is(attachments(facturx).length, 1);
+  const r = extractInvoice(facturx);
+  t.is(r.source, "EmbeddedXml");
+  t.is(r.fields.invoiceId?.value, "INV-2026-0042");
+  t.is(new PdfDown(facturx).invoice().fields.invoiceTotal?.value, 833);
 });
 
 // ── Render + Three-tier cascade tests ────────────────────────────────────────
