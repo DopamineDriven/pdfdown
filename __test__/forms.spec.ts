@@ -318,3 +318,36 @@ const hasQpdf = spawnSync("qpdf", ["--version"]).status === 0;
     t.is(form?.needAppearances, theirs.needappearances);
   }
 });
+
+test("hostile: a self-referencing /V array yields no value and nothing crashes", (t) => {
+  const buf = fixture("acroform-hostile.pdf");
+  const loopv = one(extractFormFieldsPerPage(buf), "loopv", "Text");
+  t.is(loopv.value, undefined);
+  t.truthy(pdfMetadata(buf).form);
+  t.is(pdfDocument(buf).totalFormFields, 3);
+});
+
+test("hostile: a widget listed twice in /Annots is reported once, with a warning", (t) => {
+  const buf = fixture("acroform-hostile.pdf");
+  const dup = extractFormFieldsPerPage(buf).filter((f) => f.name === "dupfield");
+  t.is(dup.length, 1);
+  t.is(dup[0].type, "Text");
+  t.is(dup[0].widgetCount, 1);
+  const form = pdfMetadata(buf).form;
+  if (!form) throw new Error("hostile fixture must report form info");
+  t.true(form.warnings.some((w) => w.includes("repeats widget")));
+});
+
+test("hostile: orphan widgets inherit name and value through /Parent", (t) => {
+  const orphan = one(extractFormFieldsPerPage(fixture("acroform-hostile.pdf")), "orphanParent", "Unknown");
+  t.is(orphan.value, "val");
+  t.true(orphan.readOnly);
+});
+
+test("dangling /AcroForm reference reports form info with a warning, not silence", (t) => {
+  const form = pdfMetadata(fixture("acroform-dangling.pdf")).form;
+  if (!form) throw new Error("an unresolvable /AcroForm must still report form info");
+  t.false(form.hasAcroForm);
+  t.is(form.fieldCount, 0);
+  t.true(form.warnings.some((w) => w.includes("/AcroForm")));
+});

@@ -56,6 +56,16 @@ pub(crate) fn decode_text_object(
 ) -> Option<String> {
   let obj = deref(doc, obj, warnings, "value")?;
   match obj {
+    // A text value is at most one array deep (multi-select /V). Never recurse: a
+    // self-referencing array (`5 0 obj [5 0 R]`) would otherwise overflow the stack.
+    Object::Array(items) => scalar_to_string(deref(doc, items.first()?, warnings, "value")?),
+    other => scalar_to_string(other),
+  }
+}
+
+/// Text string, name or number → `String`; anything else (dictionary, stream, array) → `None`.
+fn scalar_to_string(obj: &Object) -> Option<String> {
+  match obj {
     Object::String(bytes, _) => Some(
       lopdf::decode_text_string(obj)
         .unwrap_or_else(|_| String::from_utf8_lossy(bytes).into_owned()),
@@ -63,9 +73,6 @@ pub(crate) fn decode_text_object(
     Object::Name(n) => Some(decode_name_bytes(n)),
     Object::Integer(i) => Some(i.to_string()),
     Object::Real(r) => Some(r.to_string()),
-    Object::Array(items) => items
-      .first()
-      .and_then(|first| decode_text_object(first, doc, warnings)),
     _ => None,
   }
 }
@@ -466,6 +473,9 @@ pub(crate) struct PlacementRef<'a> {
 /// widgets can be joined to field nodes by identity.
 pub(crate) fn scan_widgets(doc: &Document, warnings: &mut Vec<String>) -> Vec<PlacedWidget> {
   let mut widgets = Vec::new();
+  // A widget annotation has one page; a reference repeated in /Annots (or on two pages,
+  // which incremental saves and merges produce) is reported once and warned about.
+  let mut seen: HashSet<ObjectId> = HashSet::new();
   for (page_num, page_id) in doc.get_pages() {
     let Ok(page) = doc.get_dictionary(page_id) else {
       continue;
@@ -516,6 +526,15 @@ pub(crate) fn scan_widgets(doc: &Document, warnings: &mut Vec<String>) -> Vec<Pl
         .and_then(|o| deref(doc, o, warnings, "/Subtype"))
         .is_some_and(|o| matches!(o, Object::Name(n) if n == b"Widget"));
       if !is_widget {
+        continue;
+      }
+      if let Some(id) = key
+        && !seen.insert(id)
+      {
+        warnings.push(format!(
+          "page {page_num}: /Annots[{index}] repeats widget {} {} R",
+          id.0, id.1
+        ));
         continue;
       }
       let rect = dict
@@ -804,7 +823,10 @@ pub(crate) fn extract_forms(doc: &Document) -> FormsExtraction {
     .collect();
   let mut claimed = vec![false; widgets.len()];
 
-  // 2. /AcroForm, if present.
+  // 2. /AcroForm, if present. The key's presence is tracked separately from its resolution so
+  //    a dangling reference reports `FormInfo { has_acro_form: false, warnings }` instead of
+  //    silence: "could not extract" must stay distinguishable from "nothing present".
+  let has_acroform_key = doc.catalog().ok().is_some_and(|cat| cat.has(b"AcroForm"));
   let acroform = doc
     .catalog()
     .ok()
@@ -900,7 +922,7 @@ pub(crate) fn extract_forms(doc: &Document) -> FormsExtraction {
   sort_fields(&mut fields);
   let mut all_warnings = tree.warnings.clone();
   all_warnings.extend(warnings);
-  let info = (acroform.is_some() || !fields.is_empty()).then(|| FormInfo {
+  let info = (has_acroform_key || !fields.is_empty()).then(|| FormInfo {
     has_acro_form: acroform.is_some(),
     has_xfa,
     need_appearances,
@@ -984,20 +1006,52 @@ fn unplaced_for(
   u
 }
 
-/// A widget annotation no field claims: whatever its own dictionary says, typed `Unknown`.
+/// A widget annotation no field claims, typed `Unknown`. Its `/Parent` chain is still walked
+/// (visited set, depth cap) so a widget whose field never made it into `/AcroForm /Fields`, a
+/// common breakage, keeps its dotted name and inherits `/V`, `/DV` and `/Ff` like a placed one.
 fn unknown_for(doc: &Document, widget: &PlacedWidget, warnings: &mut Vec<String>) -> PageFormField {
-  let dict = &widget.dict;
-  let text = |key: &[u8], warnings: &mut Vec<String>| {
-    dict
+  // chain[0] is the widget itself, then each /Parent up to the root.
+  let mut chain: Vec<&Dictionary> = vec![&widget.dict];
+  let mut visited: HashSet<ObjectId> = widget.key.into_iter().collect();
+  while chain.len() < MAX_FIELD_DEPTH {
+    let Ok(Object::Reference(pid)) = chain[chain.len() - 1].get(b"Parent") else {
+      break;
+    };
+    if !visited.insert(*pid) {
+      warnings.push(format!(
+        "page {}: /Parent chain of widget {} loops at {} {} R",
+        widget.page, widget.object_id, pid.0, pid.1
+      ));
+      break;
+    }
+    match doc.get_dictionary(*pid) {
+      Ok(parent) => chain.push(parent),
+      Err(_) => {
+        warnings.push(format!(
+          "page {}: /Parent unresolved reference {} {} R",
+          widget.page, pid.0, pid.1
+        ));
+        break;
+      }
+    }
+  }
+  let own = |key: &[u8], warnings: &mut Vec<String>| {
+    widget
+      .dict
       .get(key)
       .ok()
       .and_then(|o| decode_text_object(o, doc, warnings))
   };
-  let name = text(b"T", warnings).unwrap_or_default();
+  let inherited = |key: &[u8]| chain.iter().find_map(|d| d.get(key).ok());
+  let mut names: Vec<String> = chain
+    .iter()
+    .filter_map(|d| d.get(b"T").ok())
+    .filter_map(|o| decode_text_object(o, doc, warnings))
+    .filter(|n| !n.is_empty())
+    .collect();
+  names.reverse();
   let flags = FieldFlags(
-    dict
-      .get(b"Ff")
-      .ok()
+    inherited(b"Ff")
       .and_then(|o| deref(doc, o, warnings, "/Ff"))
       .and_then(|o| match o {
         Object::Integer(i) => u32::try_from(*i).ok(),
@@ -1010,18 +1064,18 @@ fn unknown_for(doc: &Document, widget: &PlacedWidget, warnings: &mut Vec<String>
     rect: widget.rect.clone(),
     object_id: widget.object_id.clone(),
     field_object_id: widget.object_id.clone(),
-    partial_name: name.clone(),
-    name,
+    name: names.join("."),
+    partial_name: own(b"T", warnings).unwrap_or_default(),
     widget_index: 0,
     widget_count: 1,
-    value: text(b"V", warnings),
-    default_value: text(b"DV", warnings),
-    tooltip: text(b"TU", warnings),
-    mapping_name: text(b"TM", warnings),
+    value: inherited(b"V").and_then(|o| decode_text_object(o, doc, warnings)),
+    default_value: inherited(b"DV").and_then(|o| decode_text_object(o, doc, warnings)),
+    tooltip: own(b"TU", warnings),
+    mapping_name: own(b"TM", warnings),
     read_only: flags.read_only(),
     required: flags.required(),
     no_export: flags.no_export(),
-    has_actions: dict.has(b"AA") || dict.has(b"A"),
+    has_actions: widget.dict.has(b"AA") || widget.dict.has(b"A"),
   };
   PageFormField::new(common, FieldKind::Unknown {})
 }
@@ -2294,5 +2348,109 @@ mod tests {
     assert_eq!(info.sig_flags, 0);
     assert!(!info.has_xfa);
     assert!(info.has_acro_form);
+  }
+
+  // ── Final review fixes ────────────────────────────────────────
+
+  #[test]
+  fn self_referencing_array_value_does_not_recurse() {
+    let d = doc(vec![
+      ((5, 0), Object::Array(vec![Object::Reference((5, 0))])),
+      ((6, 0), Object::Array(vec![Object::Reference((7, 0))])),
+      ((7, 0), Object::string_literal("x")),
+      (
+        (8, 0),
+        Object::Array(vec![Object::Array(vec![Object::string_literal("deep")])]),
+      ),
+    ]);
+    let mut w = vec![];
+    assert_eq!(
+      decode_text_object(&Object::Reference((5, 0)), &d, &mut w),
+      None
+    );
+    assert_eq!(
+      decode_text_object(&Object::Reference((6, 0)), &d, &mut w),
+      Some("x".into())
+    );
+    assert_eq!(
+      decode_text_object(&Object::Reference((8, 0)), &d, &mut w),
+      None
+    );
+  }
+
+  #[test]
+  fn scan_dedupes_repeated_widget_references() {
+    let d = pdf_with_pages(
+      vec![refs(&[(5, 0), (5, 0)]), refs(&[(5, 0)])],
+      vec![(
+        (5, 0),
+        widget_dict(dictionary! { "T" => Object::string_literal("w") }).into(),
+      )],
+    );
+    let mut w = vec![];
+    let widgets = scan_widgets(&d, &mut w);
+    assert_eq!(widgets.len(), 1);
+    assert_eq!(widgets[0].page, 1);
+    assert_eq!(w.iter().filter(|m| m.contains("repeats widget")).count(), 2);
+  }
+
+  #[test]
+  fn orphan_widget_inherits_name_value_and_flags_through_parent() {
+    let mut kid = widget_dict(Dictionary::new());
+    kid.set("Parent", Object::Reference((5, 0)));
+    let d = pdf_full(
+      Some(acroform(&[])),
+      vec![refs(&[(6, 0)])],
+      vec![
+        ((4, 0), dictionary! { "T" => Object::string_literal("top"), "Kids" => refs(&[(5, 0)]) }.into()),
+        ((5, 0), dictionary! {
+          "T" => Object::string_literal("orphanParent"), "FT" => name("Tx"), "V" => Object::string_literal("val"),
+          "Ff" => Object::Integer(1), "Parent" => Object::Reference((4, 0)), "Kids" => refs(&[(6, 0)])
+        }.into()),
+        ((6, 0), kid.into()),
+      ],
+    );
+    let out = extract_forms(&d);
+    assert_eq!(out.fields.len(), 1);
+    assert_eq!(out.fields[0].kind_name(), "Unknown");
+    assert_eq!(out.fields[0].name(), "top.orphanParent");
+    match &out.fields[0] {
+      PageFormField::Unknown {
+        value,
+        read_only,
+        partial_name,
+        ..
+      } => {
+        assert_eq!(value.as_deref(), Some("val"));
+        assert!(*read_only);
+        assert_eq!(partial_name, "");
+      }
+      _ => unreachable!(),
+    }
+    let info = out.info.unwrap();
+    assert_eq!(info.field_count, 0);
+    assert_eq!(info.widget_count, 1);
+  }
+
+  #[test]
+  fn dangling_acroform_reference_reports_info_with_warning() {
+    let mut d = pdf_with_pages(vec![Object::Array(vec![])], vec![]);
+    d.get_dictionary_mut((1, 0))
+      .unwrap()
+      .set("AcroForm", Object::Reference((999, 0)));
+    let out = extract_forms(&d);
+    let info = out
+      .info
+      .expect("an /AcroForm key must report info even when it cannot be resolved");
+    assert!(!info.has_acro_form);
+    assert_eq!(info.field_count, 0);
+    assert!(
+      info
+        .warnings
+        .iter()
+        .any(|w| w.contains("/AcroForm") && w.contains("999 0 R")),
+      "{:?}",
+      info.warnings
+    );
   }
 }

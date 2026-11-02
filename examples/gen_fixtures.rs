@@ -104,7 +104,7 @@ impl Pdf {
     )
   }
 
-  fn finish(mut self, acroform: Option<Dictionary>, path: &Path) {
+  fn finish(mut self, acroform: Option<Object>, path: &Path) {
     let page_ids = self.page_ids.clone();
     for (k, &pid) in page_ids.iter().enumerate() {
       let annots = Object::Array(std::mem::take(&mut self.page_annots[k]));
@@ -133,7 +133,7 @@ impl Pdf {
     let mut catalog =
       dictionary! { "Type" => n("Catalog"), "Pages" => Object::Reference(pages_id) };
     if let Some(af) = acroform {
-      catalog.set("AcroForm", Object::Dictionary(af));
+      catalog.set("AcroForm", af);
     }
     let catalog_id = self.add(catalog);
     self.doc.trailer.set("Root", Object::Reference(catalog_id));
@@ -142,12 +142,13 @@ impl Pdf {
   }
 }
 
-fn acroform(fields: &[ObjectId], need_appearances: bool) -> Dictionary {
+fn acroform(fields: &[ObjectId], need_appearances: bool) -> Object {
   dictionary! {
     "Fields" => refs(fields),
     "DA" => s("/Helv 0 Tf 0 g"),
     "NeedAppearances" => Object::Boolean(need_appearances)
   }
+  .into()
 }
 
 fn basic(out: &Path) {
@@ -385,6 +386,55 @@ fn many(out: &Path) {
   );
 }
 
+/// Malformed-but-plausible structures the extractor must survive (final review of phase 1):
+/// a `/V` that is a self-referencing array, a widget listed twice in `/Annots`, and a widget
+/// whose field never made it into `/AcroForm /Fields` (name and value come through `/Parent`).
+fn hostile(out: &Path) {
+  let mut p = Pdf::new(1);
+  let mut fields = Vec::new();
+
+  let loop_arr = p.reserve();
+  p.put(loop_arr, Object::Array(vec![Object::Reference(loop_arr)]));
+  fields.push(p.text(
+    0,
+    "loopv",
+    Object::Reference(loop_arr),
+    rect(50, 700, 300, 720),
+  ));
+
+  let dup = p.text(0, "dupfield", s("twice"), rect(50, 660, 300, 680));
+  p.page_annots[0].push(Object::Reference(dup));
+  fields.push(dup);
+
+  let orphan_parent = p.reserve();
+  let mut orphan_widget = dictionary! { "Parent" => Object::Reference(orphan_parent) };
+  Pdf::widget(&mut orphan_widget, rect(50, 620, 300, 640));
+  let orphan_widget_id = p.add(orphan_widget);
+  p.page_annots[0].push(Object::Reference(orphan_widget_id));
+  p.put(
+    orphan_parent,
+    dictionary! {
+      "T" => s("orphanParent"), "FT" => n("Tx"), "V" => s("val"), "Ff" => int(1),
+      "Kids" => refs(&[orphan_widget_id])
+    },
+  );
+  // deliberately NOT pushed to `fields`
+
+  p.finish(
+    Some(acroform(&fields, false)),
+    &out.join("acroform-hostile.pdf"),
+  );
+}
+
+/// Catalog `/AcroForm` is a dangling reference: no form can be read, and that must be reported.
+fn dangling(out: &Path) {
+  let p = Pdf::new(1);
+  p.finish(
+    Some(Object::Reference((999, 0))),
+    &out.join("acroform-dangling.pdf"),
+  );
+}
+
 fn main() {
   let out = PathBuf::from(
     std::env::args()
@@ -397,4 +447,6 @@ fn main() {
   cycle(&out);
   orphans(&out);
   many(&out);
+  hostile(&out);
+  dangling(&out);
 }
