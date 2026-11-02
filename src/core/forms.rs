@@ -93,9 +93,6 @@ impl FieldFlags {
   pub(crate) fn password(self) -> bool {
     self.bit(14)
   }
-  pub(crate) fn no_toggle_to_off(self) -> bool {
-    self.bit(15)
-  }
   pub(crate) fn radio(self) -> bool {
     self.bit(16)
   }
@@ -156,8 +153,6 @@ pub(crate) struct FieldNode {
   pub options: Option<Vec<ChoiceOption>>,
   pub tooltip: Option<String>,
   pub mapping_name: Option<String>,
-  pub rect: Option<Vec<f64>>,
-  pub appearance_state: Option<String>,
   pub has_actions: bool,
   pub parent: Option<usize>,
   pub children: Vec<usize>,
@@ -284,15 +279,6 @@ impl FieldTree {
     let options = get(b"Opt").map(|o| parse_options(doc, o, warnings));
     let tooltip = text(b"TU", warnings);
     let mapping_name = text(b"TM", warnings);
-    let rect = get(b"Rect")
-      .and_then(|o| deref(doc, o, warnings, "/Rect"))
-      .map(parse_rect);
-    let appearance_state = get(b"AS")
-      .and_then(|o| deref(doc, o, warnings, "/AS"))
-      .and_then(|o| match o {
-        Object::Name(n) => Some(decode_name_bytes(n)),
-        _ => None,
-      });
 
     FieldNode {
       object_id,
@@ -307,8 +293,6 @@ impl FieldTree {
       options,
       tooltip,
       mapping_name,
-      rect,
-      appearance_state,
       has_actions: dict.has(b"AA") || dict.has(b"A"),
       parent,
       children: Vec::new(),
@@ -374,7 +358,7 @@ impl FieldTree {
   /// An unnamed node with a parent is a widget of that parent, never a field of its own.
   fn is_widget_only(&self, i: usize) -> bool {
     let node = &self.nodes[i];
-    node.partial_name.is_empty() && node.parent.is_some()
+    node.partial_name.is_empty() && !node.is_root
   }
 
   /// A logical field: has an effective `/FT`, no child carrying a non-empty `/T`, and is
@@ -800,6 +784,7 @@ pub(crate) fn common_for(
 // ── Extraction entry point ───────────────────────────────────────
 
 /// Everything the forms module produces for one document.
+#[allow(dead_code)] // `info` is consumed by PdfMeta / PdfDocument wiring (plan Task 7)
 pub(crate) struct FormsExtraction {
   /// Present when `/AcroForm` exists or any widget was found.
   pub info: Option<FormInfo>,
@@ -1068,6 +1053,7 @@ pub(crate) fn sort_fields(fields: &mut [PageFormField]) {
 }
 
 /// Sorted unique page numbers of the given placements (mirrors `imagePages`).
+#[allow(dead_code)] // consumed by the PdfDocument aggregates (plan Task 7)
 pub(crate) fn form_field_pages(fields: &[PageFormField]) -> Vec<u32> {
   fields
     .iter()

@@ -1,5 +1,4 @@
 pub(crate) mod document;
-#[allow(dead_code)]
 pub(crate) mod forms;
 pub(crate) mod images;
 pub(crate) mod meta;

@@ -99,6 +99,8 @@ export declare class PdfDown {
   documentAsync(): Promise<PdfDocument>
   structuredText(): Array<StructuredPageText>
   structuredTextAsync(): Promise<Array<StructuredPageText>>
+  formFieldsPerPage(): Array<PageFormField>
+  formFieldsPerPageAsync(): Promise<Array<PageFormField>>
   renderPagesAsync(opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>
 }
 
@@ -119,6 +121,10 @@ export interface ChoiceOption {
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
 
 export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>
+
+export declare function extractFormFieldsPerPage(buffer: Buffer): Array<PageFormField>
+
+export declare function extractFormFieldsPerPageAsync(buffer: Buffer): Promise<Array<PageFormField>>
 
 export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>
 

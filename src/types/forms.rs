@@ -73,7 +73,6 @@ pub struct FormInfo {
 }
 
 /// The fields every `PageFormField` variant carries.
-#[allow(dead_code)]
 pub(crate) struct FieldCommon {
   pub page: u32,
   pub rect: Vec<f64>,
@@ -96,7 +95,10 @@ pub(crate) struct FieldCommon {
 /// Declares the common fields once and stamps them into every variant of the napi structured
 /// enum, the internal kind enum, the constructor and the common-field accessors.
 macro_rules! page_form_field {
-  ($($variant:ident { $($field:ident : $ty:ty),* $(,)? }),+ $(,)?) => {
+  // Kind-specific field types are written in brackets and forwarded as raw token trees: a `$ty:ty`
+  // fragment reaches napi-derive wrapped in an invisible group, its `Option<…>` check misses, and a
+  // `None` would be emitted as `null` instead of being omitted like every other optional field.
+  ($($variant:ident { $($field:ident : [$($ty:tt)+]),* $(,)? }),+ $(,)?) => {
     #[napi(object_from_js = false)]
     pub enum PageFormField {
       $($variant {
@@ -116,17 +118,15 @@ macro_rules! page_form_field {
         required: bool,
         no_export: bool,
         has_actions: bool,
-        $($field: $ty,)*
+        $($field: $($ty)+,)*
       },)+
     }
 
     /// Kind-specific payload, built by the extractor and combined with `FieldCommon`.
-    #[allow(dead_code)]
     pub(crate) enum FieldKind {
-      $($variant { $($field: $ty,)* },)+
+      $($variant { $($field: $($ty)+,)* },)+
     }
 
-    #[allow(dead_code)]
     impl FieldKind {
       /// The variant name, identical to the `type` literal of the matching `PageFormField`.
       pub(crate) fn kind_name(&self) -> &'static str {
@@ -134,7 +134,6 @@ macro_rules! page_form_field {
       }
     }
 
-    #[allow(dead_code)]
     impl PageFormField {
       pub(crate) fn new(c: FieldCommon, kind: FieldKind) -> Self {
         match kind {
@@ -160,6 +159,8 @@ macro_rules! page_form_field {
         }
       }
 
+      /// Variant name; used by tests and by the invoice phases, not by extraction itself.
+      #[allow(dead_code)]
       pub(crate) fn kind_name(&self) -> &'static str {
         match self { $(PageFormField::$variant { .. } => stringify!($variant),)+ }
       }
@@ -184,13 +185,13 @@ macro_rules! page_form_field {
 }
 
 page_form_field! {
-  Text { multiline: bool, password: bool, comb: bool, rich_text: bool, max_len: Option<u32> },
-  Checkbox { on_state: Option<String>, export_value: Option<String>, checked: bool },
-  Radio { on_state: Option<String>, export_value: Option<String>, selected: bool },
-  ComboBox { options: Vec<ChoiceOption>, editable: bool },
-  ListBox { options: Vec<ChoiceOption>, multi_select: bool, values: Option<Vec<String>> },
+  Text { multiline: [bool], password: [bool], comb: [bool], rich_text: [bool], max_len: [Option<u32>] },
+  Checkbox { on_state: [Option<String>], export_value: [Option<String>], checked: [bool] },
+  Radio { on_state: [Option<String>], export_value: [Option<String>], selected: [bool] },
+  ComboBox { options: [Vec<ChoiceOption>], editable: [bool] },
+  ListBox { options: [Vec<ChoiceOption>], multi_select: [bool], values: [Option<Vec<String>>] },
   PushButton {},
-  Signature { signed: bool },
+  Signature { signed: [bool] },
   Unknown {}
 }
 
