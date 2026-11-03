@@ -1,3 +1,7 @@
+
+/**
+ * @type {import('ava').SharedConfiguration}
+ */
 export default {
   files: ["ocr/__test__/**/*.spec.ts"],
   extensions: ["ts"],
