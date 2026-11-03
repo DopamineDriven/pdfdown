@@ -166,6 +166,7 @@ export interface PdfDocumentOcr {
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { extractTextWithOcrPerPageAsync } from "@d0paminedriven/pdfdown-ocr";
 
 const pdf = await readFile("scanned-document.pdf");
@@ -180,6 +181,7 @@ for (const { page, text, source } of pages) {
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { PdfDown } from "@d0paminedriven/pdfdown-ocr";
 
 const pdf = new PdfDown(await readFile("scanned-document.pdf"));
@@ -196,6 +198,7 @@ const meta = pdf.metadata();
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { PdfDown } from "@d0paminedriven/pdfdown-ocr";
 
 const pdf = new PdfDown(await readFile("scanned-document.pdf"));
@@ -212,6 +215,7 @@ const result = await pdf.documentOcrAsync({ minTextLength: 10 });
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { PdfDown } from "@d0paminedriven/pdfdown-ocr";
 
 const pdf = new PdfDown(await readFile("scanned-document.pdf"));
@@ -256,6 +260,7 @@ Copier and fax scans (`CCITTFaxDecode`, Group 3 and Group 4) are decoded in pure
 
 ```typescript
 import { readFileSync } from "fs";
+
 import { extractLayoutWithOcrPerPage } from "@d0paminedriven/pdfdown-ocr";
 
 for (const page of extractLayoutWithOcrPerPage(readFileSync("scan.pdf"), { render: "Auto" })) {

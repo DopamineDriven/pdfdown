@@ -1,6 +1,7 @@
-import { Bench } from "tinybench";
 import { readFileSync } from "fs";
 import { join } from "path";
+
+import { Bench } from "tinybench";
 
 import {
   extractImagesPerPage,

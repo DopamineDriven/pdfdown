@@ -20,7 +20,7 @@ Keep unplaced fields as a discriminated union preserving the applicable **logica
 
 **3. Dereferencing needs to be explicit and consistent.**
 
-`decode_text_object()` cannot resolve references because it receives no `Document`. Meanwhile, the plan treats a signature’s `/V` being *any reference* as sufficient for `signed: true`.
+`decode_text_object()` cannot resolve references because it receives no `Document`. Meanwhile, the plan treats a signature’s `/V` being _any reference_ as sufficient for `signed: true`.
 
 Make callers resolve indirect objects before decoding or classifying them. Add tests for an indirect text value, an indirect multiselect array, and missing or invalid reference targets.
 
@@ -52,12 +52,12 @@ Expose a small diagnostic or completeness indicator for depth truncation and unr
 
 The verification plan also needs a few adjustments:
 
-| Area | Adjustment |
-|---|---|
+| Area       | Adjustment                                                                                                                                                                                                                   |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Encryption | The proposed 128-bit qpdf command defaults to RC4. Add an explicit AES fixture to substantiate the stated RC4/AES coverage. [QPDF 10.6.3 documentation](https://qpdf.readthedocs.io/en/10.6/cli.html?utm_source=chatgpt.com) |
-| Type tests | Add actual narrowing and negative-access assertions, and check both packages’ generated declarations. |
-| CI | Explicitly run the new typecheck and the supported WASI build/check; adding `cargo test` alone doesn’t establish those guarantees. |
-| Scale | The 1,500-field fixture checks counts and ordering. A separate measurement is needed to support the performance claim. |
+| Type tests | Add actual narrowing and negative-access assertions, and check both packages’ generated declarations.                                                                                                                        |
+| CI         | Explicitly run the new typecheck and the supported WASI build/check; adding `cargo test` alone doesn’t establish those guarantees.                                                                                           |
+| Scale      | The 1,500-field fixture checks counts and ordering. A separate measurement is needed to support the performance claim.                                                                                                       |
 
 **I’d proceed with this architecture after those corrections, with the field/widget classification and unplaced-data preservation addressed first.** Phase 1 can stay focused on AcroForm extraction; invoice grouping and the 896-page processing workflow belong in the subsequent extraction/assembly work.
 

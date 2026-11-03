@@ -5,6 +5,9 @@
     "moduleResolution": "bundler",
     "module": "preserve",
     "noUnusedLocals": true,
+    "paths": {
+      "@/*": ["./*"]
+    },
     "noUnusedParameters": true,
     "types": ["*"],
     "esModuleInterop": true,

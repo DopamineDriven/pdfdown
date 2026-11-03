@@ -486,6 +486,7 @@ export interface InvoiceOptions {
 
 ```typescript
 import { readFileSync } from "fs";
+
 import { extractTextPerPage } from "@d0paminedriven/pdfdown";
 
 const pdf = readFileSync("document.pdf");
@@ -500,6 +501,7 @@ for (const { page, text } of pages) {
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { extractTextPerPageAsync } from "@d0paminedriven/pdfdown";
 
 const pdf = await readFile("document.pdf");
@@ -516,6 +518,7 @@ Splits each page into `header`, `body`, and `footer` sections by detecting repea
 
 ```typescript
 import { readFileSync } from "fs";
+
 import { extractStructuredTextPerPage } from "@d0paminedriven/pdfdown";
 
 const pdf = readFileSync("document.pdf");
@@ -533,6 +536,7 @@ for (const { page, header, body, footer } of pages) {
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { extractStructuredTextPerPageAsync } from "@d0paminedriven/pdfdown";
 
 const pdf = await readFile("document.pdf");
@@ -546,6 +550,7 @@ const cleanText = pages.map((p) => p.body).join("\n\n");
 
 ```typescript
 import { readFileSync } from "fs";
+
 import { extractImagesPerPage } from "@d0paminedriven/pdfdown";
 
 const pdf = readFileSync("document.pdf");
@@ -561,6 +566,7 @@ for (const img of images) {
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { extractImagesPerPageAsync } from "@d0paminedriven/pdfdown";
 
 const pdf = await readFile("document.pdf");
@@ -576,6 +582,7 @@ for (const img of images) {
 
 ```typescript
 import { readFileSync } from "fs";
+
 import { extractAnnotationsPerPage } from "@d0paminedriven/pdfdown";
 
 const pdf = readFileSync("document.pdf");
@@ -595,6 +602,7 @@ for (const annot of annots) {
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { extractAnnotationsPerPageAsync } from "@d0paminedriven/pdfdown";
 
 const pdf = await readFile("document.pdf");
@@ -610,6 +618,7 @@ console.log(`Found ${links.length} external links across ${new Set(links.map((a)
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { attachments, extractInvoiceAsync } from "@d0paminedriven/pdfdown";
 
 const buf = await readFile("invoice.pdf");
@@ -636,6 +645,7 @@ Money fields expose both `value` (a JS number) and `text` (the exact printed str
 
 ```typescript
 import { readFileSync } from "fs";
+
 import { pdfMetadata } from "@d0paminedriven/pdfdown";
 
 const pdf = readFileSync("document.pdf");
@@ -648,6 +658,7 @@ console.log(`v${meta.version}, ${meta.pageCount} pages, linearized: ${meta.isLin
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { pdfMetadataAsync } from "@d0paminedriven/pdfdown";
 
 const pdf = await readFile("document.pdf");
@@ -662,6 +673,7 @@ console.log(`v${meta.version}, ${meta.pageCount} pages, linearized: ${meta.isLin
 
 ```typescript
 import { readFileSync } from "fs";
+
 import { pdfMetadata } from "@d0paminedriven/pdfdown";
 
 const meta = pdfMetadata(readFileSync("document.pdf"));
@@ -683,6 +695,7 @@ Read-only. One entry per widget placement, sorted by page, then top-to-bottom, l
 
 ```typescript
 import { readFileSync } from "fs";
+
 import { extractFormFieldsPerPage, pdfMetadata } from "@d0paminedriven/pdfdown";
 
 const pdf = readFileSync("application.pdf");
@@ -724,6 +737,7 @@ The class-based API parses the PDF once in the constructor. Sync methods reuse t
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { PdfDown } from "@d0paminedriven/pdfdown";
 
 const pdf = new PdfDown(await readFile("document.pdf"));
@@ -748,6 +762,7 @@ const [asyncText, asyncImages, asyncAnnots, asyncStructured] = await Promise.all
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { PdfDown } from "@d0paminedriven/pdfdown";
 
 const pdf = new PdfDown(await readFile("document.pdf"));
@@ -785,6 +800,7 @@ for (const { page, text: pageText } of text) {
 
 ```typescript
 import { readFile } from "fs/promises";
+
 import { PdfDown } from "@d0paminedriven/pdfdown";
 
 const pdf = new PdfDown(await readFile("document.pdf"));
@@ -805,6 +821,7 @@ const chunks = pages
 
 ```typescript
 import { readFileSync } from "fs";
+
 import { layoutPerPage } from "@d0paminedriven/pdfdown";
 
 const [page] = layoutPerPage(readFileSync("invoice.pdf"));

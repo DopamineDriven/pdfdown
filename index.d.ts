@@ -59,10 +59,7 @@ export type IsExact<T, U> = [T] extends [U] ? ([U] extends [T] ? true : false) :
  * is true. But `Equal<{ a: string; b: string  }, { a: string; } & { b: string }>`
  * is false.
  */
-export type Equal<X, Y> =
-  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
-    ? true
-    : false;
+export type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
 export type UTR<
   TUnion extends Record<TKey, string>,
@@ -111,42 +108,42 @@ export type FormFieldPayload<T extends keyof FormFieldByType = keyof FormFieldBy
  * flavor napi-rs can build is listed, because `NAPI_RS_NATIVE_LIBRARY_PATH`
  * can point the loader at a WASI artifact this package does not build itself.
  */
-export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
+export declare const __napiBindingTarget: "native" | "wasm32-wasi" | "wasm32-wasip1";
 
 export declare class PdfDown {
-  constructor(buffer: Buffer)
-  textPerPage(): Array<PageText>
-  imagesPerPage(): Array<PageImage>
-  annotationsPerPage(): Array<PageAnnotation>
-  metadata(): PdfMeta
+  constructor(buffer: Buffer);
+  textPerPage(): Array<PageText>;
+  imagesPerPage(): Array<PageImage>;
+  annotationsPerPage(): Array<PageAnnotation>;
+  metadata(): PdfMeta;
   /** Positioned words and lines per page from the content stream (native text only). */
-  layout(): Array<PageLayout>
-  layoutAsync(): Promise<Array<PageLayout>>
-  attachments(): Array<Attachment>
-  attachmentsAsync(): Promise<Array<Attachment>>
-  invoice(opts?: InvoiceOptions | undefined | null): InvoiceResult
-  invoiceAsync(opts?: InvoiceOptions | undefined | null): Promise<InvoiceResult>
-  textPerPageAsync(): Promise<Array<PageText>>
-  imagesPerPageAsync(): Promise<Array<PageImage>>
-  annotationsPerPageAsync(): Promise<Array<PageAnnotation>>
-  metadataAsync(): Promise<PdfMeta>
-  document(): PdfDocument
-  documentAsync(): Promise<PdfDocument>
-  structuredText(): Array<StructuredPageText>
-  structuredTextAsync(): Promise<Array<StructuredPageText>>
-  formFieldsPerPage(): Array<PageFormField>
-  formFieldsPerPageAsync(): Promise<Array<PageFormField>>
-  renderPagesAsync(opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>
+  layout(): Array<PageLayout>;
+  layoutAsync(): Promise<Array<PageLayout>>;
+  attachments(): Array<Attachment>;
+  attachmentsAsync(): Promise<Array<Attachment>>;
+  invoice(opts?: InvoiceOptions | undefined | null): InvoiceResult;
+  invoiceAsync(opts?: InvoiceOptions | undefined | null): Promise<InvoiceResult>;
+  textPerPageAsync(): Promise<Array<PageText>>;
+  imagesPerPageAsync(): Promise<Array<PageImage>>;
+  annotationsPerPageAsync(): Promise<Array<PageAnnotation>>;
+  metadataAsync(): Promise<PdfMeta>;
+  document(): PdfDocument;
+  documentAsync(): Promise<PdfDocument>;
+  structuredText(): Array<StructuredPageText>;
+  structuredTextAsync(): Promise<Array<StructuredPageText>>;
+  formFieldsPerPage(): Array<PageFormField>;
+  formFieldsPerPageAsync(): Promise<Array<PageFormField>>;
+  renderPagesAsync(opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>;
 }
 
 /** `value` is `lines` joined with `
 `. */
 export interface AddressField {
-  value: string
-  text: string
-  confidence: number
-  span?: FieldSpan
-  lines: Array<string>
+  value: string;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+  lines: Array<string>;
 }
 
 /**
@@ -157,16 +154,16 @@ export interface AddressField {
  */
 export interface AircraftReference {
   /** Airframe model, e.g. "Challenger 350", "Global 6000", "Phenom 300". */
-  model?: StringField
+  model?: StringField;
   /** Manufacturer serial number (MSN). */
-  serialNumber?: StringField
+  serialNumber?: StringField;
   /** Registration / tail number, e.g. "N123AB", "C-GXYZ". */
-  registration?: StringField
+  registration?: StringField;
   /** Engine model, e.g. "BR710", "AE 3007", "PW308C". */
-  engineModel?: StringField
+  engineModel?: StringField;
   /** Engine serial number (ESN). */
-  engineSerialNumber?: StringField
-  span?: FieldSpan
+  engineSerialNumber?: StringField;
+  span?: FieldSpan;
 }
 
 /**
@@ -174,96 +171,99 @@ export interface AircraftReference {
  * `/AF` associated file, or a page-level `/FileAttachment` annotation.
  */
 export interface Attachment {
-  name: string
+  name: string;
   /** From the embedded file stream's `/Subtype`, e.g. `text/xml`. */
-  mimeType?: string
+  mimeType?: string;
   /** Decoded payload size in bytes. */
-  size: number
+  size: number;
   /** `/AFRelationship`: `Source`, `Data`, `Alternative`, `Supplement`, ... */
-  relationship?: string
-  description?: string
+  relationship?: string;
+  description?: string;
   /** 1-based page for a `/FileAttachment` annotation; absent for document-level files. */
-  page?: number
-  data: Buffer
+  page?: number;
+  data: Buffer;
 }
 
 /** Every embedded file: `/Names /EmbeddedFiles`, catalog `/AF`, and page `/FileAttachment` annotations. */
-export declare function attachments(buffer: Buffer): Array<Attachment>
+export declare function attachments(buffer: Buffer): Array<Attachment>;
 
-export declare function attachmentsAsync(buffer: Buffer): Promise<Array<Attachment>>
+export declare function attachmentsAsync(buffer: Buffer): Promise<Array<Attachment>>;
 
-export type BoxType = 'CropBox' | 'MediaBox' | 'Unknown'
+export type BoxType = "CropBox" | "MediaBox" | "Unknown";
 
-export declare function capabilities(): Capabilities
+export declare function capabilities(): Capabilities;
 
 export interface Capabilities {
-  ocr: boolean
-  render: boolean
+  ocr: boolean;
+  render: boolean;
 }
 
 export interface ChoiceOption {
-  exportValue: string
-  displayValue: string
+  exportValue: string;
+  displayValue: string;
 }
 
 /** `value` is an ISO 8601 calendar date, `YYYY-MM-DD`. */
 export interface DateField {
-  value: string
-  text: string
-  confidence: number
-  span?: FieldSpan
+  value: string;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
 }
 
-export type DateOrder = 'Auto' | 'MDY' | 'DMY' | 'YMD'
+export type DateOrder = "Auto" | "MDY" | "DMY" | "YMD";
 
-export type EInvoiceStandard = 'FacturX' | 'ZUGFeRD' | 'XRechnung' | 'UBL' | 'Unknown'
+export type EInvoiceStandard = "FacturX" | "ZUGFeRD" | "XRechnung" | "UBL" | "Unknown";
 
 export interface EmbeddedInvoiceXml {
-  filename: string
-  standard: EInvoiceStandard
+  filename: string;
+  standard: EInvoiceStandard;
   /**
    * The guideline / customization identifier, e.g.
    * `urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic`.
    */
-  profile?: string
-  xml: string
+  profile?: string;
+  xml: string;
 }
 
-export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
+export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>;
 
-export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>
+export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>;
 
-export declare function extractFormFieldsPerPage(buffer: Buffer): Array<PageFormField>
+export declare function extractFormFieldsPerPage(buffer: Buffer): Array<PageFormField>;
 
-export declare function extractFormFieldsPerPageAsync(buffer: Buffer): Promise<Array<PageFormField>>
+export declare function extractFormFieldsPerPageAsync(buffer: Buffer): Promise<Array<PageFormField>>;
 
-export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>
+export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>;
 
-export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array<PageImage>>
+export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array<PageImage>>;
 
 /**
  * Structured invoice data. This version reads embedded Factur-X / ZUGFeRD /
  * XRechnung / UBL XML; documents without it return `source: "None"`.
  */
-export declare function extractInvoice(buffer: Buffer, opts?: InvoiceOptions | undefined | null): InvoiceResult
+export declare function extractInvoice(buffer: Buffer, opts?: InvoiceOptions | undefined | null): InvoiceResult;
 
-export declare function extractInvoiceAsync(buffer: Buffer, opts?: InvoiceOptions | undefined | null): Promise<InvoiceResult>
+export declare function extractInvoiceAsync(
+  buffer: Buffer,
+  opts?: InvoiceOptions | undefined | null
+): Promise<InvoiceResult>;
 
-export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>
+export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>;
 
-export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>
+export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>;
 
-export declare function extractTextPerPage(buffer: Buffer): Array<PageText>
+export declare function extractTextPerPage(buffer: Buffer): Array<PageText>;
 
-export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<PageText>>
+export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<PageText>>;
 
 /** Where a field was read from, in PDF user space on a 1-based page. */
 export interface FieldSpan {
-  page: number
-  x0: number
-  y0: number
-  x1: number
-  y1: number
+  page: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
 }
 
 /**
@@ -272,23 +272,23 @@ export interface FieldSpan {
  */
 export interface FormInfo {
   /** `/AcroForm` present (false when only orphan widgets were found). */
-  hasAcroForm: boolean
+  hasAcroForm: boolean;
   /** `/AcroForm /XFA` present (XFA is not parsed). */
-  hasXfa: boolean
-  needAppearances: boolean
-  sigFlags: number
+  hasXfa: boolean;
+  needAppearances: boolean;
+  sigFlags: number;
   /** Logical fields, placed + unplaced; may differ from `totalFormFields`. */
-  fieldCount: number
+  fieldCount: number;
   /** Placements; always equals `totalFormFields` and `formFields.length`. */
-  widgetCount: number
-  unplacedFields: Array<UnplacedFormField>
+  widgetCount: number;
+  unplacedFields: Array<UnplacedFormField>;
   /** The `/Kids` depth cap was hit somewhere: the result is partial. */
-  truncated: boolean
+  truncated: boolean;
   /** Dangling references, non-array `/Annots`, non-dictionary `/Kids` entries, depth cap. */
-  warnings: Array<string>
+  warnings: Array<string>;
 }
 
-export type InvoiceDocumentType = 'Invoice' | 'CreditNote' | 'Unknown'
+export type InvoiceDocumentType = "Invoice" | "CreditNote" | "Unknown";
 
 /**
  * Field names mirror the de-facto vocabulary of common invoice extractors so
@@ -296,56 +296,56 @@ export type InvoiceDocumentType = 'Invoice' | 'CreditNote' | 'Unknown'
  * talks to any service.
  */
 export interface InvoiceFields {
-  vendorName?: StringField
-  vendorAddress?: AddressField
-  vendorTaxId?: StringField
-  vendorEmail?: StringField
-  vendorPhone?: StringField
-  vendorWebsite?: StringField
-  customerName?: StringField
-  customerId?: StringField
-  customerAddress?: AddressField
-  customerTaxId?: StringField
-  billingAddress?: AddressField
-  shippingAddress?: AddressField
-  remittanceAddress?: AddressField
-  invoiceId?: StringField
-  invoiceDate?: DateField
-  dueDate?: DateField
-  purchaseOrder?: StringField
-  paymentTerm?: StringField
-  serviceStartDate?: DateField
-  serviceEndDate?: DateField
-  currencyCode?: string
-  subTotal?: MoneyField
-  totalDiscount?: MoneyField
-  totalTax?: MoneyField
-  shippingCost?: MoneyField
-  invoiceTotal?: MoneyField
-  amountDue?: MoneyField
-  previousUnpaidBalance?: MoneyField
+  vendorName?: StringField;
+  vendorAddress?: AddressField;
+  vendorTaxId?: StringField;
+  vendorEmail?: StringField;
+  vendorPhone?: StringField;
+  vendorWebsite?: StringField;
+  customerName?: StringField;
+  customerId?: StringField;
+  customerAddress?: AddressField;
+  customerTaxId?: StringField;
+  billingAddress?: AddressField;
+  shippingAddress?: AddressField;
+  remittanceAddress?: AddressField;
+  invoiceId?: StringField;
+  invoiceDate?: DateField;
+  dueDate?: DateField;
+  purchaseOrder?: StringField;
+  paymentTerm?: StringField;
+  serviceStartDate?: DateField;
+  serviceEndDate?: DateField;
+  currencyCode?: string;
+  subTotal?: MoneyField;
+  totalDiscount?: MoneyField;
+  totalTax?: MoneyField;
+  shippingCost?: MoneyField;
+  invoiceTotal?: MoneyField;
+  amountDue?: MoneyField;
+  previousUnpaidBalance?: MoneyField;
   /** MRO work order / shop order the invoice bills against. */
-  workOrder?: StringField
+  workOrder?: StringField;
   /** Aircraft and engines the invoice relates to; empty when none is identified. */
-  aircraft: Array<AircraftReference>
-  taxDetails: Array<TaxDetail>
-  paymentDetails: Array<PaymentDetail>
-  items: Array<InvoiceItem>
+  aircraft: Array<AircraftReference>;
+  taxDetails: Array<TaxDetail>;
+  paymentDetails: Array<PaymentDetail>;
+  items: Array<InvoiceItem>;
 }
 
 export interface InvoiceItem {
-  description?: StringField
-  productCode?: StringField
-  quantity?: NumberField
-  unit?: StringField
-  unitPrice?: MoneyField
-  taxRate?: NumberField
-  tax?: MoneyField
-  discount?: MoneyField
-  date?: DateField
-  amount?: MoneyField
+  description?: StringField;
+  productCode?: StringField;
+  quantity?: NumberField;
+  unit?: StringField;
+  unitPrice?: MoneyField;
+  taxRate?: NumberField;
+  tax?: MoneyField;
+  discount?: MoneyField;
+  date?: DateField;
+  amount?: MoneyField;
   /** Absent when the item came from embedded XML (no page geometry). */
-  span?: FieldSpan
+  span?: FieldSpan;
 }
 
 /**
@@ -355,121 +355,282 @@ export interface InvoiceItem {
  */
 export interface InvoiceOptions {
   /** Label lexicons to enable; default `["en"]`. */
-  languages?: Array<string>
+  languages?: Array<string>;
   /** ISO 4217 hint when the page shows only symbols. */
-  currency?: string
-  dateOrder?: DateOrder
-  decimalSeparator?: "Auto" | "." | ","
+  currency?: string;
+  dateOrder?: DateOrder;
+  decimalSeparator?: "Auto" | "." | ",";
   /** Default `true`. Embedded Factur-X / ZUGFeRD / XRechnung / UBL XML is used when present. */
-  preferEmbeddedXml?: boolean
-  includeLayout?: boolean
-  includeCandidates?: boolean
+  preferEmbeddedXml?: boolean;
+  includeLayout?: boolean;
+  includeCandidates?: boolean;
 }
 
 export interface InvoiceResult {
-  source: InvoiceSource
-  documentType: InvoiceDocumentType
+  source: InvoiceSource;
+  documentType: InvoiceDocumentType;
   /** Document-level confidence, 0..1. */
-  confidence: number
-  fields: InvoiceFields
-  warnings: Array<string>
-  embeddedXml?: EmbeddedInvoiceXml
+  confidence: number;
+  fields: InvoiceFields;
+  warnings: Array<string>;
+  embeddedXml?: EmbeddedInvoiceXml;
 }
 
 /**
  * Which extraction path produced the result. `None` means no path could
  * (no embedded XML, and layout-based extraction is not available yet).
  */
-export type InvoiceSource = 'EmbeddedXml' | 'Native' | 'Ocr' | 'Rendered' | 'Mixed' | 'None'
+export type InvoiceSource = "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "None";
 
 /**
  * Positioned words and lines per page from the content stream (native text only).
  * Coordinates are PDF user space in points, y up.
  */
-export declare function layoutPerPage(buffer: Buffer): Array<PageLayout>
+export declare function layoutPerPage(buffer: Buffer): Array<PageLayout>;
 
-export declare function layoutPerPageAsync(buffer: Buffer): Promise<Array<PageLayout>>
+export declare function layoutPerPageAsync(buffer: Buffer): Promise<Array<PageLayout>>;
 
 /**
  * Money as a JS number plus the exact printed text; `text` is authoritative
  * when cents matter.
  */
 export interface MoneyField {
-  value: number
-  text: string
-  confidence: number
-  span?: FieldSpan
-  currencyCode?: string
-  currencySymbol?: string
+  value: number;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
+  currencyCode?: string;
+  currencySymbol?: string;
 }
 
 export interface NumberField {
-  value: number
-  text: string
-  confidence: number
-  span?: FieldSpan
+  value: number;
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
 }
 
 export interface PageAnnotation {
-  page: number
-  subtype: string
-  rect: Array<number>
-  uri?: string
-  dest?: string
-  content?: string
+  page: number;
+  subtype: string;
+  rect: Array<number>;
+  uri?: string;
+  dest?: string;
+  content?: string;
 }
 
 export interface PageBox {
   /** Number of pages that share these dimensions. */
-  pageCount: number
-  left: number
-  bottom: number
-  right: number
-  top: number
-  width: number
-  height: number
-  boxType: BoxType
+  pageCount: number;
+  left: number;
+  bottom: number;
+  right: number;
+  top: number;
+  width: number;
+  height: number;
+  boxType: BoxType;
   /**
    * Present only on non-dominant boxes — lists the specific pages with these
    * dimensions. `None` on the first (most frequent) entry means "all pages
    * not listed in any other entry's `pages` array."
    */
-  pages?: Array<number>
+  pages?: Array<number>;
 }
 
 export type PageFormField =
-  | { type: 'Text'; page: number; rect: Array<number>; objectId: string; fieldObjectId: string; name: string; partialName: string; widgetIndex: number; widgetCount: number; value?: string; defaultValue?: string; tooltip?: string; mappingName?: string; readOnly: boolean; required: boolean; noExport: boolean; hasActions: boolean; multiline: boolean; password: boolean; comb: boolean; richText: boolean; maxLen?: number }
-  | { type: 'Checkbox'; page: number; rect: Array<number>; objectId: string; fieldObjectId: string; name: string; partialName: string; widgetIndex: number; widgetCount: number; value?: string; defaultValue?: string; tooltip?: string; mappingName?: string; readOnly: boolean; required: boolean; noExport: boolean; hasActions: boolean; onState?: string; exportValue?: string; checked: boolean }
-  | { type: 'Radio'; page: number; rect: Array<number>; objectId: string; fieldObjectId: string; name: string; partialName: string; widgetIndex: number; widgetCount: number; value?: string; defaultValue?: string; tooltip?: string; mappingName?: string; readOnly: boolean; required: boolean; noExport: boolean; hasActions: boolean; onState?: string; exportValue?: string; selected: boolean }
-  | { type: 'ComboBox'; page: number; rect: Array<number>; objectId: string; fieldObjectId: string; name: string; partialName: string; widgetIndex: number; widgetCount: number; value?: string; defaultValue?: string; tooltip?: string; mappingName?: string; readOnly: boolean; required: boolean; noExport: boolean; hasActions: boolean; options: Array<ChoiceOption>; editable: boolean }
-  | { type: 'ListBox'; page: number; rect: Array<number>; objectId: string; fieldObjectId: string; name: string; partialName: string; widgetIndex: number; widgetCount: number; value?: string; defaultValue?: string; tooltip?: string; mappingName?: string; readOnly: boolean; required: boolean; noExport: boolean; hasActions: boolean; options: Array<ChoiceOption>; multiSelect: boolean; values?: Array<string> }
-  | { type: 'PushButton'; page: number; rect: Array<number>; objectId: string; fieldObjectId: string; name: string; partialName: string; widgetIndex: number; widgetCount: number; value?: string; defaultValue?: string; tooltip?: string; mappingName?: string; readOnly: boolean; required: boolean; noExport: boolean; hasActions: boolean }
-  | { type: 'Signature'; page: number; rect: Array<number>; objectId: string; fieldObjectId: string; name: string; partialName: string; widgetIndex: number; widgetCount: number; value?: string; defaultValue?: string; tooltip?: string; mappingName?: string; readOnly: boolean; required: boolean; noExport: boolean; hasActions: boolean; signed: boolean }
-  | { type: 'Unknown'; page: number; rect: Array<number>; objectId: string; fieldObjectId: string; name: string; partialName: string; widgetIndex: number; widgetCount: number; value?: string; defaultValue?: string; tooltip?: string; mappingName?: string; readOnly: boolean; required: boolean; noExport: boolean; hasActions: boolean }
+  | {
+      type: "Text";
+      page: number;
+      rect: Array<number>;
+      objectId: string;
+      fieldObjectId: string;
+      name: string;
+      partialName: string;
+      widgetIndex: number;
+      widgetCount: number;
+      value?: string;
+      defaultValue?: string;
+      tooltip?: string;
+      mappingName?: string;
+      readOnly: boolean;
+      required: boolean;
+      noExport: boolean;
+      hasActions: boolean;
+      multiline: boolean;
+      password: boolean;
+      comb: boolean;
+      richText: boolean;
+      maxLen?: number;
+    }
+  | {
+      type: "Checkbox";
+      page: number;
+      rect: Array<number>;
+      objectId: string;
+      fieldObjectId: string;
+      name: string;
+      partialName: string;
+      widgetIndex: number;
+      widgetCount: number;
+      value?: string;
+      defaultValue?: string;
+      tooltip?: string;
+      mappingName?: string;
+      readOnly: boolean;
+      required: boolean;
+      noExport: boolean;
+      hasActions: boolean;
+      onState?: string;
+      exportValue?: string;
+      checked: boolean;
+    }
+  | {
+      type: "Radio";
+      page: number;
+      rect: Array<number>;
+      objectId: string;
+      fieldObjectId: string;
+      name: string;
+      partialName: string;
+      widgetIndex: number;
+      widgetCount: number;
+      value?: string;
+      defaultValue?: string;
+      tooltip?: string;
+      mappingName?: string;
+      readOnly: boolean;
+      required: boolean;
+      noExport: boolean;
+      hasActions: boolean;
+      onState?: string;
+      exportValue?: string;
+      selected: boolean;
+    }
+  | {
+      type: "ComboBox";
+      page: number;
+      rect: Array<number>;
+      objectId: string;
+      fieldObjectId: string;
+      name: string;
+      partialName: string;
+      widgetIndex: number;
+      widgetCount: number;
+      value?: string;
+      defaultValue?: string;
+      tooltip?: string;
+      mappingName?: string;
+      readOnly: boolean;
+      required: boolean;
+      noExport: boolean;
+      hasActions: boolean;
+      options: Array<ChoiceOption>;
+      editable: boolean;
+    }
+  | {
+      type: "ListBox";
+      page: number;
+      rect: Array<number>;
+      objectId: string;
+      fieldObjectId: string;
+      name: string;
+      partialName: string;
+      widgetIndex: number;
+      widgetCount: number;
+      value?: string;
+      defaultValue?: string;
+      tooltip?: string;
+      mappingName?: string;
+      readOnly: boolean;
+      required: boolean;
+      noExport: boolean;
+      hasActions: boolean;
+      options: Array<ChoiceOption>;
+      multiSelect: boolean;
+      values?: Array<string>;
+    }
+  | {
+      type: "PushButton";
+      page: number;
+      rect: Array<number>;
+      objectId: string;
+      fieldObjectId: string;
+      name: string;
+      partialName: string;
+      widgetIndex: number;
+      widgetCount: number;
+      value?: string;
+      defaultValue?: string;
+      tooltip?: string;
+      mappingName?: string;
+      readOnly: boolean;
+      required: boolean;
+      noExport: boolean;
+      hasActions: boolean;
+    }
+  | {
+      type: "Signature";
+      page: number;
+      rect: Array<number>;
+      objectId: string;
+      fieldObjectId: string;
+      name: string;
+      partialName: string;
+      widgetIndex: number;
+      widgetCount: number;
+      value?: string;
+      defaultValue?: string;
+      tooltip?: string;
+      mappingName?: string;
+      readOnly: boolean;
+      required: boolean;
+      noExport: boolean;
+      hasActions: boolean;
+      signed: boolean;
+    }
+  | {
+      type: "Unknown";
+      page: number;
+      rect: Array<number>;
+      objectId: string;
+      fieldObjectId: string;
+      name: string;
+      partialName: string;
+      widgetIndex: number;
+      widgetCount: number;
+      value?: string;
+      defaultValue?: string;
+      tooltip?: string;
+      mappingName?: string;
+      readOnly: boolean;
+      required: boolean;
+      noExport: boolean;
+      hasActions: boolean;
+    };
 
 export interface PageImage {
-  page: number
-  imageIndex: number
-  width: number
-  height: number
-  data: Buffer
-  colorSpace: string
-  bitsPerComponent: number
-  filter: string
-  xobjectName: string
-  objectId: string
+  page: number;
+  imageIndex: number;
+  width: number;
+  height: number;
+  data: Buffer;
+  colorSpace: string;
+  bitsPerComponent: number;
+  filter: string;
+  xobjectName: string;
+  objectId: string;
 }
 
 export interface PageLayout {
-  page: number
+  page: number;
   /**
    * CropBox (fallback MediaBox) size in points. Coordinates in `words`,
    * `lines` and `images` are raw user space, not shifted to this box's origin.
    */
-  width: number
-  height: number
+  width: number;
+  height: number;
   /** `/Rotate`, reported and not applied. */
-  rotate: number
+  rotate: number;
   /**
    * Clockwise degrees (0, 90, 180, 270) the OCR tiers had to turn the raster
    * before its text read upright; `width` and `height` are swapped for a
@@ -480,120 +641,123 @@ export interface PageLayout {
    * away from the origin, words can lie outside the reported box. Every
    * turned image adds a warning naming it.
    */
-  contentRotation: number
-  source: TextSource
-  words: Array<TextWord>
-  lines: Array<TextLine>
-  images: Array<PlacedImage>
-  warnings: Array<string>
+  contentRotation: number;
+  source: TextSource;
+  words: Array<TextWord>;
+  lines: Array<TextLine>;
+  images: Array<PlacedImage>;
+  warnings: Array<string>;
 }
 
 export interface PageText {
-  page: number
-  text: string
+  page: number;
+  text: string;
 }
 
 export interface PaymentDetail {
-  iban?: StringField
-  swift?: StringField
-  bankName?: StringField
-  accountNumber?: StringField
-  routingNumber?: StringField
+  iban?: StringField;
+  swift?: StringField;
+  bankName?: StringField;
+  accountNumber?: StringField;
+  routingNumber?: StringField;
 }
 
-export declare function pdfDocument(buffer: Buffer): PdfDocument
+export declare function pdfDocument(buffer: Buffer): PdfDocument;
 
 export interface PdfDocument {
-  version: string
-  isLinearized: boolean
-  pageCount: number
-  creator?: string
-  producer?: string
-  creationDate?: string
-  modificationDate?: string
-  pageBoxes: Array<PageBox>
-  totalImages: number
-  totalAnnotations: number
-  imagePages: Array<number>
-  annotationPages: Array<number>
-  text: Array<PageText>
-  structuredText: Array<StructuredPageText>
-  images: Array<PageImage>
-  annotations: Array<PageAnnotation>
-  form?: FormInfo
-  formFields: Array<PageFormField>
-  totalFormFields: number
-  formFieldPages: Array<number>
+  version: string;
+  isLinearized: boolean;
+  pageCount: number;
+  creator?: string;
+  producer?: string;
+  creationDate?: string;
+  modificationDate?: string;
+  pageBoxes: Array<PageBox>;
+  totalImages: number;
+  totalAnnotations: number;
+  imagePages: Array<number>;
+  annotationPages: Array<number>;
+  text: Array<PageText>;
+  structuredText: Array<StructuredPageText>;
+  images: Array<PageImage>;
+  annotations: Array<PageAnnotation>;
+  form?: FormInfo;
+  formFields: Array<PageFormField>;
+  totalFormFields: number;
+  formFieldPages: Array<number>;
 }
 
-export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>
+export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>;
 
 export interface PdfMeta {
-  pageCount: number
-  version: string
-  isLinearized: boolean
-  creator?: string
-  producer?: string
-  creationDate?: string
-  modificationDate?: string
-  pageBoxes: Array<PageBox>
+  pageCount: number;
+  version: string;
+  isLinearized: boolean;
+  creator?: string;
+  producer?: string;
+  creationDate?: string;
+  modificationDate?: string;
+  pageBoxes: Array<PageBox>;
   /** AcroForm facts; present when `/AcroForm` exists or orphan widgets were found. */
-  form?: FormInfo
+  form?: FormInfo;
 }
 
-export declare function pdfMetadata(buffer: Buffer): PdfMeta
+export declare function pdfMetadata(buffer: Buffer): PdfMeta;
 
-export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>
+export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>;
 
 /**
  * Where an image XObject was painted: the unit square under the CTM at the
  * `Do` operator, as an axis-aligned box in user space.
  */
 export interface PlacedImage {
-  xobjectName: string
-  x0: number
-  y0: number
-  x1: number
-  y1: number
+  xobjectName: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
 }
 
 export interface RenderedPage {
-  page: number
-  width: number
-  height: number
-  dpi: number
-  data: Buffer
+  page: number;
+  width: number;
+  height: number;
+  dpi: number;
+  data: Buffer;
 }
 
-export type RenderMode = 'Auto' | 'Never' | 'Always'
+export type RenderMode = "Auto" | "Never" | "Always";
 
 export interface RenderOptions {
-  dpi?: number
-  mode?: RenderMode
+  dpi?: number;
+  mode?: RenderMode;
 }
 
-export declare function renderPagesAsync(buffer: Buffer, opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>
+export declare function renderPagesAsync(
+  buffer: Buffer,
+  opts?: RenderOptions | undefined | null
+): Promise<Array<RenderedPage>>;
 
 export interface StringField {
-  value: string
+  value: string;
   /** The exact source text the value was derived from. */
-  text: string
-  confidence: number
-  span?: FieldSpan
+  text: string;
+  confidence: number;
+  span?: FieldSpan;
 }
 
 export interface StructuredPageText {
-  page: number
-  header: string
-  body: string
-  footer: string
+  page: number;
+  header: string;
+  body: string;
+  footer: string;
 }
 
 export interface TaxDetail {
-  rate?: NumberField
-  amount?: MoneyField
-  base?: MoneyField
-  category?: StringField
+  rate?: NumberField;
+  amount?: MoneyField;
+  base?: MoneyField;
+  category?: StringField;
 }
 
 /**
@@ -601,39 +765,39 @@ export interface TaxDetail {
  * address a contiguous slice of `PageLayout.words`.
  */
 export interface TextLine {
-  text: string
-  x0: number
-  y0: number
-  x1: number
-  y1: number
-  firstWord: number
-  wordCount: number
+  text: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  firstWord: number;
+  wordCount: number;
 }
 
 /**
  * Where a page's text came from. Present in every build; `Rendered` is only
  * produced when the `render` feature rasterised the page.
  */
-export type TextSource = 'Native' | 'Ocr' | 'Rendered'
+export type TextSource = "Native" | "Ocr" | "Rendered";
 
 /** One word with its box in PDF user space (points, y up). */
 export interface TextWord {
-  text: string
-  x0: number
-  y0: number
-  x1: number
-  y1: number
+  text: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
   /** Index into `PageLayout.lines`. */
-  line: number
+  line: number;
   /** Native only: font size in user space (after the CTM), in points. */
-  fontSize?: number
+  fontSize?: number;
   /** Native only: base font name with any subset prefix stripped. */
-  fontName?: string
+  fontName?: string;
   /** Native: from the font descriptor and name. OCR: not reported. */
-  bold?: boolean
-  italic?: boolean
+  bold?: boolean;
+  italic?: boolean;
   /** OCR only: Tesseract word confidence, 0..1. */
-  confidence?: number
+  confidence?: number;
 }
 
 /**
@@ -645,29 +809,29 @@ export interface UnplacedFormField {
    * `"N G obj"`, or `"<parent fieldObjectId>/kid I"` / `"/Fields I"` when the field
    * dictionary itself is written inline.
    */
-  fieldObjectId: string
-  name: string
-  partialName: string
-  type: FormFieldType
-  value?: string
+  fieldObjectId: string;
+  name: string;
+  partialName: string;
+  type: FormFieldType;
+  value?: string;
   /** Multi-select list boxes. */
-  values?: Array<string>
-  defaultValue?: string
-  tooltip?: string
-  mappingName?: string
+  values?: Array<string>;
+  defaultValue?: string;
+  tooltip?: string;
+  mappingName?: string;
   /** Choice fields. */
-  options?: Array<ChoiceOption>
-  maxLen?: number
-  readOnly: boolean
-  required: boolean
-  noExport: boolean
-  hasActions: boolean
-  multiline: boolean
-  password: boolean
-  comb: boolean
-  richText: boolean
-  editable: boolean
-  multiSelect: boolean
+  options?: Array<ChoiceOption>;
+  maxLen?: number;
+  readOnly: boolean;
+  required: boolean;
+  noExport: boolean;
+  hasActions: boolean;
+  multiline: boolean;
+  password: boolean;
+  comb: boolean;
+  richText: boolean;
+  editable: boolean;
+  multiSelect: boolean;
   /** Signature fields: signature data present in /V (not cryptographic validation). */
-  signed: boolean
+  signed: boolean;
 }

@@ -59,10 +59,7 @@ export type IsExact<T, U> = [T] extends [U] ? ([U] extends [T] ? true : false) :
  * is true. But `Equal<{ a: string; b: string  }, { a: string; } & { b: string }>`
  * is false.
  */
-export type Equal<X, Y> =
-  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
-    ? true
-    : false;
+export type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
 export type UTR<
   TUnion extends Record<TKey, string>,
