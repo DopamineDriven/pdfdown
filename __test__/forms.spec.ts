@@ -242,6 +242,7 @@ test("pdfMetadata: form info present on forms, absent otherwise", (t) => {
   t.is(hidden.value, "secret");
   t.false(hidden.signed);
   t.regex(inlinekid.fieldObjectId, /^\d+ \d+ obj$/);
+  t.false(/\/kid/.test(inlinekid.fieldObjectId), "an unplaced field keeps its own object id, not a synthetic kid id");
   t.is(sigdata.type, "Signature");
   t.true(sigdata.signed);
 
@@ -252,6 +253,14 @@ test("pdfMetadata: form info present on forms, absent otherwise", (t) => {
   t.is(orphans.widgetCount, 2);
 
   t.is(pdfMetadata(scan()).form, undefined);
+});
+
+test("real world: Sliced Invoices sample has no form at all", (t) => {
+  const buf = readFileSync(
+    join(import.meta.dirname, "fixtures", "invoices", "wordpress-pdf-invoice-plugin-sample.pdf")
+  );
+  t.is(pdfMetadata(buf).form, undefined);
+  t.deepEqual(extractFormFieldsPerPage(buf), []);
 });
 
 test("real world: WHMCS invoice with an empty /AcroForm", (t) => {
@@ -303,11 +312,14 @@ const hasQpdf = spawnSync("qpdf", ["--version"]).status === 0;
   for (const name of ["acroform-basic.pdf", "acroform-inherited.pdf"]) {
     const ours = extractFormFieldsPerPage(fixture(name));
     const run = spawnSync("qpdf", ["--json", "--json-key=acroform", join(FIXTURES, name)], { encoding: "utf8" });
-    const theirs = JSON.parse(run.stdout).acroform as {
-      hasacroform: boolean;
-      needappearances: boolean;
-      fields: Array<{ fullname: string; pageposfrom1?: number }>;
-    };
+    const parsed: {
+      acroform: {
+        hasacroform: boolean;
+        needappearances: boolean;
+        fields: Array<{ fullname: string; pageposfrom1?: number }>;
+      };
+    } = JSON.parse(run.stdout);
+    const theirs = parsed.acroform;
     const placed = theirs.fields.filter((f) => f.pageposfrom1);
     t.deepEqual(
       ours.map((f) => `${f.page}:${f.name}`).sort(),
