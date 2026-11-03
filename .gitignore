@@ -135,3 +135,4 @@ notes.md
 
 # superpowers plan-execution scratch (ledgers, briefs, logs)
 .superpowers/
+ocr/__test__/fixtures/private/*
