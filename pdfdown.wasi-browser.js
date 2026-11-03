@@ -1441,21 +1441,32 @@ try {
 }
 export default __napiModule.exports
 export const PdfDown = __napiModule.exports.PdfDown
+export const attachments = __napiModule.exports.attachments
+export const attachmentsAsync = __napiModule.exports.attachmentsAsync
 export const BoxType = __napiModule.exports.BoxType
 export const capabilities = __napiModule.exports.capabilities
+export const DateOrder = __napiModule.exports.DateOrder
+export const EInvoiceStandard = __napiModule.exports.EInvoiceStandard
 export const extractAnnotationsPerPage = __napiModule.exports.extractAnnotationsPerPage
 export const extractAnnotationsPerPageAsync = __napiModule.exports.extractAnnotationsPerPageAsync
 export const extractFormFieldsPerPage = __napiModule.exports.extractFormFieldsPerPage
 export const extractFormFieldsPerPageAsync = __napiModule.exports.extractFormFieldsPerPageAsync
 export const extractImagesPerPage = __napiModule.exports.extractImagesPerPage
 export const extractImagesPerPageAsync = __napiModule.exports.extractImagesPerPageAsync
+export const extractInvoice = __napiModule.exports.extractInvoice
+export const extractInvoiceAsync = __napiModule.exports.extractInvoiceAsync
 export const extractStructuredTextPerPage = __napiModule.exports.extractStructuredTextPerPage
 export const extractStructuredTextPerPageAsync = __napiModule.exports.extractStructuredTextPerPageAsync
 export const extractTextPerPage = __napiModule.exports.extractTextPerPage
 export const extractTextPerPageAsync = __napiModule.exports.extractTextPerPageAsync
+export const InvoiceDocumentType = __napiModule.exports.InvoiceDocumentType
+export const InvoiceSource = __napiModule.exports.InvoiceSource
+export const layoutPerPage = __napiModule.exports.layoutPerPage
+export const layoutPerPageAsync = __napiModule.exports.layoutPerPageAsync
 export const pdfDocument = __napiModule.exports.pdfDocument
 export const pdfDocumentAsync = __napiModule.exports.pdfDocumentAsync
 export const pdfMetadata = __napiModule.exports.pdfMetadata
 export const pdfMetadataAsync = __napiModule.exports.pdfMetadataAsync
 export const RenderMode = __napiModule.exports.RenderMode
 export const renderPagesAsync = __napiModule.exports.renderPagesAsync
+export const TextSource = __napiModule.exports.TextSource

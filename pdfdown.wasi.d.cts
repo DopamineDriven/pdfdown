@@ -48,6 +48,22 @@ export type RTC<T, K extends keyof OnlyRequired<T> = keyof OnlyRequired<T>> = Rm
 };
 export type IsExact<T, U> = [T] extends [U] ? ([U] extends [T] ? true : false) : false;
 
+/**
+ * Checks that X and Y are exactly equal.
+ *
+ * For instance, `Equal<'a', 'a'>` is true. But
+ * `Equal<'a', 'b'>` is false.
+ *
+ * This also checks for exact intersection equality. So
+ * `Equal<{ a: string; b: string  }, { a: string; b: string }>`
+ * is true. But `Equal<{ a: string; b: string  }, { a: string; } & { b: string }>`
+ * is false.
+ */
+export type Equal<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
+    ? true
+    : false;
+
 export type UTR<
   TUnion extends Record<TKey, string>,
   TKey extends string = "kind",
@@ -77,6 +93,18 @@ export type OnlyRequired<T> = {
 export type FormFieldType = PageFormField["type"];
 export type FormFieldByType = UTR<PageFormField, "type", true>;
 
+/**
+ * Payload of one or more variants, selected by discriminant. Pass a single key
+ * for that variant's fields, or a union of keys for the union of their payloads.
+ *
+ * @example
+ * type Sig = FormFieldPayload<"Signature">;              // { signed: boolean; page: number; ... }
+ * type Buttons = FormFieldPayload<"Checkbox" | "Radio">; // either payload
+ */
+export type FormFieldPayload<T extends keyof FormFieldByType = keyof FormFieldByType> = {
+  [P in T]: FormFieldByType[P];
+}[T];
+
 /** The WASI flavor this loader instantiates. */
 export declare const __napiBindingTarget: 'wasm32-wasi'
 
@@ -86,6 +114,13 @@ export declare class PdfDown {
   imagesPerPage(): Array<PageImage>
   annotationsPerPage(): Array<PageAnnotation>
   metadata(): PdfMeta
+  /** Positioned words and lines per page from the content stream (native text only). */
+  layout(): Array<PageLayout>
+  layoutAsync(): Promise<Array<PageLayout>>
+  attachments(): Array<Attachment>
+  attachmentsAsync(): Promise<Array<Attachment>>
+  invoice(opts?: InvoiceOptions | undefined | null): InvoiceResult
+  invoiceAsync(opts?: InvoiceOptions | undefined | null): Promise<InvoiceResult>
   textPerPageAsync(): Promise<Array<PageText>>
   imagesPerPageAsync(): Promise<Array<PageImage>>
   annotationsPerPageAsync(): Promise<Array<PageAnnotation>>
@@ -98,6 +133,59 @@ export declare class PdfDown {
   formFieldsPerPageAsync(): Promise<Array<PageFormField>>
   renderPagesAsync(opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>
 }
+
+/** `value` is `lines` joined with `
+`. */
+export interface AddressField {
+  value: string
+  text: string
+  confidence: number
+  span?: FieldSpan
+  lines: Array<string>
+}
+
+/**
+ * An aircraft or engine the invoice relates to. Maintenance, parts and
+ * program invoices identify the asset by airframe (model, manufacturer serial
+ * number, registration) and/or by engine (model, engine serial number); one
+ * invoice can cover several assets, so `InvoiceFields.aircraft` is a list.
+ */
+export interface AircraftReference {
+  /** Airframe model, e.g. "Challenger 350", "Global 6000", "Phenom 300". */
+  model?: StringField
+  /** Manufacturer serial number (MSN). */
+  serialNumber?: StringField
+  /** Registration / tail number, e.g. "N123AB", "C-GXYZ". */
+  registration?: StringField
+  /** Engine model, e.g. "BR710", "AE 3007", "PW308C". */
+  engineModel?: StringField
+  /** Engine serial number (ESN). */
+  engineSerialNumber?: StringField
+  span?: FieldSpan
+}
+
+/**
+ * A file embedded in the PDF: a `/Names /EmbeddedFiles` entry, a catalog
+ * `/AF` associated file, or a page-level `/FileAttachment` annotation.
+ */
+export interface Attachment {
+  name: string
+  /** From the embedded file stream's `/Subtype`, e.g. `text/xml`. */
+  mimeType?: string
+  /** Decoded payload size in bytes. */
+  size: number
+  /** `/AFRelationship`: `Source`, `Data`, `Alternative`, `Supplement`, ... */
+  relationship?: string
+  description?: string
+  /** 1-based page for a `/FileAttachment` annotation; absent for document-level files. */
+  page?: number
+  data: Buffer
+}
+
+/** Every embedded file: `/Names /EmbeddedFiles`, catalog `/AF`, and page `/FileAttachment` annotations. */
+export declare function attachments(buffer: Buffer): Array<Attachment>
+
+export declare function attachmentsAsync(buffer: Buffer): Promise<Array<Attachment>>
 
 export type BoxType = 'CropBox' | 'MediaBox' | 'Unknown'
 
@@ -113,6 +201,29 @@ export interface ChoiceOption {
   displayValue: string
 }
 
+/** `value` is an ISO 8601 calendar date, `YYYY-MM-DD`. */
+export interface DateField {
+  value: string
+  text: string
+  confidence: number
+  span?: FieldSpan
+}
+
+export type DateOrder = 'Auto' | 'MDY' | 'DMY' | 'YMD'
+
+export type EInvoiceStandard = 'FacturX' | 'ZUGFeRD' | 'XRechnung' | 'UBL' | 'Unknown'
+
+export interface EmbeddedInvoiceXml {
+  filename: string
+  standard: EInvoiceStandard
+  /**
+   * The guideline / customization identifier, e.g.
+   * `urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic`.
+   */
+  profile?: string
+  xml: string
+}
+
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>
 
 export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>
@@ -125,6 +236,14 @@ export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>
 
 export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array<PageImage>>
 
+/**
+ * Structured invoice data. This version reads embedded Factur-X / ZUGFeRD /
+ * XRechnung / UBL XML; documents without it return `source: "None"`.
+ */
+export declare function extractInvoice(buffer: Buffer, opts?: InvoiceOptions | undefined | null): InvoiceResult
+
+export declare function extractInvoiceAsync(buffer: Buffer, opts?: InvoiceOptions | undefined | null): Promise<InvoiceResult>
+
 export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>
 
 export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>
@@ -132,6 +251,15 @@ export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promi
 export declare function extractTextPerPage(buffer: Buffer): Array<PageText>
 
 export declare function extractTextPerPageAsync(buffer: Buffer): Promise<Array<PageText>>
+
+/** Where a field was read from, in PDF user space on a 1-based page. */
+export interface FieldSpan {
+  page: number
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
 
 /**
  * Document-level AcroForm facts. Present on `PdfMeta` / `PdfDocument` when `/AcroForm` exists
@@ -153,6 +281,128 @@ export interface FormInfo {
   truncated: boolean
   /** Dangling references, non-array `/Annots`, non-dictionary `/Kids` entries, depth cap. */
   warnings: Array<string>
+}
+
+export type InvoiceDocumentType = 'Invoice' | 'CreditNote' | 'Unknown'
+
+/**
+ * Field names mirror the de-facto vocabulary of common invoice extractors so
+ * consumers can swap sources with a thin mapper. Naming only: nothing here
+ * talks to any service.
+ */
+export interface InvoiceFields {
+  vendorName?: StringField
+  vendorAddress?: AddressField
+  vendorTaxId?: StringField
+  vendorEmail?: StringField
+  vendorPhone?: StringField
+  vendorWebsite?: StringField
+  customerName?: StringField
+  customerId?: StringField
+  customerAddress?: AddressField
+  customerTaxId?: StringField
+  billingAddress?: AddressField
+  shippingAddress?: AddressField
+  remittanceAddress?: AddressField
+  invoiceId?: StringField
+  invoiceDate?: DateField
+  dueDate?: DateField
+  purchaseOrder?: StringField
+  paymentTerm?: StringField
+  serviceStartDate?: DateField
+  serviceEndDate?: DateField
+  currencyCode?: string
+  subTotal?: MoneyField
+  totalDiscount?: MoneyField
+  totalTax?: MoneyField
+  shippingCost?: MoneyField
+  invoiceTotal?: MoneyField
+  amountDue?: MoneyField
+  previousUnpaidBalance?: MoneyField
+  /** MRO work order / shop order the invoice bills against. */
+  workOrder?: StringField
+  /** Aircraft and engines the invoice relates to; empty when none is identified. */
+  aircraft: Array<AircraftReference>
+  taxDetails: Array<TaxDetail>
+  paymentDetails: Array<PaymentDetail>
+  items: Array<InvoiceItem>
+}
+
+export interface InvoiceItem {
+  description?: StringField
+  productCode?: StringField
+  quantity?: NumberField
+  unit?: StringField
+  unitPrice?: MoneyField
+  taxRate?: NumberField
+  tax?: MoneyField
+  discount?: MoneyField
+  date?: DateField
+  amount?: MoneyField
+  /** Absent when the item came from embedded XML (no page geometry). */
+  span?: FieldSpan
+}
+
+/**
+ * Options accepted by every invoice entry point. In this version only
+ * `preferEmbeddedXml` changes behaviour; the rest are reserved for the
+ * layout-based extractor and are accepted so callers can set them now.
+ */
+export interface InvoiceOptions {
+  /** Label lexicons to enable; default `["en"]`. */
+  languages?: Array<string>
+  /** ISO 4217 hint when the page shows only symbols. */
+  currency?: string
+  dateOrder?: DateOrder
+  decimalSeparator?: "Auto" | "." | ","
+  /** Default `true`. Embedded Factur-X / ZUGFeRD / XRechnung / UBL XML is used when present. */
+  preferEmbeddedXml?: boolean
+  includeLayout?: boolean
+  includeCandidates?: boolean
+}
+
+export interface InvoiceResult {
+  source: InvoiceSource
+  documentType: InvoiceDocumentType
+  /** Document-level confidence, 0..1. */
+  confidence: number
+  fields: InvoiceFields
+  warnings: Array<string>
+  embeddedXml?: EmbeddedInvoiceXml
+}
+
+/**
+ * Which extraction path produced the result. `None` means no path could
+ * (no embedded XML, and layout-based extraction is not available yet).
+ */
+export type InvoiceSource = 'EmbeddedXml' | 'Native' | 'Ocr' | 'Rendered' | 'Mixed' | 'None'
+
+/**
+ * Positioned words and lines per page from the content stream (native text only).
+ * Coordinates are PDF user space in points, y up.
+ */
+export declare function layoutPerPage(buffer: Buffer): Array<PageLayout>
+
+export declare function layoutPerPageAsync(buffer: Buffer): Promise<Array<PageLayout>>
+
+/**
+ * Money as a JS number plus the exact printed text; `text` is authoritative
+ * when cents matter.
+ */
+export interface MoneyField {
+  value: number
+  text: string
+  confidence: number
+  span?: FieldSpan
+  currencyCode?: string
+  currencySymbol?: string
+}
+
+export interface NumberField {
+  value: number
+  text: string
+  confidence: number
+  span?: FieldSpan
 }
 
 export interface PageAnnotation {
@@ -205,9 +455,40 @@ export interface PageImage {
   objectId: string
 }
 
+export interface PageLayout {
+  page: number
+  /**
+   * CropBox (fallback MediaBox) size in points. Coordinates in `words`,
+   * `lines` and `images` are raw user space, not shifted to this box's origin.
+   */
+  width: number
+  height: number
+  /** `/Rotate`, reported and not applied. */
+  rotate: number
+  /**
+   * Clockwise degrees (0, 90, 180, 270) the OCR tiers had to turn the raster
+   * before its text read upright. Words, lines, `width` and `height` are then
+   * in that upright frame. Always 0 for `Native` pages.
+   */
+  contentRotation: number
+  source: TextSource
+  words: Array<TextWord>
+  lines: Array<TextLine>
+  images: Array<PlacedImage>
+  warnings: Array<string>
+}
+
 export interface PageText {
   page: number
   text: string
+}
+
+export interface PaymentDetail {
+  iban?: StringField
+  swift?: StringField
+  bankName?: StringField
+  accountNumber?: StringField
+  routingNumber?: StringField
 }
 
 export declare function pdfDocument(buffer: Buffer): PdfDocument
@@ -254,6 +535,18 @@ export declare function pdfMetadata(buffer: Buffer): PdfMeta
 
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>
 
+/**
+ * Where an image XObject was painted: the unit square under the CTM at the
+ * `Do` operator, as an axis-aligned box in user space.
+ */
+export interface PlacedImage {
+  xobjectName: string
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
 export interface RenderedPage {
   page: number
   width: number
@@ -271,11 +564,66 @@ export interface RenderOptions {
 
 export declare function renderPagesAsync(buffer: Buffer, opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>
 
+export interface StringField {
+  value: string
+  /** The exact source text the value was derived from. */
+  text: string
+  confidence: number
+  span?: FieldSpan
+}
+
 export interface StructuredPageText {
   page: number
   header: string
   body: string
   footer: string
+}
+
+export interface TaxDetail {
+  rate?: NumberField
+  amount?: MoneyField
+  base?: MoneyField
+  category?: StringField
+}
+
+/**
+ * Words sharing a baseline band, left to right. `firstWord` / `wordCount`
+ * address a contiguous slice of `PageLayout.words`.
+ */
+export interface TextLine {
+  text: string
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  firstWord: number
+  wordCount: number
+}
+
+/**
+ * Where a page's text came from. Present in every build; `Rendered` is only
+ * produced when the `render` feature rasterised the page.
+ */
+export type TextSource = 'Native' | 'Ocr' | 'Rendered'
+
+/** One word with its box in PDF user space (points, y up). */
+export interface TextWord {
+  text: string
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  /** Index into `PageLayout.lines`. */
+  line: number
+  /** Native only: font size in user space (after the CTM), in points. */
+  fontSize?: number
+  /** Native only: base font name with any subset prefix stripped. */
+  fontName?: string
+  /** Native: from the font descriptor and name. OCR: not reported. */
+  bold?: boolean
+  italic?: boolean
+  /** OCR only: Tesseract word confidence, 0..1. */
+  confidence?: number
 }
 
 /**
