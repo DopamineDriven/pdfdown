@@ -1810,6 +1810,29 @@ mod tests {
   }
 
   #[test]
+  fn radio_without_as_selects_by_group_value_through_ap_states() {
+    // No /AS anywhere: the group /V "1" selects the widget whose /AP names state "1".
+    let kid = |state: &str| dictionary! { "AP" => ap_n(&["Off", state]) };
+    let (out, w) = radio_group(
+      dictionary! { "V" => name("1") },
+      vec![kid("0"), kid("1"), kid("2")],
+    );
+    let parts: Vec<_> = out.iter().map(|(k, _)| radio_parts(k)).collect();
+    assert_eq!(
+      parts
+        .iter()
+        .map(|p| p.0.clone().unwrap())
+        .collect::<Vec<_>>(),
+      vec!["0", "1", "2"]
+    );
+    assert_eq!(
+      parts.iter().map(|p| p.2).collect::<Vec<_>>(),
+      vec![false, true, false]
+    );
+    assert!(w.is_empty());
+  }
+
+  #[test]
   fn radio_keeps_state_name_and_export_value_apart() {
     let opt = Object::Array(vec![
       Object::string_literal("Red"),
