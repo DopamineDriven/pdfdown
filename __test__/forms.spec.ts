@@ -27,9 +27,10 @@ type Variant<K extends FormFieldType> = Extract<PageFormField, { type: K }>;
 function one<K extends FormFieldType>(fields: PageFormField[], name: string, type: K): Variant<K> {
   const matches = fields.filter((f) => f.name === name);
   if (matches.length !== 1) throw new Error(`expected exactly one field named ${name}, got ${matches.length}`);
+  const isVariant = (f: PageFormField): f is Variant<K> => f.type === type;
   const f = matches[0];
-  if (f.type !== type) throw new Error(`expected ${name} to be ${type}, got ${f.type}`);
-  return f as Variant<K>;
+  if (!isVariant(f)) throw new Error(`expected ${name} to be ${type}, got ${f.type}`);
+  return f;
 }
 
 const BASIC_ORDER = ["name", "notes", "zip", "agree", "color", "color", "color", "country", "tags", "sig", "submit"];
