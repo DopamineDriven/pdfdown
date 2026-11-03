@@ -1,40 +1,25 @@
-import type { FormFieldByType, FormFieldType, IsExact, PageFormField, Rm, UnplacedFormField } from "../index";
-import { extractFormFieldsPerPage } from "../index";
+import type { Equal, FormFieldByType, FormFieldType, IsExact, PageFormField, Rm, UnplacedFormField } from "../index";
+import type { extractFormFieldsPerPage } from "../index";
 
 // shape
-const _types: IsExact<
+true satisfies IsExact<
   FormFieldType,
   "Text" | "Checkbox" | "Radio" | "ComboBox" | "ListBox" | "PushButton" | "Signature" | "Unknown"
-> = true;
-const _keys: IsExact<keyof FormFieldByType, FormFieldType> = true;
-const _checkbox: IsExact<FormFieldByType["Checkbox"], Rm<Extract<PageFormField, { type: "Checkbox" }>, "type">> = true;
-const _noType: "type" extends keyof FormFieldByType["Text"] ? false : true = true;
-const _unplacedType: IsExact<UnplacedFormField["type"], FormFieldType> = true;
+>;
+true satisfies IsExact<keyof FormFieldByType, FormFieldType>;
+true satisfies IsExact<FormFieldByType["Checkbox"], Rm<Extract<PageFormField, { type: "Checkbox" }>, "type">>;
+true satisfies IsExact<UnplacedFormField["type"], FormFieldType>;
+true satisfies IsExact<ReturnType<typeof extractFormFieldsPerPage>, PageFormField[]>;
 
-// narrowing
-declare const buf: Buffer;
-for (const f of extractFormFieldsPerPage(buf)) {
-  if (f.type === "Checkbox") {
-    const checked: boolean = f.checked;
-    const state: string | undefined = f.onState;
-    void checked;
-    void state;
-  }
-  if (f.type === "ListBox") {
-    const vs: Array<string> | undefined = f.values;
-    void vs;
-  }
-  const page: number = f.page;
-  const rect: Array<number> = f.rect;
-  void page;
-  void rect;
-  // @ts-expect-error checked exists only on the Checkbox variant
-  void f.checked;
-  // @ts-expect-error page is a required number on every variant
-  const _p: undefined = f.page;
-}
-void _types;
-void _keys;
-void _checkbox;
-void _noType;
-void _unplacedType;
+// per-variant fields through the keyed lookup
+true satisfies Equal<FormFieldByType["Checkbox"]["checked"], boolean>;
+true satisfies IsExact<FormFieldByType["Checkbox"]["onState"], string | undefined>;
+true satisfies IsExact<FormFieldByType["ListBox"]["values"], string[] | undefined>;
+true satisfies IsExact<FormFieldByType["Text"]["page"], number>;
+true satisfies IsExact<FormFieldByType["Text"]["rect"], number[]>;
+
+// negatives
+// @ts-expect-error "type" is stripped from every keyed entry
+type _NoDiscriminant = FormFieldByType["Text"]["type"];
+// @ts-expect-error checked exists only on the Checkbox variant
+type _NoCheckedOnText = FormFieldByType["Text"]["checked"];

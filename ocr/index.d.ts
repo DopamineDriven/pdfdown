@@ -48,6 +48,22 @@ export type RTC<T, K extends keyof OnlyRequired<T> = keyof OnlyRequired<T>> = Rm
 };
 export type IsExact<T, U> = [T] extends [U] ? ([U] extends [T] ? true : false) : false;
 
+/**
+ * Checks that X and Y are exactly equal.
+ *
+ * For instance, `Equal<'a', 'a'>` is true. But
+ * `Equal<'a', 'b'>` is false.
+ *
+ * This also checks for exact intersection equality. So
+ * `Equal<{ a: string; b: string  }, { a: string; b: string }>`
+ * is true. But `Equal<{ a: string; b: string  }, { a: string; } & { b: string }>`
+ * is false.
+ */
+export type Equal<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
+    ? true
+    : false;
+
 export type UTR<
   TUnion extends Record<TKey, string>,
   TKey extends string = "kind",
