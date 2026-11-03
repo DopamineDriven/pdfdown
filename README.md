@@ -105,7 +105,7 @@ export interface PageLayout {
   width: number; // CropBox (fallback MediaBox) size in points
   height: number;
   rotate: number; // /Rotate, reported and not applied
-  contentRotation: number; // 0 | 90 | 180 | 270: turn the OCR tiers applied so the text reads upright (always 0 for Native)
+  contentRotation: number; // 0 | 90 | 180 | 270: turn the OCR tiers applied so the text reads upright; detected per image, last turned image wins (always 0 for Native)
   source: TextSource; // "Native" here; "Ocr" | "Rendered" from the OCR package
   words: Array<TextWord>;
   lines: Array<TextLine>;

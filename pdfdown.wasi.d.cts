@@ -467,8 +467,13 @@ export interface PageLayout {
   rotate: number
   /**
    * Clockwise degrees (0, 90, 180, 270) the OCR tiers had to turn the raster
-   * before its text read upright. Words, lines, `width` and `height` are then
-   * in that upright frame. Always 0 for `Native` pages.
+   * before its text read upright; `width` and `height` are swapped for a
+   * quarter turn. Always 0 for `Native` pages. Rotation is detected per image
+   * and this reports the last image that needed a turn: tier-2 words stay
+   * anchored at their own image placement, as painted or turned about its
+   * corner, so on a page whose images disagree, or whose image is painted
+   * away from the origin, words can lie outside the reported box. Every
+   * turned image adds a warning naming it.
    */
   contentRotation: number
   source: TextSource
