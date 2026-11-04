@@ -25,9 +25,12 @@ pub struct TextWord {
   pub font_size: Option<f64>,
   /// Native only: base font name with any subset prefix stripped.
   pub font_name: Option<String>,
-  /// Native: from the font descriptor and name. OCR: not reported.
+  /// Native: from the font descriptor and name; absent when the font gives no weight evidence
+  /// (anonymous names such as `CIDFont+F1`) and for OCR words.
   pub bold: Option<bool>,
   pub italic: Option<bool>,
+  /// Native only: true when the word is set in a barcode font, so its glyphs are bars, not letters.
+  pub symbolic: Option<bool>,
   /// OCR only: Tesseract word confidence, 0..1.
   pub confidence: Option<f64>,
 }

@@ -122,8 +122,9 @@ export interface TextWord {
   line: number; // index into PageLayout.lines
   fontSize?: number; // native only: size in points after the CTM
   fontName?: string; // native only: base font, subset prefix stripped
-  bold?: boolean; // native only: name, ForceBold flag or FontWeight >= 600
+  bold?: boolean; // native only: name, ForceBold flag or FontWeight >= 600; absent when the font gives no weight evidence (anonymous CIDFont+Fn names)
   italic?: boolean;
+  symbolic?: boolean; // native only: set in a barcode font, so the glyphs are bars, not letters
   confidence?: number; // OCR only: 0..1
 }
 

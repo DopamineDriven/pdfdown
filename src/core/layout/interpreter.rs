@@ -130,6 +130,8 @@ pub(crate) struct FontMeta {
   pub name: String,
   pub bold: bool,
   pub italic: bool,
+  pub symbolic: bool,
+  pub weight_known: bool,
 }
 
 /// One positioned glyph in user space.
@@ -219,6 +221,8 @@ impl<'a> Interpreter<'a> {
         name: f.name.clone(),
         bold: f.bold,
         italic: f.italic,
+        symbolic: f.symbolic,
+        weight_known: f.weight_known,
       })
       .collect()
   }

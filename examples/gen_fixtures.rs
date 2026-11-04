@@ -854,6 +854,43 @@ fn rotated_scan(out: &Path) {
   p.finish(None, &out.join("rotated-scan.pdf"));
 }
 
+/// Three lines in three fonts: a barcode font (glyphs are bars), an anonymous `CIDFont+F1` (no weight
+/// evidence) and Helvetica-Bold (plan notes/2026-11-03/2155.md, Task 5).
+fn fonts_sample(out: &Path) {
+  let mut p = Pdf::new(1);
+  let barcode = p.add(dictionary! {
+    "Type" => n("Font"), "Subtype" => n("TrueType"), "BaseFont" => n("IDAutomationHC39M"), "Encoding" => n("WinAnsiEncoding")
+  });
+  let anonymous = p.add(dictionary! {
+    "Type" => n("Font"), "Subtype" => n("TrueType"), "BaseFont" => n("CIDFont+F1"), "Encoding" => n("WinAnsiEncoding")
+  });
+  let bold = p.add(dictionary! {
+    "Type" => n("Font"), "Subtype" => n("Type1"), "BaseFont" => n("Helvetica-Bold"), "Encoding" => n("WinAnsiEncoding")
+  });
+  let content = p.add(Stream::new(
+    dictionary! {},
+    concat!(
+      "BT /F1 14 Tf 50 700 Td (*12345*) Tj ET\n",
+      "BT /F2 12 Tf 50 670 Td (Anonymous weight) Tj ET\n",
+      "BT /F3 12 Tf 50 640 Td (Bold sample) Tj ET\n"
+    )
+    .as_bytes()
+    .to_vec(),
+  ));
+  p.set_page(0, "Contents", Object::Reference(content));
+  p.set_page(
+    0,
+    "Resources",
+    dictionary! {
+      "Font" => dictionary! {
+        "F1" => Object::Reference(barcode), "F2" => Object::Reference(anonymous), "F3" => Object::Reference(bold)
+      }
+    }
+    .into(),
+  );
+  p.finish(None, &out.join("fonts-sample.pdf"));
+}
+
 /// Three native words and no raster: a cover sheet, which must stay `Native` however sparse.
 fn sparse_native(out: &Path) {
   let mut p = Pdf::new(1);
@@ -905,6 +942,7 @@ fn main() {
   std::fs::create_dir_all(&layout).expect("layout fixture dir");
   layout_sample(&layout);
   sparse_native(&layout);
+  fonts_sample(&layout);
 
   // OCR fixtures live with the OCR package's tests.
   let ocr_fixtures = Path::new("ocr/__test__/fixtures");

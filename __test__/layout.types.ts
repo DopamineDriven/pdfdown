@@ -18,7 +18,10 @@ true satisfies IsExact<TextSource, "Native" | "Ocr" | "Rendered">;
 true satisfies IsExact<PageLayout["source"], TextSource>;
 
 // Native-only and OCR-only word fields are optional; geometry and the line index never are.
-true satisfies IsExact<keyof OnlyOptional<TextWord>, "fontSize" | "fontName" | "bold" | "italic" | "confidence">;
+true satisfies IsExact<
+  keyof OnlyOptional<TextWord>,
+  "fontSize" | "fontName" | "bold" | "italic" | "symbolic" | "confidence"
+>;
 true satisfies IsExact<keyof OnlyRequired<TextWord>, "text" | "x0" | "y0" | "x1" | "y1" | "line">;
 
 // Page-level fields are all required; contentRotation is a plain number (0 on native pages).

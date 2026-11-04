@@ -1051,6 +1051,7 @@ mod cascade_tests {
           font_name: None,
           bold: None,
           italic: None,
+          symbolic: None,
           confidence: None,
         })
         .collect(),

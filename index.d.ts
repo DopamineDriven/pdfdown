@@ -793,9 +793,14 @@ export interface TextWord {
   fontSize?: number;
   /** Native only: base font name with any subset prefix stripped. */
   fontName?: string;
-  /** Native: from the font descriptor and name. OCR: not reported. */
+  /**
+   * Native: from the font descriptor and name; absent when the font gives no weight evidence
+   * (anonymous names such as `CIDFont+F1`) and for OCR words.
+   */
   bold?: boolean;
   italic?: boolean;
+  /** Native only: true when the word is set in a barcode font, so its glyphs are bars, not letters. */
+  symbolic?: boolean;
   /** OCR only: Tesseract word confidence, 0..1. */
   confidence?: number;
 }

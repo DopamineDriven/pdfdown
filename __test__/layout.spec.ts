@@ -12,6 +12,7 @@ import type { PageLayout, TextWord } from "../index";
 // the content stream, which paints the footer first and the title second.
 const sample = readFileSync(join(import.meta.dirname, "fixtures", "layout", "layout-sample.pdf"));
 const imageOnly = readFileSync(join(import.meta.dirname, "fixtures", "ascii85-dct-scan.pdf"));
+const fontsSample = readFileSync(join(import.meta.dirname, "fixtures", "layout", "fonts-sample.pdf"));
 const PUBLIC = join(import.meta.dirname, "fixtures", "invoices");
 const wordpress = readFileSync(join(PUBLIC, "wordpress-pdf-invoice-plugin-sample.pdf"));
 const addOnSamples = readFileSync(join(PUBLIC, "Downloadable-PDF-Invoices-Add-On-Samples.pdf"));
@@ -183,4 +184,30 @@ test("layout costs the same order as plain text extraction", (t) => {
 
 test("rejects data that is not a PDF", (t) => {
   t.throws(() => layoutPerPage(Buffer.from("not a pdf")));
+});
+
+// ── Fonts that say nothing, or something other than letters ──────────────────
+
+test("fonts-sample: barcode glyphs are flagged symbolic, anonymous fonts carry no weight", (t) => {
+  const [p1] = layoutPerPage(fontsSample);
+  const byFont = (name: string) => p1.words.filter((w) => w.fontName === name);
+  const barcode = byFont("IDAutomationHC39M");
+  t.true(barcode.length >= 1, "barcode words present");
+  t.true(
+    barcode.every((w) => w.symbolic === true),
+    "barcode words are symbolic"
+  );
+  t.true(
+    barcode.every((w) => w.bold === false),
+    "a named regular font has a known weight"
+  );
+  const anonymous = byFont("CIDFont+F1");
+  t.is(anonymous.length, 2);
+  t.true(
+    anonymous.every((w) => w.symbolic === false && w.bold === undefined && w.italic === undefined),
+    JSON.stringify(anonymous[0])
+  );
+  const bold = byFont("Helvetica-Bold");
+  t.is(bold.length, 2);
+  t.true(bold.every((w) => w.bold === true && w.symbolic === false));
 });

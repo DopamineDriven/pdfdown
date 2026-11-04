@@ -181,8 +181,9 @@ pub(crate) fn words_to_lines(
         line: li as u32,
         font_size: w.font_size,
         font_name: meta.map(|m| m.name.clone()),
-        bold: meta.map(|m| m.bold),
-        italic: meta.map(|m| m.italic),
+        bold: meta.and_then(|m| m.weight_known.then_some(m.bold)),
+        italic: meta.and_then(|m| m.weight_known.then_some(m.italic)),
+        symbolic: meta.map(|m| m.symbolic),
         confidence: w.confidence,
       });
     }
@@ -258,6 +259,8 @@ mod tests {
       name: "Helvetica".into(),
       bold: false,
       italic: false,
+      symbolic: false,
+      weight_known: true,
     }];
     let g = vec![
       glyph("low", 10.0, 600.0, 20.0, 10.0),
