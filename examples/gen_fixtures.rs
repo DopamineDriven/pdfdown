@@ -751,7 +751,9 @@ fn stamped_scan(out: &Path) {
   });
   let content = p.add(Stream::new(
     dictionary! {},
-    b"q 600 0 0 150 6 6 cm /Im1 Do Q\nBT /F1 10 Tf 40 164 Td (PO 4711) Tj ET".to_vec(),
+    // The stamp sits above the raster; "Hello" is painted natively over the raster's own "Hello"
+    // (OCR reads it at about x 170-248, y 67-95) so the hybrid merge has a duplicate to drop.
+    b"q 600 0 0 150 6 6 cm /Im1 Do Q\nBT /F1 10 Tf 40 164 Td (PO 4711) Tj ET\nBT /F1 25 Tf 180.8 74.5 Td (Hello) Tj ET".to_vec(),
   ));
   p.set_page(0, "MediaBox", rect(0, 0, 612, 180));
   p.set_page(0, "Contents", Object::Reference(content));

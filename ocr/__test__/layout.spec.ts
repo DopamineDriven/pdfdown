@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import { readFileSync } from "fs";
 import { join } from "path";
 
@@ -13,6 +14,12 @@ import {
 import type { PageLayout } from "../index";
 
 const FIXTURES = join(import.meta.dirname, "fixtures");
+
+/** The orientation detector needs `osd.traineddata`; without it the confidence retry decides. */
+const hasOsd = (() => {
+  const listed = spawnSync("tesseract", ["--list-langs"], { encoding: "utf8" });
+  return `${listed.stdout ?? ""}${listed.stderr ?? ""}`.split(/\r?\n/).some((l) => l.trim() === "osd");
+})();
 const helloOcr = readFileSync(join(FIXTURES, "hello-ocr.pdf"));
 const multipageOcr = readFileSync(join(FIXTURES, "multipage-ocr.pdf"));
 const ascii85DctScan = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/ascii85-dct-scan.pdf"));
@@ -103,7 +110,12 @@ test("stamped scan: the stamp is read natively and the scan is OCR'd on one hybr
   const [p1] = extractLayoutWithOcrPerPage(stampedScan, { render: "Never" });
   t.is(p1.source, "Ocr");
   const stamp = p1.words.filter((w) => w.confidence === undefined).map((w) => w.text);
-  t.deepEqual(stamp.sort(), ["4711", "PO"], "each native word appears exactly once");
+  t.deepEqual(stamp.sort(), ["4711", "Hello", "PO"], "each native word appears exactly once");
+  // The raster's own "Hello" is read by OCR at the same place as the native one: the native word
+  // stays and the OCR duplicate is dropped, so "Hello" appears exactly once on the page.
+  const hellos = p1.words.filter((w) => w.text === "Hello");
+  t.is(hellos.length, 1, JSON.stringify(hellos));
+  t.is(hellos[0]?.confidence, undefined, "the surviving Hello is the native one");
   t.true(
     p1.words.some((w) => w.confidence !== undefined),
     "OCR words are present"
@@ -119,7 +131,7 @@ test("stamped scan: the stamp is read natively and the scan is OCR'd on one hybr
     t.true(p1.lines[i].y1 <= p1.lines[i - 1].y1 + 0.5, `line ${i} below line ${i - 1}`);
   }
   t.true(
-    p1.warnings.some((w) => /2 native words kept alongside OCR/.test(w)),
+    p1.warnings.some((w) => /3 native words kept alongside OCR \(1 duplicates dropped\)/.test(w)),
     p1.warnings.join(" | ")
   );
 });
@@ -140,7 +152,7 @@ test("rotated scan: OSD names the turn, the words read upright, and the page say
       .join(" | ")
   );
   t.true(
-    p1.warnings.some((w) => /270° turn \(by OSD\)/.test(w)),
+    p1.warnings.some((w) => (hasOsd ? /270° turn \(by OSD\)/ : /270° turn \(by retry\)/).test(w)),
     p1.warnings.join(" | ")
   );
   // One frame per page: the 792x612 sheet is 612x792 once turned, and every word and the scan's

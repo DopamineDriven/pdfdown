@@ -271,12 +271,23 @@ fn is_barcode_font(lower: &str) -> bool {
     "3of9",
     "postnet",
     "ean13",
-    "upca",
     "qrcode",
     "datamatrix",
   ]
   .iter()
   .any(|needle| compact.contains(needle))
+    || upc_at_word_start(lower)
+}
+
+/// The UPC-A / UPC-E families: `upc` at the start of the name or of a word in it. A word that
+/// merely contains it ("Cupcake") is not a barcode font.
+fn upc_at_word_start(lower: &str) -> bool {
+  lower.match_indices("upc").any(|(at, _)| {
+    !lower[..at]
+      .chars()
+      .next_back()
+      .is_some_and(|c| c.is_ascii_alphabetic())
+  })
 }
 
 /// `CIDFont+F1`, `F2`, … (Microsoft Print To PDF and friends) carry no weight or style in the name.
@@ -384,6 +395,14 @@ mod tests {
     assert!(!f.bold);
     let dict = dictionary! { "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "LibreBarcode128-Regular" };
     assert!(load_font(&doc, &dict).symbolic);
+    let dict = dictionary! { "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "UPC-A" };
+    assert!(load_font(&doc, &dict).symbolic);
+    let dict =
+      dictionary! { "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "Cupcake-Regular" };
+    assert!(
+      !load_font(&doc, &dict).symbolic,
+      "a word that merely contains \"upc\" is not a barcode font"
+    );
     let dict =
       dictionary! { "Type" => "Font", "Subtype" => "TrueType", "BaseFont" => "Free3of9Extended" };
     assert!(load_font(&doc, &dict).symbolic);
