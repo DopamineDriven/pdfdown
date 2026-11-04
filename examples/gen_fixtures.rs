@@ -2,6 +2,7 @@
 //! Task 5) and the e-invoice attachment fixtures under `__test__/fixtures/einvoice/`. Deterministic, pure lopdf, our own code. Re-run with `cargo run --example gen_fixtures`
 //! and commit the output together with any test that depends on it.
 
+use image::{GrayImage, imageops};
 use lopdf::{Dictionary, Document, Object, ObjectId, Stream, StringFormat, dictionary};
 use std::path::{Path, PathBuf};
 
@@ -766,6 +767,93 @@ fn stamped_scan(out: &Path) {
   p.finish(None, &out.join("stamped-scan.pdf"));
 }
 
+/// ASCII85 (PDF flavour: `<~` optional, `~>` terminator, `z` for four zero bytes).
+fn ascii85_decode(data: &[u8]) -> Vec<u8> {
+  let mut out = Vec::with_capacity(data.len() * 4 / 5);
+  let mut group = [0u8; 5];
+  let mut n = 0;
+  let body = data.strip_prefix(b"<~").unwrap_or(data);
+  for &b in body {
+    match b {
+      b'~' => break,
+      b'z' if n == 0 => out.extend_from_slice(&[0, 0, 0, 0]),
+      b'!'..=b'u' => {
+        group[n] = b - b'!';
+        n += 1;
+        if n == 5 {
+          let v = group.iter().fold(0u32, |acc, &d| acc * 85 + u32::from(d));
+          out.extend_from_slice(&v.to_be_bytes());
+          n = 0;
+        }
+      }
+      _ => {}
+    }
+  }
+  if n > 0 {
+    for slot in group.iter_mut().skip(n) {
+      *slot = 84;
+    }
+    let v = group.iter().fold(0u32, |acc, &d| acc * 85 + u32::from(d));
+    out.extend_from_slice(&v.to_be_bytes()[..n - 1]);
+  }
+  out
+}
+
+/// The scanned sample page (`__test__/fixtures/ascii85-dct-scan.pdf`) as a gray raster: a full page
+/// of text, which is what the orientation detector needs to be confident.
+fn scanned_page_gray() -> GrayImage {
+  let src = Document::load("__test__/fixtures/ascii85-dct-scan.pdf").expect("scan fixture");
+  let stream = src
+    .objects
+    .values()
+    .find_map(|o| match o {
+      Object::Stream(st)
+        if st.dict.get(b"Subtype").ok().and_then(|v| v.as_name().ok()) == Some(b"Image") =>
+      {
+        Some(st)
+      }
+      _ => None,
+    })
+    .expect("the scan carries one image XObject");
+  let jpeg = ascii85_decode(&stream.content);
+  image::load_from_memory(&jpeg)
+    .expect("decode the JPEG raster")
+    .to_luma8()
+}
+
+/// The scanned sample page turned a quarter turn clockwise and painted upright on a landscape page,
+/// so its text reads sideways until the OCR tiers turn it back: 270° clockwise restores it
+/// (plan notes/2026-11-03/2155.md, Task 4). The detector's confidence on this raster is ~10.
+fn rotated_scan(out: &Path) {
+  let turned = imageops::rotate90(&scanned_page_gray());
+  let (w, h) = turned.dimensions();
+  let mut jpeg = Vec::new();
+  image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 70)
+    .encode(turned.as_raw(), w, h, image::ExtendedColorType::L8)
+    .expect("encode the turned raster");
+  let image = Stream::new(
+    dictionary! {
+      "Type" => n("XObject"), "Subtype" => n("Image"), "Width" => int(w as i64), "Height" => int(h as i64),
+      "ColorSpace" => n("DeviceGray"), "BitsPerComponent" => int(8), "Filter" => n("DCTDecode")
+    },
+    jpeg,
+  );
+  let mut p = Pdf::new(1);
+  let im = p.add(image);
+  let content = p.add(Stream::new(
+    dictionary! {},
+    b"q 792 0 0 560 0 26 cm /Im1 Do Q".to_vec(),
+  ));
+  p.set_page(0, "MediaBox", rect(0, 0, 792, 612));
+  p.set_page(0, "Contents", Object::Reference(content));
+  p.set_page(
+    0,
+    "Resources",
+    dictionary! { "XObject" => dictionary! { "Im1" => Object::Reference(im) } }.into(),
+  );
+  p.finish(None, &out.join("rotated-scan.pdf"));
+}
+
 /// Three native words and no raster: a cover sheet, which must stay `Native` however sparse.
 fn sparse_native(out: &Path) {
   let mut p = Pdf::new(1);
@@ -822,6 +910,7 @@ fn main() {
   let ocr_fixtures = Path::new("ocr/__test__/fixtures");
   std::fs::create_dir_all(ocr_fixtures).expect("ocr fixture dir");
   stamped_scan(ocr_fixtures);
+  rotated_scan(ocr_fixtures);
 
   // The CCITT sample sits at the fixtures root, next to the other scan fixtures.
   let fixtures_root = out

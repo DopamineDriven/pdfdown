@@ -80,6 +80,72 @@ fn get_tessdata_prefix() -> Option<&'static str> {
 /// page scanned in portrait scores 35-45 and comes back as punctuation soup.
 const ROTATION_RETRY_CONFIDENCE: f32 = 55.0;
 
+/// Tesseract's orientation detector is trusted from this confidence; below it the blind retry
+/// loop decides. Measured on copier scans: upright pages 3.9–13.8, turned pages 6.0–12.2.
+const OSD_MIN_CONFIDENCE: f32 = 3.0;
+
+/// Who decided a raster's orientation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OrientationSource {
+  /// The first pass read upright well enough.
+  Upright,
+  /// Tesseract's orientation and script detector named the turn.
+  Osd,
+  /// The confidence retry over the quarter and half turns found a better score.
+  Retry,
+}
+
+impl OrientationSource {
+  fn label(self) -> &'static str {
+    match self {
+      OrientationSource::Upright => "upright",
+      OrientationSource::Osd => "by OSD",
+      OrientationSource::Retry => "by retry",
+    }
+  }
+}
+
+/// `detect_os` reports how the text currently lies (0, 90, 180 or 270 degrees); the clockwise turn
+/// that puts it upright is the complement. The CLI prints "Orientation 270 / Rotate 90".
+fn osd_correction(orient_deg: i32) -> u32 {
+  ((360 - orient_deg.rem_euclid(360)) % 360) as u32
+}
+
+/// The turn to try first, when the detector is confident enough to be worth one OCR pass.
+fn pick_first_rotation(osd: Option<(u32, f32)>) -> Option<u32> {
+  osd
+    .filter(|(_, confidence)| *confidence >= OSD_MIN_CONFIDENCE)
+    .map(|(degrees, _)| degrees)
+}
+
+/// Orientation and confidence from Tesseract's OSD model, or `None` when `osd.traineddata` is not
+/// installed, the image is too sparse for the detector, or anything else goes wrong.
+fn osd_rotation(img: &DynamicImage, datapath: &str, ppi: Option<i32>) -> Option<(u32, f32)> {
+  use tesseract_rs::TessPageSegMode;
+
+  let rgb = img.to_rgb8();
+  let (w, h) = rgb.dimensions();
+  let tess = tesseract_rs::TesseractAPI::new();
+  tess.init(datapath, "osd").ok()?;
+  tess.set_page_seg_mode(TessPageSegMode::PSM_OSD_ONLY).ok()?;
+  tess
+    .set_image(rgb.as_raw(), w as i32, h as i32, 3, (w * 3) as i32)
+    .ok()?;
+  // Scans without a stated resolution otherwise make Tesseract assume 70 dpi and warn.
+  let _ = tess.set_source_resolution(ppi.unwrap_or(300));
+  let (orient_deg, orient_conf, _script, _script_conf) = tess.detect_os().ok()?;
+  Some((osd_correction(orient_deg), orient_conf))
+}
+
+/// One OCR pass over the raster at a given turn.
+struct OrientedPass {
+  words: Vec<OcrWord>,
+  degrees: u32,
+  dims: (u32, u32),
+  confidence: f32,
+  source: OrientationSource,
+}
+
 /// Rotations tried, in order, when the upright pass scores too low. Most
 /// rotated scans are a landscape sheet fed in portrait, so the quarter turns
 /// come first and the half turn is only tried when neither of them is good.
@@ -117,24 +183,41 @@ fn ocr_image_text(img: &DynamicImage, lang: &str) -> (String, f32) {
   (text, conf)
 }
 
-/// OCR a single DynamicImage and return extracted text, retrying rotated when
-/// the upright pass produced low-confidence text.
+/// OCR a single DynamicImage and return extracted text. The OSD detector names the turn first when
+/// confident; otherwise the upright pass and the retry over the other turns decide.
 fn ocr_dynamic_image(img: &DynamicImage, lang: &str) -> String {
-  let (text, conf) = ocr_image_text(img, lang);
-  if text.is_empty() || conf >= ROTATION_RETRY_CONFIDENCE {
-    return text;
-  }
-  let mut best = (text, conf);
-  for degrees in ROTATIONS {
-    let candidate = ocr_image_text(&rotate_image(img, degrees), lang);
-    if candidate.1 > best.1 {
-      best = candidate;
+  let datapath = get_tessdata_prefix().unwrap_or("");
+  let seed = pick_first_rotation(osd_rotation(img, datapath, None));
+  let mut tried: Vec<u32> = Vec::new();
+  let mut best: Option<(String, f32)> = None;
+  let mut consider = |degrees: u32, tried: &mut Vec<u32>| -> bool {
+    tried.push(degrees);
+    let candidate = if degrees == 0 {
+      ocr_image_text(img, lang)
+    } else {
+      ocr_image_text(&rotate_image(img, degrees), lang)
+    };
+    if best.as_ref().is_none_or(|b| candidate.1 > b.1) {
+      best = Some(candidate);
     }
-    if best.1 >= ROTATION_RETRY_CONFIDENCE {
+    best
+      .as_ref()
+      .is_some_and(|b| !b.0.is_empty() && b.1 >= ROTATION_RETRY_CONFIDENCE)
+  };
+  if let Some(degrees) = seed
+    && consider(degrees, &mut tried)
+  {
+    return best.expect("a pass was recorded").0;
+  }
+  if !tried.contains(&0) && consider(0, &mut tried) {
+    return best.expect("a pass was recorded").0;
+  }
+  for degrees in ROTATIONS {
+    if !tried.contains(&degrees) && consider(degrees, &mut tried) {
       break;
     }
   }
-  best.0
+  best.map(|b| b.0).unwrap_or_default()
 }
 
 fn ocr_page_images(doc: &Document, page_id: ObjectId, lang: &str) -> String {
@@ -335,33 +418,78 @@ fn mean_confidence(words: &[OcrWord]) -> f32 {
   }
 }
 
-/// Word boxes in the frame where the text reads upright: the image as given,
-/// or rotated by the returned angle (clockwise degrees) when the upright pass
-/// scored below [`ROTATION_RETRY_CONFIDENCE`] and a rotation scored higher.
-/// Boxes are in pixels of the rotated image, whose size is also returned.
+/// Word boxes in the frame where the text reads upright: the image as given, or rotated by the
+/// returned clockwise angle. The OSD detector names the turn first when it is confident; that pass
+/// is accepted when it scores at least [`ROTATION_RETRY_CONFIDENCE`]. Otherwise the upright pass and
+/// the blind retry over the other turns decide, as before. Boxes are in pixels of the rotated image,
+/// whose size is also returned, together with who decided.
 fn ocr_words_best_orientation(
   img: &DynamicImage,
   lang: &str,
   ppi: Option<i32>,
-) -> (Vec<OcrWord>, u32, (u32, u32)) {
-  let upright = ocr_dynamic_image_words(img, lang, ppi);
-  let conf = mean_confidence(&upright);
-  if upright.is_empty() || conf >= ROTATION_RETRY_CONFIDENCE {
-    return (upright, 0, (img.width(), img.height()));
-  }
-  let mut best = (upright, 0, (img.width(), img.height()), conf);
-  for degrees in ROTATIONS {
-    let rotated = rotate_image(img, degrees);
-    let words = ocr_dynamic_image_words(&rotated, lang, ppi);
-    let conf = mean_confidence(&words);
-    if conf > best.3 {
-      best = (words, degrees, (rotated.width(), rotated.height()), conf);
+) -> (Vec<OcrWord>, u32, (u32, u32), OrientationSource) {
+  let datapath = get_tessdata_prefix().unwrap_or("");
+  let seed = pick_first_rotation(osd_rotation(img, datapath, ppi));
+  let mut tried: Vec<u32> = Vec::new();
+  let mut best: Option<OrientedPass> = None;
+
+  let mut consider = |degrees: u32, source: OrientationSource, tried: &mut Vec<u32>| -> bool {
+    tried.push(degrees);
+    let (words, dims) = if degrees == 0 {
+      (
+        ocr_dynamic_image_words(img, lang, ppi),
+        (img.width(), img.height()),
+      )
+    } else {
+      let rotated = rotate_image(img, degrees);
+      (
+        ocr_dynamic_image_words(&rotated, lang, ppi),
+        (rotated.width(), rotated.height()),
+      )
+    };
+    let confidence = mean_confidence(&words);
+    if best.as_ref().is_none_or(|b| confidence > b.confidence) {
+      best = Some(OrientedPass {
+        words,
+        degrees,
+        dims,
+        confidence,
+        source,
+      });
     }
-    if best.3 >= ROTATION_RETRY_CONFIDENCE {
+    best
+      .as_ref()
+      .is_some_and(|b| !b.words.is_empty() && b.confidence >= ROTATION_RETRY_CONFIDENCE)
+  };
+
+  if let Some(degrees) = seed
+    && consider(
+      degrees,
+      if degrees == 0 {
+        OrientationSource::Upright
+      } else {
+        OrientationSource::Osd
+      },
+      &mut tried,
+    )
+  {
+    let b = best.expect("a pass was recorded");
+    return (b.words, b.degrees, b.dims, b.source);
+  }
+  if !tried.contains(&0) && consider(0, OrientationSource::Upright, &mut tried) {
+    let b = best.expect("a pass was recorded");
+    return (b.words, b.degrees, b.dims, b.source);
+  }
+  for degrees in ROTATIONS {
+    if tried.contains(&degrees) {
+      continue;
+    }
+    if consider(degrees, OrientationSource::Retry, &mut tried) {
       break;
     }
   }
-  (best.0, best.1, best.2)
+  let b = best.expect("at least the upright pass ran");
+  (b.words, b.degrees, b.dims, b.source)
 }
 
 /// OCR an image and return every recognised word with its pixel box.
@@ -479,10 +607,11 @@ fn ocr_page_image_words(
         placed.len()
       ));
     }
-    let (words, degrees, (w, h)) = ocr_words_best_orientation(&img, lang, None);
+    let (words, degrees, (w, h), decided) = ocr_words_best_orientation(&img, lang, None);
     if degrees != 0 {
       warnings.push(format!(
-        "image {name}: text reads upright after a {degrees}° turn; its words are in that frame"
+        "image {name}: text reads upright after a {degrees}° turn ({}); its words are in that frame",
+        decided.label()
       ));
       *rotation = degrees;
     }
@@ -518,10 +647,11 @@ fn render_page_words(
       geo.rotate
     ));
   }
-  let (words, degrees, (w, h)) = ocr_words_best_orientation(&img, lang, Some(dpi as i32));
+  let (words, degrees, (w, h), decided) = ocr_words_best_orientation(&img, lang, Some(dpi as i32));
   if degrees != 0 {
     warnings.push(format!(
-      "page {page_num}: text reads upright after a {degrees}° turn; words, width and height are in that frame"
+      "page {page_num}: text reads upright after a {degrees}° turn ({}); words, width and height are in that frame",
+      decided.label()
     ));
     *rotation = degrees;
   }
@@ -1016,5 +1146,35 @@ mod cascade_tests {
       Some(0.8),
       "the disjoint OCR word survives"
     );
+  }
+}
+
+#[cfg(test)]
+mod osd_tests {
+  use super::*;
+
+  #[test]
+  fn osd_below_threshold_is_ignored() {
+    assert_eq!(pick_first_rotation(Some((90, 2.9))), None);
+  }
+
+  #[test]
+  fn osd_seeds_the_first_pass() {
+    assert_eq!(pick_first_rotation(Some((90, 6.0))), Some(90));
+    assert_eq!(pick_first_rotation(Some((0, 10.0))), Some(0));
+  }
+
+  #[test]
+  fn no_osd_means_no_seed() {
+    assert_eq!(pick_first_rotation(None), None);
+  }
+
+  #[test]
+  fn osd_orientation_becomes_a_clockwise_correction() {
+    // Tesseract reports how the text currently lies; the CLI prints "Orientation 270 / Rotate 90".
+    assert_eq!(osd_correction(270), 90);
+    assert_eq!(osd_correction(90), 270);
+    assert_eq!(osd_correction(180), 180);
+    assert_eq!(osd_correction(0), 0);
   }
 }

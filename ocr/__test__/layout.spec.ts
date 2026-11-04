@@ -19,6 +19,7 @@ const ascii85DctScan = readFileSync(join(import.meta.dirname, "../../__test__/fi
 const layoutSample = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/layout/layout-sample.pdf"));
 const sparseNative = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/layout/sparse-native.pdf"));
 const stampedScan = readFileSync(join(FIXTURES, "stamped-scan.pdf"));
+const rotatedScan = readFileSync(join(FIXTURES, "rotated-scan.pdf"));
 
 const caps = capabilities();
 
@@ -119,6 +120,27 @@ test("stamped scan: the stamp is read natively and the scan is OCR'd on one hybr
   }
   t.true(
     p1.warnings.some((w) => /2 native words kept alongside OCR/.test(w)),
+    p1.warnings.join(" | ")
+  );
+});
+
+test("rotated scan: OSD names the turn, the words read upright, and the page says who decided", (t) => {
+  const [p1] = extractLayoutWithOcrPerPage(rotatedScan, { render: "Never" });
+  t.is(p1.source, "Ocr");
+  // The raster was turned 90° clockwise, so 270° clockwise puts it back; 90° would read it upside down.
+  t.is(p1.contentRotation, 270);
+  t.true(
+    p1.lines
+      .map((l) => l.text.toLowerCase())
+      .join(" ")
+      .includes("scanned"),
+    p1.lines
+      .slice(0, 3)
+      .map((l) => l.text)
+      .join(" | ")
+  );
+  t.true(
+    p1.warnings.some((w) => /270° turn \(by OSD\)/.test(w)),
     p1.warnings.join(" | ")
   );
 });
