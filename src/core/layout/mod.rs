@@ -48,7 +48,7 @@ pub(crate) struct PageGeometry {
   pub height: f64,
   pub rotate: u32,
   /// `[x0, y0, x1, y1]` of the CropBox (fallback MediaBox) in user space.
-  #[cfg_attr(not(all(feature = "ocr", feature = "render")), allow(dead_code))]
+  #[cfg_attr(not(feature = "ocr"), allow(dead_code))]
   pub bbox: [f64; 4],
 }
 

@@ -3,7 +3,7 @@ use crate::core::images::{
 };
 use crate::core::layout::interpreter::FontMeta;
 use crate::core::layout::words::{Word, words_to_lines};
-use crate::core::layout::{NativeLayout, native_layout, page_geometry, page_layout};
+use crate::core::layout::{NativeLayout, PageGeometry, native_layout, page_geometry, page_layout};
 use crate::core::text::{detect_headers_footers, strip_footer_artifacts};
 use crate::types::{OcrPageText, OcrStructuredPageText, PageText, TextSource};
 use crate::types::{PageLayout, PlacedImage};
@@ -755,15 +755,43 @@ fn ocr_page_image_words(
   (out, dominant)
 }
 
-/// Tier 3: rasterise the page and place each OCR word on the page box, in the frame as
-/// rendered; the caller turns the page frame by `rotation`.
+/// Tier-3 words from the rendered raster (the page as displayed, `/Rotate` applied, turned
+/// `degrees` more to read upright), mapped back onto the page box in the page's own frame, the
+/// frame native words use. The content's turn from that frame is `/Rotate` plus `degrees`.
+#[cfg_attr(not(feature = "render"), allow(dead_code))]
+fn place_rendered_words(
+  words: Vec<OcrWord>,
+  degrees: u32,
+  turned_dims: (u32, u32),
+  geo: &PageGeometry,
+) -> (Vec<Word>, u32) {
+  let quarter = |d: u32| d == 90 || d == 270;
+  let (tw, th) = turned_dims;
+  // back to the raster as rendered …
+  let displayed = words_in_painted_raster(words, degrees, tw, th);
+  let (dw, dh) = if quarter(degrees) { (th, tw) } else { (tw, th) };
+  // … then to the page as painted, undoing /Rotate
+  let painted = words_in_painted_raster(displayed, geo.rotate, dw, dh);
+  let (pw, ph) = if quarter(geo.rotate) {
+    (dh, dw)
+  } else {
+    (dw, dh)
+  };
+  (
+    map_ocr_words(painted, pw, ph, geo.bbox),
+    (geo.rotate + degrees) % 360,
+  )
+}
+
+/// Tier 3: rasterise the page as displayed and place each OCR word on the page box in the page's
+/// own frame; the caller turns the page frame by `rotation`, which includes `/Rotate`.
 #[cfg(feature = "render")]
 fn render_page_words(
   pdf_bytes: &[u8],
   page_num: u32,
   dpi: u32,
   lang: &str,
-  geo: &crate::core::layout::PageGeometry,
+  geo: &PageGeometry,
   rotation: &mut u32,
   warnings: &mut Vec<String>,
 ) -> Option<Vec<Word>> {
@@ -772,23 +800,17 @@ fn render_page_words(
   }
   let page_index = (page_num - 1) as u16;
   let img = render::render_page_to_image_from_bytes(pdf_bytes, page_index, dpi)?;
-  if geo.rotate != 0 {
-    warnings.push(format!(
-      "page {page_num}: /Rotate {}; rendered OCR coordinates are in displayed orientation",
-      geo.rotate
-    ));
-  }
-  let (words, degrees, (rw, rh), decided) =
+  let (words, degrees, turned_dims, decided) =
     ocr_words_best_orientation(&img, lang, Some(dpi as i32));
   if degrees != 0 {
     warnings.push(format!(
       "page {page_num}: text reads upright after a {degrees}° turn ({})",
       decided.label()
     ));
-    *rotation = degrees;
   }
-  let painted = words_in_painted_raster(words, degrees, rw, rh);
-  Some(map_ocr_words(painted, img.width(), img.height(), geo.bbox))
+  let (placed, content_rotation) = place_rendered_words(words, degrees, turned_dims, geo);
+  *rotation = content_rotation;
+  Some(placed)
 }
 
 fn finish_ocr_layout(
@@ -1365,6 +1387,56 @@ mod frame_tests {
     let turned_page = turn_box(page, 90, page);
     let b = [50.0, 700.0, 300.0, 720.0];
     assert_eq!(turn_box(turn_box(b, 90, page), 270, turned_page), b);
+  }
+
+  fn ocr_word(b: [i32; 4]) -> OcrWord {
+    OcrWord {
+      text: "w".into(),
+      left: b[0],
+      top: b[1],
+      right: b[2],
+      bottom: b[3],
+      confidence: 90.0,
+    }
+  }
+
+  fn close(a: [f64; 4], b: [f64; 4]) -> bool {
+    a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9)
+  }
+
+  fn geo(rotate: u32) -> PageGeometry {
+    PageGeometry {
+      width: 612.0,
+      height: 792.0,
+      rotate,
+      bbox: [0.0, 0.0, 612.0, 792.0],
+    }
+  }
+
+  #[test]
+  fn rendered_words_land_in_the_page_frame_and_the_turn_includes_rotate() {
+    // /Rotate 90: the portrait page renders landscape (792×612 px at 72 dpi); a word across the
+    // displayed top-left corner is a vertical box at the bottom-left of the page's own frame
+    let (words, turn) =
+      place_rendered_words(vec![ocr_word([0, 0, 100, 20])], 0, (792, 612), &geo(90));
+    assert_eq!(turn, 90);
+    let w = &words[0];
+    let b = [w.x0, w.y0, w.x1, w.y1];
+    assert!(close(b, [0.0, 0.0, 20.0, 100.0]), "{b:?}");
+    // turning the page frame by that turn puts it back across the displayed top-left corner
+    let turned = turn_box(b, turn, geo(90).bbox);
+    assert!(close(turned, [0.0, 592.0, 100.0, 612.0]), "{turned:?}");
+    // no /Rotate: a box at the top-left of a raster turned 180° is at the bottom-right of the
+    // rendered page, and the turn is the OCR turn alone
+    let (words, turn) =
+      place_rendered_words(vec![ocr_word([0, 0, 100, 20])], 180, (612, 792), &geo(0));
+    assert_eq!(turn, 180);
+    let w = &words[0];
+    let b = [w.x0, w.y0, w.x1, w.y1];
+    assert!(close(b, [512.0, 0.0, 612.0, 20.0]), "{b:?}");
+    // /Rotate 90 plus a 270° OCR turn is no turn at all
+    let (_, turn) = place_rendered_words(vec![], 270, (792, 612), &geo(90));
+    assert_eq!(turn, 0);
   }
 
   #[test]

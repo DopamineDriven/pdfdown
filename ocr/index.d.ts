@@ -693,7 +693,10 @@ export interface PageLayout {
    * line and image placement is expressed in that turned frame, and `width`
    * and `height` swap for a quarter turn. An image with more than a few words
    * that reads upright at a different turn is named in a warning: its words
-   * read sideways in the page frame. Always 0 for `Native` pages.
+   * read sideways in the page frame. The render tier reads the page as
+   * displayed, so its turn includes `/Rotate`. Always 0 for `Native` pages.
+   * For any page, displayed coordinates are this frame turned clockwise by
+   * `rotate - contentRotation` (mod 360).
    */
   contentRotation: number;
   source: TextSource;
