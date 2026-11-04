@@ -10,6 +10,7 @@
   "files": [
     "index.d.ts",
     "index.js",
+    "pdfdown_ocr.napi.js",
     "README.md"
   ],
   "os": [

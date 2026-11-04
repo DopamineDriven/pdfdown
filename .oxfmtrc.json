@@ -18,7 +18,7 @@
     "wasi-worker-browser.mjs",
     "wasi-worker.mjs",
     ".yarnrc.yml",
-    "ocr/index.js",
+    "ocr/pdfdown_ocr.napi.js",
     "**/*.toml",
     "pdfdown.wasi.cjs",
     "pdfdown.wasi-browser.js",

@@ -32,7 +32,7 @@
     "bench": "node --import @oxc-node/core/register benchmark/bench.ts",
     "build": "napi build --platform --release --no-const-enum --features render && oxfmt --write index.d.ts browser.js",
     "build:debug": "napi build --platform --no-const-enum --features render && oxfmt --write index.d.ts browser.js",
-    "build:ocr": "napi build --platform --release --no-const-enum --features ocr,render --package-json-path ocr/package.json --output-dir ocr && oxfmt --write ocr/index.d.ts",
+    "build:ocr": "napi build --platform --release --no-const-enum --features ocr,render --package-json-path ocr/package.json --output-dir ocr --js pdfdown_ocr.napi.js && oxfmt --write ocr/index.d.ts",
     "create-npm-dirs:ocr": "napi create-npm-dirs --package-json-path ocr/package.json --npm-dir ocr/npm",
     "format": "run-p format:oxfmt format:rs format:toml",
     "format:oxfmt": "oxfmt",
