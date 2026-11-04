@@ -131,8 +131,11 @@ impl Pdf {
         "MediaBox" => rect(0, 0, 612, 792),
         "Annots" => annots
       };
+      // `set` per key: lopdf's `Dictionary::extend` merges array values instead of replacing them.
       let extra = std::mem::take(&mut self.page_extra[k]);
-      page.extend(&extra);
+      for (key, value) in extra.iter() {
+        page.set(key.clone(), value.clone());
+      }
       self.put(pid, page);
     }
     let count = page_ids.len() as i64;
@@ -147,7 +150,9 @@ impl Pdf {
       catalog.set("AcroForm", af);
     }
     let extra = std::mem::take(&mut self.catalog_extra);
-    catalog.extend(&extra);
+    for (key, value) in extra.iter() {
+      catalog.set(key.clone(), value.clone());
+    }
     let catalog_id = self.add(catalog);
     self.doc.trailer.set("Root", Object::Reference(catalog_id));
     self.doc.save(path).expect("write fixture");
@@ -725,6 +730,61 @@ fn ccitt_tiny(out: &Path) {
   p.finish(None, &out.join("ccitt-g4-tiny.pdf"));
 }
 
+/// A scanned page with a native stamp: hello-ocr's raster painted at its own aspect over most of a
+/// short page, plus two native words above it. The cascade must OCR the scan and keep the stamp
+/// (plan notes/2026-11-03/2155.md, Task 3).
+fn stamped_scan(out: &Path) {
+  let src = Document::load("ocr/__test__/fixtures/hello-ocr.pdf").expect("hello-ocr fixture");
+  let image = src
+    .objects
+    .values()
+    .find(|o| {
+      matches!(o, Object::Stream(st) if st.dict.get(b"Subtype").ok().and_then(|v| v.as_name().ok()) == Some(b"Image"))
+    })
+    .cloned()
+    .expect("hello-ocr carries one image XObject");
+  let mut p = Pdf::new(1);
+  let im = p.add(image);
+  let helv = p.add(dictionary! {
+    "Type" => n("Font"), "Subtype" => n("Type1"), "BaseFont" => n("Helvetica"), "Encoding" => n("WinAnsiEncoding")
+  });
+  let content = p.add(Stream::new(
+    dictionary! {},
+    b"q 600 0 0 150 6 6 cm /Im1 Do Q\nBT /F1 10 Tf 40 164 Td (PO 4711) Tj ET".to_vec(),
+  ));
+  p.set_page(0, "MediaBox", rect(0, 0, 612, 180));
+  p.set_page(0, "Contents", Object::Reference(content));
+  p.set_page(
+    0,
+    "Resources",
+    dictionary! {
+      "Font" => dictionary! { "F1" => Object::Reference(helv) },
+      "XObject" => dictionary! { "Im1" => Object::Reference(im) }
+    }
+    .into(),
+  );
+  p.finish(None, &out.join("stamped-scan.pdf"));
+}
+
+/// Three native words and no raster: a cover sheet, which must stay `Native` however sparse.
+fn sparse_native(out: &Path) {
+  let mut p = Pdf::new(1);
+  let helv = p.add(dictionary! {
+    "Type" => n("Font"), "Subtype" => n("Type1"), "BaseFont" => n("Helvetica"), "Encoding" => n("WinAnsiEncoding")
+  });
+  let content = p.add(Stream::new(
+    dictionary! {},
+    b"BT /F1 12 Tf 50 700 Td (Cover sheet only) Tj ET".to_vec(),
+  ));
+  p.set_page(0, "Contents", Object::Reference(content));
+  p.set_page(
+    0,
+    "Resources",
+    dictionary! { "Font" => dictionary! { "F1" => Object::Reference(helv) } }.into(),
+  );
+  p.finish(None, &out.join("sparse-native.pdf"));
+}
+
 fn main() {
   let out = PathBuf::from(
     std::env::args()
@@ -756,6 +816,12 @@ fn main() {
     .join("layout");
   std::fs::create_dir_all(&layout).expect("layout fixture dir");
   layout_sample(&layout);
+  sparse_native(&layout);
+
+  // OCR fixtures live with the OCR package's tests.
+  let ocr_fixtures = Path::new("ocr/__test__/fixtures");
+  std::fs::create_dir_all(ocr_fixtures).expect("ocr fixture dir");
+  stamped_scan(ocr_fixtures);
 
   // The CCITT sample sits at the fixtures root, next to the other scan fixtures.
   let fixtures_root = out

@@ -67,6 +67,7 @@ const files = existsSync(PRIVATE)
 (files.length > 0 ? test : test.skip)(
   "private corpus: every invoice parses and every extractor returns a well-formed result",
   (t) => {
+    t.timeout(10 * 60 * 1000, "every invoice in the private corpus through every extractor");
     const widths = { name: Math.max(...files.map((n) => n.length), 4) };
     const entries: Array<PrivateCorpusEntry> = [];
     t.log(`${files.length} private invoice(s)`);

@@ -404,17 +404,18 @@ fn page_has_xobject_subtype(doc: &Document, page_id: ObjectId, wanted: &[u8]) ->
 }
 
 /// Check if the page content stream contains vector drawing operators.
-/// Returns true if the count of path operators exceeds a threshold (> 10).
-#[cfg(all(feature = "ocr", feature = "render"))]
-pub(crate) fn page_has_vector_content(doc: &Document, page_id: ObjectId) -> bool {
+/// Number of path construction and painting operators on the page. A few hundred means ruled
+/// tables; tens of thousands means text printed as outlines, which only the render tier can read.
+#[cfg(feature = "ocr")]
+pub(crate) fn page_path_op_count(doc: &Document, page_id: ObjectId) -> usize {
   let content_bytes = get_page_content_bytes(doc, page_id);
   if content_bytes.is_empty() {
-    return false;
+    return 0;
   }
 
   let content = match lopdf::content::Content::decode(&content_bytes) {
     Ok(c) => c,
-    Err(_) => return false,
+    Err(_) => return 0,
   };
 
   let path_ops: &[&str] = &[
@@ -422,13 +423,11 @@ pub(crate) fn page_has_vector_content(doc: &Document, page_id: ObjectId) -> bool
     "W*",
   ];
 
-  let count = content
+  content
     .operations
     .iter()
     .filter(|op| path_ops.contains(&op.operator.as_str()))
-    .count();
-
-  count > 10
+    .count()
 }
 
 /// Resolve /DecodeParms from a stream dictionary, following indirect references.

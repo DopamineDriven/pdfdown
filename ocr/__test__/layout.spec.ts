@@ -17,6 +17,8 @@ const helloOcr = readFileSync(join(FIXTURES, "hello-ocr.pdf"));
 const multipageOcr = readFileSync(join(FIXTURES, "multipage-ocr.pdf"));
 const ascii85DctScan = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/ascii85-dct-scan.pdf"));
 const layoutSample = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/layout/layout-sample.pdf"));
+const sparseNative = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/layout/sparse-native.pdf"));
+const stampedScan = readFileSync(join(FIXTURES, "stamped-scan.pdf"));
 
 const caps = capabilities();
 
@@ -81,12 +83,51 @@ test("native pages keep their glyph layout and match layoutPerPage exactly", (t)
   t.is(viaOcr[0].words[0].fontName, "Helvetica-Bold");
 });
 
-test("minTextLength above the page's text falls through the cascade", (t) => {
+test("minTextLength above the page's text falls through the cascade and keeps the native words", (t) => {
   const [p1] = extractLayoutWithOcrPerPage(layoutSample, { render: "Never", minTextLength: 999999 });
+  const [native] = layoutPerPage(layoutSample);
   // The only raster on the page is a 2×2 gray image: nothing to OCR, and rendering is off.
   t.is(p1.source, "Ocr");
-  t.is(p1.words.length, 0);
+  t.is(p1.words.length, native.words.length, "native words are evidence and stay on a hybrid page");
+  t.true(
+    p1.warnings.some((w) => /OCR found no new words; \d+ native words kept/.test(w)),
+    p1.warnings.join(" | ")
+  );
   t.is(p1.images.length, 1, "image placements from the native pass are kept");
+});
+
+// ── Coverage routing and hybrid pages ────────────────────────────────────────
+
+test("stamped scan: the stamp is read natively and the scan is OCR'd on one hybrid page", (t) => {
+  const [p1] = extractLayoutWithOcrPerPage(stampedScan, { render: "Never" });
+  t.is(p1.source, "Ocr");
+  const stamp = p1.words.filter((w) => w.confidence === undefined).map((w) => w.text);
+  t.deepEqual(stamp.sort(), ["4711", "PO"], "each native word appears exactly once");
+  t.true(
+    p1.words.some((w) => w.confidence !== undefined),
+    "OCR words are present"
+  );
+  t.true(
+    p1.lines
+      .map((l) => l.text.toLowerCase())
+      .join(" ")
+      .includes("hello"),
+    p1.lines.map((l) => l.text).join(" | ")
+  );
+  for (let i = 1; i < p1.lines.length; i++) {
+    t.true(p1.lines[i].y1 <= p1.lines[i - 1].y1 + 0.5, `line ${i} below line ${i - 1}`);
+  }
+  t.true(
+    p1.warnings.some((w) => /2 native words kept alongside OCR/.test(w)),
+    p1.warnings.join(" | ")
+  );
+});
+
+test("sparse native page stays Native: a few words and no raster is a cover sheet, not a scan", (t) => {
+  const [p1] = extractLayoutWithOcrPerPage(sparseNative, { render: "Never" });
+  t.is(p1.source, "Native");
+  t.is(p1.words.length, 3);
+  t.deepEqual(p1.warnings, []);
 });
 
 // ── Async and class parity ───────────────────────────────────────────────────

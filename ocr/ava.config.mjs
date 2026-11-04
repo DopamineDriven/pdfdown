@@ -4,7 +4,7 @@
 export default {
   files: ["ocr/__test__/**/*.spec.ts"],
   extensions: ["ts"],
-  timeout: "2m",
+  timeout: "10m",
   workerThreads: false,
   environmentVariables: {
     OXC_TSCONFIG_PATH: "./ocr/tsconfig.json"

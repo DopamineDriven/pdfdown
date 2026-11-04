@@ -9,9 +9,10 @@ pub(crate) mod words;
 use crate::core::images::get_inherited_resources;
 use crate::core::meta::get_inherited_page_box;
 use crate::types::{PageLayout, TextSource};
-use interpreter::{Interpreter, Matrix};
+use interpreter::{FontMeta, Interpreter, Matrix};
 use lopdf::{Dictionary, Document, Object, ObjectId};
 use rayon::prelude::*;
+use words::Word;
 
 /// Per-page bound on decoded content-stream bytes.
 const MAX_CONTENT_BYTES: usize = 64 * 1024 * 1024;
@@ -72,7 +73,16 @@ pub(crate) fn page_geometry(doc: &Document, page_id: ObjectId) -> PageGeometry {
 }
 
 /// Native layout of one page: glyph positions from the content stream.
-pub(crate) fn page_layout(doc: &Document, page_num: u32, page_id: ObjectId) -> PageLayout {
+/// A page's native layout together with the raw words and font metadata the lines were
+/// clustered from, so an OCR tier can merge its own words in and re-cluster once.
+#[cfg_attr(not(feature = "ocr"), allow(dead_code))]
+pub(crate) struct NativeLayout {
+  pub layout: PageLayout,
+  pub words: Vec<Word>,
+  pub fonts: Vec<FontMeta>,
+}
+
+pub(crate) fn native_layout(doc: &Document, page_num: u32, page_id: ObjectId) -> NativeLayout {
   let geo = page_geometry(doc, page_id);
   let mut layout = PageLayout {
     page: page_num,
@@ -93,7 +103,11 @@ pub(crate) fn page_layout(doc: &Document, page_num: u32, page_id: ObjectId) -> P
       layout
         .warnings
         .push(format!("page {page_num}: content stream not decoded: {e}"));
-      return layout;
+      return NativeLayout {
+        layout,
+        words: Vec::new(),
+        fonts: Vec::new(),
+      };
     }
   };
   // Resources with page-tree inheritance; an empty dictionary when the page has none.
@@ -102,13 +116,21 @@ pub(crate) fn page_layout(doc: &Document, page_num: u32, page_id: ObjectId) -> P
   let mut interp = Interpreter::new(doc);
   interp.run(&content, &resources, Matrix::IDENTITY);
   let fonts = interp.font_metas();
-  let words = words::glyphs_to_words(&interp.glyphs);
-  let (words, lines) = words::words_to_lines(words, &fonts);
+  let raw = words::glyphs_to_words(&interp.glyphs);
+  let (words, lines) = words::words_to_lines(raw.clone(), &fonts);
   layout.words = words;
   layout.lines = lines;
   layout.images = interp.images;
   layout.warnings.extend(interp.warnings);
-  layout
+  NativeLayout {
+    layout,
+    words: raw,
+    fonts,
+  }
+}
+
+pub(crate) fn page_layout(doc: &Document, page_num: u32, page_id: ObjectId) -> PageLayout {
+  native_layout(doc, page_num, page_id).layout
 }
 
 /// Native layout of every page, in page order.

@@ -136,6 +136,17 @@ test("extractTextWithOcrPerPageAsync — native text PDF matches sync", async (t
   }
 });
 
+// ── Hybrid pages ─────────────────────────────────────────────────────────────
+
+test("extractTextWithOcrPerPage — a stamped scan keeps the native stamp in front of the OCR text", (t) => {
+  const stamped = readFileSync(join(FIXTURES, "stamped-scan.pdf"));
+  const [p1] = extractTextWithOcrPerPage(stamped, { render: "Never" });
+  t.is(p1.source, "Ocr");
+  t.true(p1.text.includes("4711"), p1.text);
+  t.true(p1.text.toLowerCase().includes("hello"), p1.text);
+  t.true(p1.text.indexOf("4711") < p1.text.toLowerCase().indexOf("hello"), "stamp first");
+});
+
 // ── OcrOptions: minTextLength forcing OCR fallback ───────────────────────────
 
 test("extractTextWithOcrPerPage — high minTextLength forces OCR on native pages", (t) => {

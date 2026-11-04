@@ -1,6 +1,11 @@
-use crate::core::images::{collect_page_decoded_images, collect_page_decoded_images_named};
+use crate::core::images::{
+  collect_page_decoded_images, collect_page_decoded_images_named, page_path_op_count,
+};
+use crate::core::layout::interpreter::FontMeta;
+#[cfg(feature = "render")]
+use crate::core::layout::page_geometry;
 use crate::core::layout::words::{Word, words_to_lines};
-use crate::core::layout::{page_geometry, page_layout};
+use crate::core::layout::{NativeLayout, native_layout, page_layout};
 use crate::core::text::{detect_headers_footers, strip_footer_artifacts};
 use crate::types::{OcrPageText, OcrStructuredPageText, PageText, TextSource};
 use crate::types::{PageLayout, PlacedImage};
@@ -11,9 +16,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 
 #[cfg(all(feature = "ocr", feature = "render"))]
-use crate::core::images::{
-  page_has_form_xobjects, page_has_image_xobjects, page_has_vector_content,
-};
+use crate::core::images::{page_has_form_xobjects, page_has_image_xobjects};
 #[cfg(all(feature = "ocr", feature = "render"))]
 use crate::core::render;
 
@@ -187,16 +190,28 @@ pub(crate) fn extract_text_with_ocr(
   let pdf_arc: Arc<Vec<u8>> = Arc::new(pdf_bytes.to_vec());
   #[cfg(not(feature = "render"))]
   let _ = (pdf_bytes, render_dpi, render_mode);
+  #[cfg(not(feature = "render"))]
+  let render_available = false;
+  #[cfg(feature = "render")]
+  let render_available = render_mode != RENDER_MODE_NEVER;
+
+  #[cfg(feature = "render")]
+  let token_count = |s: &str| s.split_whitespace().count();
 
   let mut results: Vec<OcrPageText> = pool.install(|| {
     page_entries
       .par_iter()
       .map(|&(page_num, page_id)| {
-        // Tier 1: Native text extraction
+        // Tier 1: native text; the routing decision is made on the page's geometry.
         let raw = doc.extract_text(&[page_num]).unwrap_or_default();
         let native = strip_footer_artifacts(&raw, &page_count_str);
-        let non_ws: usize = native.chars().filter(|c| !c.is_whitespace()).count();
-        if non_ws >= min_len as usize {
+        let layout = page_layout(doc, page_num, page_id);
+        let path_ops = page_path_op_count(doc, page_id);
+        #[cfg(feature = "render")]
+        let outline = path_ops >= OUTLINE_PATH_OPS;
+        let decision = page_needs_ocr(&layout, min_len, path_ops);
+
+        if decision == OcrDecision::Native {
           #[cfg(feature = "render")]
           {
             // In Always mode, render every page regardless
@@ -219,45 +234,44 @@ pub(crate) fn extract_text_with_ocr(
         }
 
         // Tier 2: OCR extracted raster images
-        let ocr_text = ocr_page_images(doc, page_id, lang);
-        if !ocr_text.is_empty() {
-          return OcrPageText {
-            page: page_num,
-            text: ocr_text,
-            source: TextSource::Ocr,
-          };
-        }
+        #[cfg_attr(not(feature = "render"), allow(unused_mut))]
+        let mut text = if decision == OcrDecision::Ocr {
+          ocr_page_images(doc, page_id, lang)
+        } else {
+          String::new()
+        };
+        #[cfg_attr(not(feature = "render"), allow(unused_mut))]
+        let mut source = TextSource::Ocr;
 
-        // Tier 3: Render page + OCR (render feature only)
+        // Tier 3: render + OCR (render feature only)
         #[cfg(feature = "render")]
-        {
-          if render_mode != RENDER_MODE_NEVER {
-            // Auto: rasterize when the page has content tier 2 could not read directly —
-            // form XObjects, vector drawing, or image XObjects whose codec/filter chain we
-            // could not decode (otherwise such a page is reported as empty OCR).
-            let should_render = render_mode == RENDER_MODE_ALWAYS
-              || page_has_form_xobjects(doc, page_id)
-              || page_has_image_xobjects(doc, page_id)
-              || page_has_vector_content(doc, page_id);
-
-            if should_render
-              && let Some(rendered_text) = try_render_ocr_page(&pdf_arc, page_num, render_dpi, lang)
-              && !rendered_text.is_empty()
-            {
-              return OcrPageText {
-                page: page_num,
-                text: rendered_text,
-                source: TextSource::Rendered,
-              };
-            }
+        if render_available {
+          let escalate = decision == OcrDecision::RenderOnly
+            || (outline && token_count(&text) < WEAK_TIER2_WORDS)
+            || (text.is_empty()
+              && (path_ops > 10
+                || page_has_form_xobjects(doc, page_id)
+                || page_has_image_xobjects(doc, page_id)));
+          if escalate
+            && let Some(rendered_text) = try_render_ocr_page(&pdf_arc, page_num, render_dpi, lang)
+            && token_count(&rendered_text) > token_count(&text)
+          {
+            text = rendered_text;
+            source = TextSource::Rendered;
           }
         }
+        let _ = render_available;
 
-        // Fallback: empty
+        // Hybrid page: the native stamp stays in front of the OCR text.
+        let combined = match (native.trim().is_empty(), text.is_empty()) {
+          (true, _) => text,
+          (false, true) => native,
+          (false, false) => format!("{native}\n{text}"),
+        };
         OcrPageText {
           page: page_num,
-          text: String::new(),
-          source: TextSource::Ocr,
+          text: combined,
+          source,
         }
       })
       .collect()
@@ -517,10 +531,11 @@ fn render_page_words(
 fn finish_ocr_layout(
   mut layout: PageLayout,
   words: Vec<Word>,
+  fonts: &[FontMeta],
   source: TextSource,
   rotation: u32,
 ) -> PageLayout {
-  let (words, lines) = words_to_lines(words, &[]);
+  let (words, lines) = words_to_lines(words, fonts);
   layout.words = words;
   layout.lines = lines;
   layout.source = source;
@@ -529,6 +544,125 @@ fn finish_ocr_layout(
     std::mem::swap(&mut layout.width, &mut layout.height);
   }
   layout
+}
+
+/// Where a page goes in the OCR cascade.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OcrDecision {
+  /// Native glyphs are the page: no OCR.
+  Native,
+  /// OCR the embedded rasters (tier 2), escalating to the render tier when weak.
+  Ocr,
+  /// No glyphs and no rasters but painted paths ("print as paths"): only the render tier can read it.
+  RenderOnly,
+}
+
+/// Native words covering less than this share of the page do not prove the page readable…
+const OCR_WORD_COVERAGE_MAX: f64 = 0.02;
+/// …when image placements cover more than this share: that is a scan with a stamp on it.
+const OCR_IMAGE_COVERAGE_MIN: f64 = 0.5;
+/// Pages carrying at least this many path operators are text printed as outlines (or dense
+/// drawings): not readable from glyphs, and only the render tier can read the paths.
+const OUTLINE_PATH_OPS: usize = 200;
+/// A tier-2 result this thin on a page with painted paths is escalated to the render tier.
+const WEAK_TIER2_WORDS: usize = 3;
+const WEAK_TIER2_CONFIDENCE: f64 = 0.3;
+
+fn clipped_area(b: [f64; 4], width: f64, height: f64) -> f64 {
+  let w = b[2].min(width) - b[0].max(0.0);
+  let h = b[3].min(height) - b[1].max(0.0);
+  if w <= 0.0 || h <= 0.0 { 0.0 } else { w * h }
+}
+
+/// Share of the page box covered by `boxes` (clipped to the page; overlaps count twice).
+fn coverage(boxes: impl Iterator<Item = [f64; 4]>, width: f64, height: f64) -> f64 {
+  let page = (width * height).max(1.0);
+  boxes.map(|b| clipped_area(b, width, height)).sum::<f64>() / page
+}
+
+/// Decide by coverage, not by character count alone: a scanned page with a few stamped native
+/// characters is still a scan, an outline-text page with a logo and a stamp is not readable
+/// natively, and a sparse cover sheet without rasters or heavy paths is still native.
+pub(crate) fn page_needs_ocr(native: &PageLayout, min_len: u32, path_ops: usize) -> OcrDecision {
+  let outline = path_ops >= OUTLINE_PATH_OPS;
+  if native.words.is_empty() && native.images.is_empty() {
+    return if outline {
+      OcrDecision::RenderOnly
+    } else {
+      OcrDecision::Ocr
+    };
+  }
+  if non_ws_chars(native) < min_len as usize {
+    return OcrDecision::Ocr;
+  }
+  let words = coverage(
+    native.words.iter().map(|w| [w.x0, w.y0, w.x1, w.y1]),
+    native.width,
+    native.height,
+  );
+  let images = coverage(
+    native.images.iter().map(|i| [i.x0, i.y0, i.x1, i.y1]),
+    native.width,
+    native.height,
+  )
+  .min(1.0);
+  if words < OCR_WORD_COVERAGE_MAX && (images > OCR_IMAGE_COVERAGE_MIN || outline) {
+    OcrDecision::Ocr
+  } else {
+    OcrDecision::Native
+  }
+}
+
+fn intersection_over_union(a: &Word, b: &Word) -> f64 {
+  let ix = (a.x1.min(b.x1) - a.x0.max(b.x0)).max(0.0);
+  let iy = (a.y1.min(b.y1) - a.y0.max(b.y0)).max(0.0);
+  let inter = ix * iy;
+  let union = (a.x1 - a.x0) * (a.y1 - a.y0) + (b.x1 - b.x0) * (b.y1 - b.y0) - inter;
+  if union <= 0.0 { 0.0 } else { inter / union }
+}
+
+/// Native words first, then every OCR word that does not sit on a native word (IoU > 0.5 is the
+/// same word read twice). Returns the merged words and how many OCR words were dropped.
+pub(crate) fn merge_native_and_ocr(native: Vec<Word>, ocr: Vec<Word>) -> (Vec<Word>, usize) {
+  let mut out = native;
+  let native_count = out.len();
+  let mut dropped = 0usize;
+  for w in ocr {
+    if out[..native_count]
+      .iter()
+      .any(|n| intersection_over_union(n, &w) > 0.5)
+    {
+      dropped += 1;
+    } else {
+      out.push(w);
+    }
+  }
+  (out, dropped)
+}
+
+#[cfg_attr(not(feature = "render"), allow(dead_code))]
+fn ocr_score(words: &[Word]) -> f64 {
+  if words.is_empty() {
+    return 0.0;
+  }
+  let mean = words
+    .iter()
+    .map(|w| w.confidence.unwrap_or(0.0))
+    .sum::<f64>()
+    / words.len() as f64;
+  words.len() as f64 * mean
+}
+
+fn tier2_is_weak(words: &[Word]) -> bool {
+  if words.len() < WEAK_TIER2_WORDS {
+    return true;
+  }
+  let mean = words
+    .iter()
+    .map(|w| w.confidence.unwrap_or(0.0))
+    .sum::<f64>()
+    / words.len() as f64;
+  mean < WEAK_TIER2_CONFIDENCE
 }
 
 fn non_ws_chars(layout: &PageLayout) -> usize {
@@ -559,16 +693,27 @@ pub(crate) fn extract_layout_with_ocr(
   let pdf_arc: Arc<Vec<u8>> = Arc::new(pdf_bytes.to_vec());
   #[cfg(not(feature = "render"))]
   let _ = (pdf_bytes, render_dpi, render_mode);
+  #[cfg(not(feature = "render"))]
+  let render_available = false;
+  #[cfg(feature = "render")]
+  let render_available = render_mode != RENDER_MODE_NEVER;
 
   let mut results: Vec<PageLayout> = pool.install(|| {
     page_entries
       .par_iter()
       .map(|&(page_num, page_id)| {
         // Tier 1: native glyph placement (also yields image placements for tier 2).
-        let native = page_layout(doc, page_num, page_id);
+        let NativeLayout {
+          layout: native,
+          words: native_words,
+          fonts,
+        } = native_layout(doc, page_num, page_id);
         let mut warnings = Vec::new();
         let mut rotation = 0u32;
+        let path_ops = page_path_op_count(doc, page_id);
+        let outline = path_ops >= OUTLINE_PATH_OPS;
 
+        // Forced rendering replaces the page wholesale; the hybrid merge below is for the cascade.
         #[cfg(feature = "render")]
         if render_mode == RENDER_MODE_ALWAYS {
           let geo = page_geometry(doc, page_id);
@@ -582,57 +727,100 @@ pub(crate) fn extract_layout_with_ocr(
             &mut warnings,
           ) && !words.is_empty()
           {
-            let mut out = finish_ocr_layout(native, words, TextSource::Rendered, rotation);
+            let mut out = finish_ocr_layout(native, words, &[], TextSource::Rendered, rotation);
             out.warnings.extend(warnings);
             return out;
           }
         }
 
-        if non_ws_chars(&native) >= min_len as usize {
+        let decision = page_needs_ocr(&native, min_len, path_ops);
+        if decision == OcrDecision::Native {
           return native;
         }
 
         // Tier 2: OCR embedded raster images.
-        let words = ocr_page_image_words(
-          doc,
-          page_id,
-          lang,
-          &native.images,
-          &mut rotation,
-          &mut warnings,
-        );
-        if !words.is_empty() {
-          let mut out = finish_ocr_layout(native, words, TextSource::Ocr, rotation);
-          out.warnings.extend(warnings);
-          return out;
-        }
+        #[cfg_attr(not(feature = "render"), allow(unused_mut))]
+        let mut ocr_words = if decision == OcrDecision::Ocr {
+          ocr_page_image_words(
+            doc,
+            page_id,
+            lang,
+            &native.images,
+            &mut rotation,
+            &mut warnings,
+          )
+        } else {
+          Vec::new()
+        };
+        #[cfg_attr(not(feature = "render"), allow(unused_mut))]
+        let mut source = TextSource::Ocr;
 
-        // Tier 3: render + OCR.
+        // Tier 3: render + OCR for outline text, weak tier-2 results on path-heavy pages, and
+        // rasters tier 2 could not decode.
         #[cfg(feature = "render")]
-        if render_mode != RENDER_MODE_NEVER {
-          let should_render = page_has_form_xobjects(doc, page_id)
-            || page_has_image_xobjects(doc, page_id)
-            || page_has_vector_content(doc, page_id);
-          if should_render {
+        if render_available {
+          let escalate = decision == OcrDecision::RenderOnly
+            || (outline && tier2_is_weak(&ocr_words))
+            || (ocr_words.is_empty()
+              && (path_ops > 10
+                || page_has_form_xobjects(doc, page_id)
+                || page_has_image_xobjects(doc, page_id)));
+          if escalate {
             let geo = page_geometry(doc, page_id);
-            if let Some(words) = render_page_words(
+            let mut render_rotation = 0u32;
+            let mut render_warnings = Vec::new();
+            if let Some(rendered) = render_page_words(
               &pdf_arc,
               page_num,
               render_dpi,
               lang,
               &geo,
-              &mut rotation,
-              &mut warnings,
-            ) && !words.is_empty()
+              &mut render_rotation,
+              &mut render_warnings,
+            ) && ocr_score(&rendered) > ocr_score(&ocr_words)
             {
-              let mut out = finish_ocr_layout(native, words, TextSource::Rendered, rotation);
-              out.warnings.extend(warnings);
-              return out;
+              if !ocr_words.is_empty() {
+                warnings.push(format!(
+                  "page {page_num}: rendered page replaced {} weak tier-2 words",
+                  ocr_words.len()
+                ));
+              }
+              ocr_words = rendered;
+              rotation = render_rotation;
+              warnings.extend(render_warnings);
+              source = TextSource::Rendered;
             }
           }
         }
+        if outline && !render_available && (decision == OcrDecision::RenderOnly || tier2_is_weak(&ocr_words)) {
+          warnings.push(format!(
+            "page {page_num}: {path_ops} path operators paint text as outlines; only the render tier can read them"
+          ));
+        }
 
-        let mut out = finish_ocr_layout(native, Vec::new(), TextSource::Ocr, 0);
+        // Hybrid page: native words are real evidence and stay; OCR adds what they do not cover.
+        let native_count = native_words.len();
+        let (merged, dropped) = merge_native_and_ocr(native_words, ocr_words);
+        if merged.is_empty() {
+          warnings.push(format!("page {page_num}: OCR found no words"));
+        }
+        if native_count > 0 {
+          if merged.len() > native_count {
+            warnings.push(format!(
+              "page {page_num}: {native_count} native words kept alongside OCR ({dropped} duplicates dropped)"
+            ));
+          } else {
+            warnings.push(format!(
+              "page {page_num}: OCR found no new words; {native_count} native words kept"
+            ));
+          }
+          if rotation == 90 || rotation == 270 {
+            warnings.push(format!(
+              "page {page_num}: native words are in the page's own frame while OCR words were turned {rotation}°"
+            ));
+          }
+        }
+        let mut out = finish_ocr_layout(native, merged, &fonts, source, rotation);
         out.warnings.extend(warnings);
         out
       })
@@ -683,5 +871,150 @@ mod layout_tests {
     assert_eq!((w.y0, w.y1), (200.0, 220.0));
     assert_eq!(w.confidence, Some(0.875));
     assert_eq!(w.baseline, 200.0);
+  }
+}
+
+#[cfg(test)]
+mod cascade_tests {
+  use super::*;
+  use crate::types::TextWord;
+
+  fn page(words: &[(f64, f64, f64, f64, &str)], images: &[(f64, f64, f64, f64)]) -> PageLayout {
+    PageLayout {
+      page: 1,
+      width: 612.0,
+      height: 792.0,
+      rotate: 0,
+      content_rotation: 0,
+      source: TextSource::Native,
+      words: words
+        .iter()
+        .map(|&(x0, y0, x1, y1, t)| TextWord {
+          text: t.into(),
+          x0,
+          y0,
+          x1,
+          y1,
+          line: 0,
+          font_size: None,
+          font_name: None,
+          bold: None,
+          italic: None,
+          confidence: None,
+        })
+        .collect(),
+      lines: Vec::new(),
+      images: images
+        .iter()
+        .enumerate()
+        .map(|(i, &(x0, y0, x1, y1))| PlacedImage {
+          xobject_name: format!("Im{i}"),
+          x0,
+          y0,
+          x1,
+          y1,
+        })
+        .collect(),
+      warnings: Vec::new(),
+    }
+  }
+
+  fn word(x0: f64, y0: f64, x1: f64, y1: f64, confidence: Option<f64>) -> Word {
+    Word {
+      text: "w".into(),
+      x0,
+      y0,
+      x1,
+      y1,
+      baseline: y0,
+      font_size: None,
+      font: None,
+      confidence,
+    }
+  }
+
+  #[test]
+  fn coverage_rule_sends_stamped_scan_to_ocr() {
+    // two stamped words over a full-page scan: 0.2% word area, 97% image area
+    let p = page(
+      &[
+        (40.0, 760.0, 80.0, 770.0, "PO"),
+        (85.0, 760.0, 125.0, 770.0, "4711"),
+      ],
+      &[(6.0, 6.0, 606.0, 786.0)],
+    );
+    assert_eq!(page_needs_ocr(&p, 1, 0), OcrDecision::Ocr);
+  }
+
+  #[test]
+  fn outline_text_with_a_logo_and_a_stamp_is_ocr() {
+    // two stamped words, a logo covering 1.6% of the page, and thousands of path operators
+    let p = page(
+      &[
+        (40.0, 760.0, 80.0, 770.0, "PO"),
+        (85.0, 760.0, 125.0, 770.0, "4711"),
+      ],
+      &[(44.0, 695.0, 188.0, 750.0)],
+    );
+    assert_eq!(page_needs_ocr(&p, 1, 50_000), OcrDecision::Ocr);
+  }
+
+  #[test]
+  fn ruled_cover_sheet_stays_native() {
+    // a few words and a table border (dozens of path operators) is still a native page
+    let p = page(
+      &[
+        (50.0, 700.0, 120.0, 712.0, "Cover"),
+        (125.0, 700.0, 180.0, 712.0, "sheet"),
+      ],
+      &[],
+    );
+    assert_eq!(page_needs_ocr(&p, 1, 80), OcrDecision::Native);
+  }
+
+  #[test]
+  fn coverage_rule_keeps_sparse_cover_sheet_native() {
+    let p = page(
+      &[
+        (50.0, 700.0, 120.0, 712.0, "Cover"),
+        (125.0, 700.0, 180.0, 712.0, "sheet"),
+        (50.0, 680.0, 90.0, 692.0, "for"),
+        (95.0, 680.0, 160.0, 692.0, "invoice"),
+        (165.0, 680.0, 220.0, 692.0, "bundle"),
+      ],
+      &[],
+    );
+    assert_eq!(page_needs_ocr(&p, 1, 0), OcrDecision::Native);
+  }
+
+  #[test]
+  fn min_text_length_still_forces_ocr() {
+    let p = page(&[(50.0, 700.0, 120.0, 712.0, "Cover")], &[]);
+    assert_eq!(page_needs_ocr(&p, 999, 0), OcrDecision::Ocr);
+  }
+
+  #[test]
+  fn outline_page_goes_to_render() {
+    let p = page(&[], &[]);
+    assert_eq!(page_needs_ocr(&p, 1, 5_000), OcrDecision::RenderOnly);
+    assert_eq!(page_needs_ocr(&p, 1, 0), OcrDecision::Ocr);
+  }
+
+  #[test]
+  fn merge_drops_ocr_duplicates_of_native_words() {
+    let native = vec![word(0.0, 0.0, 10.0, 10.0, None)];
+    let ocr = vec![
+      word(1.0, 1.0, 10.0, 10.0, Some(0.9)),
+      word(50.0, 50.0, 60.0, 60.0, Some(0.8)),
+    ];
+    let (merged, dropped) = merge_native_and_ocr(native, ocr);
+    assert_eq!(dropped, 1);
+    assert_eq!(merged.len(), 2);
+    assert_eq!(merged[0].confidence, None, "native word first, kept as is");
+    assert_eq!(
+      merged[1].confidence,
+      Some(0.8),
+      "the disjoint OCR word survives"
+    );
   }
 }

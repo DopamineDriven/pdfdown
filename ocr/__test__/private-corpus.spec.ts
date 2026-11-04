@@ -67,6 +67,8 @@ const scanned = existsSync(PRIVATE)
   : [];
 
 (scanned.length > 0 ? test : test.skip)("private corpus: scanned invoices OCR into positioned pages", (t) => {
+  // Local-only and heavy: every scanned page in the corpus goes through Tesseract (~1.3 s/page here).
+  t.timeout(20 * 60 * 1000, "OCR over every scanned document in the private corpus");
   const entries: Array<PrivateOcrEntry> = [];
   t.log(`${scanned.length} scanned invoice(s)`);
   for (const name of scanned) {
@@ -88,7 +90,13 @@ const scanned = existsSync(PRIVATE)
       if (p.contentRotation !== 0) {
         t.true(p.warnings.length >= 1, `${name} p${p.page}: the turn is reported`);
       }
-      for (const w of p.words) {
+      // Hybrid pages keep their native words (no confidence) next to the OCR words (confidence in 0..1).
+      const ocrWords = p.words.filter((w) => w.confidence !== undefined);
+      t.true(
+        ocrWords.length > 0 || p.warnings.some((w) => /OCR found no( new)? words/.test(w)),
+        `${name} p${p.page}: OCR words or an explicit no-words warning`
+      );
+      for (const w of ocrWords) {
         t.true(w.confidence !== undefined && w.confidence >= 0 && w.confidence <= 1, `${name} p${p.page}: confidence`);
         t.true(onPageOrImage(p, w), `${name} p${p.page}: "${w.text}" on the page or inside an image placement`);
       }
@@ -99,7 +107,7 @@ const scanned = existsSync(PRIVATE)
         next += line.wordCount;
       }
       t.is(next, p.words.length, `${name} p${p.page}: lines cover every word`);
-      const conf = p.words.map((w) => w.confidence ?? 0);
+      const conf = ocrWords.map((w) => w.confidence ?? 0);
       const meanConfidence = conf.length ? conf.reduce((a, b) => a + b, 0) / conf.length : 0;
       layout.push({
         page: p.page,
