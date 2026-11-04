@@ -143,6 +143,14 @@ test("rotated scan: OSD names the turn, the words read upright, and the page say
     p1.warnings.some((w) => /270° turn \(by OSD\)/.test(w)),
     p1.warnings.join(" | ")
   );
+  // One frame per page: the 792x612 sheet is 612x792 once turned, and every word and the scan's
+  // placement lie inside it.
+  t.is(p1.width, 612);
+  t.is(p1.height, 792);
+  const inPage = (b: { x0: number; y0: number; x1: number; y1: number }) =>
+    b.x0 >= -1 && b.y0 >= -1 && b.x1 <= p1.width + 1 && b.y1 <= p1.height + 1;
+  t.true(p1.words.every(inPage), JSON.stringify(p1.words.filter((w) => !inPage(w)).slice(0, 3)));
+  t.true(p1.images.every(inPage), JSON.stringify(p1.images));
 });
 
 test("sparse native page stays Native: a few words and no raster is a cover sheet, not a scan", (t) => {

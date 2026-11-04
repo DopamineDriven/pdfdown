@@ -17,15 +17,12 @@ const within = (w: TextWord, b: Box) => w.x0 >= b[0] - 1 && w.x1 <= b[2] + 1 && 
 
 /**
  * The engine's placement contract: an OCR word lies on the page, or inside the placement of the
- * image it was read from. A scan can be painted larger than its CropBox, and an image whose text
- * only reads upright after a quarter turn reports its words in a frame of the placement's
- * height x width anchored at the same corner (see the "reads upright after a ... turn" warnings).
+ * image it was read from. Words and placements share one frame, the page's turned by
+ * `contentRotation`; a scan can be painted larger than its CropBox, which is why the placement
+ * is an acceptable home.
  */
 const onPageOrImage = (p: PageLayout, w: TextWord) =>
-  within(w, [0, 0, p.width, p.height]) ||
-  p.images.some(
-    (i) => within(w, [i.x0, i.y0, i.x1, i.y1]) || within(w, [i.x0, i.y0, i.x0 + (i.y1 - i.y0), i.y0 + (i.x1 - i.x0)])
-  );
+  within(w, [0, 0, p.width, p.height]) || p.images.some((i) => within(w, [i.x0, i.y0, i.x1, i.y1]));
 
 /** Native characters below which a document counts as scanned. */
 const SCANNED_MAX_NATIVE_CHARS = 20;

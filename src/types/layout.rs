@@ -71,14 +71,12 @@ pub struct PageLayout {
   pub height: f64,
   /// `/Rotate`, reported and not applied.
   pub rotate: u32,
-  /// Clockwise degrees (0, 90, 180, 270) the OCR tiers had to turn the raster
-  /// before its text read upright; `width` and `height` are swapped for a
-  /// quarter turn. Always 0 for `Native` pages. Rotation is detected per image
-  /// and this reports the last image that needed a turn: tier-2 words stay
-  /// anchored at their own image placement, as painted or turned about its
-  /// corner, so on a page whose images disagree, or whose image is painted
-  /// away from the origin, words can lie outside the reported box. Every
-  /// turned image adds a warning naming it.
+  /// Clockwise degrees (0, 90, 180, 270) the OCR tiers turned the page so its
+  /// text reads upright: the turn of the image carrying the most OCR words.
+  /// Every word, line and image placement is expressed in that turned frame,
+  /// and `width` and `height` swap for a quarter turn. An image whose own turn
+  /// differs reads sideways in that frame and is named in a warning. Always 0
+  /// for `Native` pages.
   pub content_rotation: u32,
   pub source: TextSource,
   pub words: Vec<TextWord>,

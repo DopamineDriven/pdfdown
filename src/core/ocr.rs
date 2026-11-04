@@ -2,10 +2,8 @@ use crate::core::images::{
   collect_page_decoded_images, collect_page_decoded_images_named, page_path_op_count,
 };
 use crate::core::layout::interpreter::FontMeta;
-#[cfg(feature = "render")]
-use crate::core::layout::page_geometry;
 use crate::core::layout::words::{Word, words_to_lines};
-use crate::core::layout::{NativeLayout, native_layout, page_layout};
+use crate::core::layout::{NativeLayout, native_layout, page_geometry, page_layout};
 use crate::core::text::{detect_headers_footers, strip_footer_artifacts};
 use crate::types::{OcrPageText, OcrStructuredPageText, PageText, TextSource};
 use crate::types::{PageLayout, PlacedImage};
@@ -588,29 +586,110 @@ fn map_ocr_words(words: Vec<OcrWord>, img_w: u32, img_h: u32, dest: [f64; 4]) ->
     .collect()
 }
 
-/// Tier 2: OCR the page's embedded raster images and place each word through
-/// the image's `Do` placement from the native pass.
-/// The rectangle an upright-frame image maps onto: the placement itself, or,
-/// after a quarter turn, a rectangle of the placement's height × width anchored
-/// at the same corner so the upright text keeps the placement's scale.
-fn upright_dest(dest: [f64; 4], rotation: u32) -> [f64; 4] {
-  if rotation == 90 || rotation == 270 {
-    let (w, h) = (dest[2] - dest[0], dest[3] - dest[1]);
-    [dest[0], dest[1], dest[0] + h, dest[1] + w]
-  } else {
-    dest
+/// A box in a raster that was turned `degrees` clockwise (now `rotated_w` × `rotated_h` pixels),
+/// mapped back onto the raster as painted. Boxes are `[left, top, right, bottom]`, y down.
+fn unrotate_pixel_box(b: [i32; 4], degrees: u32, rotated_w: i32, rotated_h: i32) -> [i32; 4] {
+  let [l, t, r, bt] = b;
+  match degrees {
+    90 => [t, rotated_w - r, bt, rotated_w - l],
+    270 => [rotated_h - bt, l, rotated_h - t, r],
+    180 => [rotated_w - r, rotated_h - bt, rotated_w - l, rotated_h - t],
+    _ => b,
   }
 }
 
+/// A user-space box re-expressed in the page frame turned `degrees` clockwise about the page
+/// box `bbox`: the box origin is kept and, for quarter turns, width and height swap.
+fn turn_box(b: [f64; 4], degrees: u32, bbox: [f64; 4]) -> [f64; 4] {
+  let [bx0, by0, bx1, by1] = bbox;
+  let (w, h) = (bx1 - bx0, by1 - by0);
+  let (x0, y0, x1, y1) = (b[0] - bx0, b[1] - by0, b[2] - bx0, b[3] - by0);
+  match degrees {
+    90 => [bx0 + y0, by0 + (w - x1), bx0 + y1, by0 + (w - x0)],
+    270 => [bx0 + (h - y1), by0 + x0, bx0 + (h - y0), by0 + x1],
+    180 => [
+      bx0 + (w - x1),
+      by0 + (h - y1),
+      bx0 + (w - x0),
+      by0 + (h - y0),
+    ],
+    _ => b,
+  }
+}
+
+/// The page's turn is the turn of the image with the most OCR words; ties keep the first.
+fn dominant_rotation(per_image: &[(u32, usize)]) -> u32 {
+  per_image
+    .iter()
+    .fold(None::<(u32, usize)>, |best, &(degrees, n)| match best {
+      Some((_, best_n)) if best_n >= n => best,
+      _ => Some((degrees, n)),
+    })
+    .map(|(degrees, _)| degrees)
+    .unwrap_or(0)
+}
+
+/// Express every word and image placement in the page frame turned `degrees` clockwise.
+/// Baselines follow the turned box's bottom edge: a turned frame has no font baseline to keep.
+fn turn_layout(words: &mut [Word], images: &mut [PlacedImage], degrees: u32, bbox: [f64; 4]) {
+  if degrees == 0 {
+    return;
+  }
+  for w in words.iter_mut() {
+    let b = turn_box([w.x0, w.y0, w.x1, w.y1], degrees, bbox);
+    w.x0 = b[0];
+    w.y0 = b[1];
+    w.x1 = b[2];
+    w.y1 = b[3];
+    w.baseline = b[1];
+  }
+  for i in images.iter_mut() {
+    let b = turn_box([i.x0, i.y0, i.x1, i.y1], degrees, bbox);
+    i.x0 = b[0];
+    i.y0 = b[1];
+    i.x1 = b[2];
+    i.y1 = b[3];
+  }
+}
+
+/// Word boxes from a turned raster, mapped back onto the raster as painted.
+fn words_in_painted_raster(
+  words: Vec<OcrWord>,
+  degrees: u32,
+  rotated_w: u32,
+  rotated_h: u32,
+) -> Vec<OcrWord> {
+  words
+    .into_iter()
+    .map(|w| {
+      let [left, top, right, bottom] = unrotate_pixel_box(
+        [w.left, w.top, w.right, w.bottom],
+        degrees,
+        rotated_w as i32,
+        rotated_h as i32,
+      );
+      OcrWord {
+        left,
+        top,
+        right,
+        bottom,
+        ..w
+      }
+    })
+    .collect()
+}
+
+/// Tier 2: OCR the page's embedded raster images and place each word through the image's `Do`
+/// placement from the native pass, in the frame as painted. Returns the words and the page's
+/// dominant turn; the caller turns the whole page frame by it.
 fn ocr_page_image_words(
   doc: &Document,
   page_id: ObjectId,
   lang: &str,
   placements: &[PlacedImage],
-  rotation: &mut u32,
   warnings: &mut Vec<String>,
-) -> Vec<Word> {
-  let mut out = Vec::new();
+) -> (Vec<Word>, u32) {
+  let mut per_image: Vec<(String, Vec<Word>, u32)> = Vec::new();
   for (name, img) in collect_page_decoded_images_named(doc, page_id) {
     let placed: Vec<&PlacedImage> = placements
       .iter()
@@ -628,25 +707,41 @@ fn ocr_page_image_words(
         placed.len()
       ));
     }
-    let (words, degrees, (w, h), decided) = ocr_words_best_orientation(&img, lang, None);
+    let (words, degrees, (rw, rh), decided) = ocr_words_best_orientation(&img, lang, None);
     if degrees != 0 {
       warnings.push(format!(
-        "image {name}: text reads upright after a {degrees}° turn ({}); its words are in that frame",
+        "image {name}: text reads upright after a {degrees}° turn ({})",
         decided.label()
       ));
-      *rotation = degrees;
     }
-    out.extend(map_ocr_words(
-      words,
-      w,
-      h,
-      upright_dest([first.x0, first.y0, first.x1, first.y1], degrees),
-    ));
+    let painted = words_in_painted_raster(words, degrees, rw, rh);
+    let mapped = map_ocr_words(
+      painted,
+      img.width(),
+      img.height(),
+      [first.x0, first.y0, first.x1, first.y1],
+    );
+    per_image.push((name, mapped, degrees));
   }
-  out
+  let counts: Vec<(u32, usize)> = per_image
+    .iter()
+    .map(|(_, words, degrees)| (*degrees, words.len()))
+    .collect();
+  let dominant = dominant_rotation(&counts);
+  let mut out = Vec::new();
+  for (name, words, degrees) in per_image {
+    if degrees != dominant && !words.is_empty() {
+      warnings.push(format!(
+        "image {name}: reads upright at {degrees}° but the page frame is turned {dominant}°; its words read sideways in it"
+      ));
+    }
+    out.extend(words);
+  }
+  (out, dominant)
 }
 
-/// Tier 3: rasterise the page and place each OCR word on the page box.
+/// Tier 3: rasterise the page and place each OCR word on the page box, in the frame as
+/// rendered; the caller turns the page frame by `rotation`.
 #[cfg(feature = "render")]
 fn render_page_words(
   pdf_bytes: &[u8],
@@ -668,15 +763,17 @@ fn render_page_words(
       geo.rotate
     ));
   }
-  let (words, degrees, (w, h), decided) = ocr_words_best_orientation(&img, lang, Some(dpi as i32));
+  let (words, degrees, (rw, rh), decided) =
+    ocr_words_best_orientation(&img, lang, Some(dpi as i32));
   if degrees != 0 {
     warnings.push(format!(
-      "page {page_num}: text reads upright after a {degrees}° turn ({}); words, width and height are in that frame",
+      "page {page_num}: text reads upright after a {degrees}° turn ({})",
       decided.label()
     ));
     *rotation = degrees;
   }
-  Some(map_ocr_words(words, w, h, upright_dest(geo.bbox, degrees)))
+  let painted = words_in_painted_raster(words, degrees, rw, rh);
+  Some(map_ocr_words(painted, img.width(), img.height(), geo.bbox))
 }
 
 fn finish_ocr_layout(
@@ -864,11 +961,13 @@ pub(crate) fn extract_layout_with_ocr(
         let path_ops = page_path_op_count(doc, page_id);
         let outline = path_ops >= OUTLINE_PATH_OPS;
 
+        let geo = page_geometry(doc, page_id);
+        let mut native = native;
+
         // Forced rendering replaces the page wholesale; the hybrid merge below is for the cascade.
         #[cfg(feature = "render")]
-        if render_mode == RENDER_MODE_ALWAYS {
-          let geo = page_geometry(doc, page_id);
-          if let Some(words) = render_page_words(
+        if render_mode == RENDER_MODE_ALWAYS
+          && let Some(mut words) = render_page_words(
             &pdf_arc,
             page_num,
             render_dpi,
@@ -876,12 +975,13 @@ pub(crate) fn extract_layout_with_ocr(
             &geo,
             &mut rotation,
             &mut warnings,
-          ) && !words.is_empty()
-          {
-            let mut out = finish_ocr_layout(native, words, &[], TextSource::Rendered, rotation);
-            out.warnings.extend(warnings);
-            return out;
-          }
+          )
+          && !words.is_empty()
+        {
+          turn_layout(&mut words, &mut native.images, rotation, geo.bbox);
+          let mut out = finish_ocr_layout(native, words, &[], TextSource::Rendered, rotation);
+          out.warnings.extend(warnings);
+          return out;
         }
 
         let decision = page_needs_ocr(&native, min_len, path_ops);
@@ -892,14 +992,10 @@ pub(crate) fn extract_layout_with_ocr(
         // Tier 2: OCR embedded raster images.
         #[cfg_attr(not(feature = "render"), allow(unused_mut))]
         let mut ocr_words = if decision == OcrDecision::Ocr {
-          ocr_page_image_words(
-            doc,
-            page_id,
-            lang,
-            &native.images,
-            &mut rotation,
-            &mut warnings,
-          )
+          let (words, dominant) =
+            ocr_page_image_words(doc, page_id, lang, &native.images, &mut warnings);
+          rotation = dominant;
+          words
         } else {
           Vec::new()
         };
@@ -917,7 +1013,6 @@ pub(crate) fn extract_layout_with_ocr(
                 || page_has_form_xobjects(doc, page_id)
                 || page_has_image_xobjects(doc, page_id)));
           if escalate {
-            let geo = page_geometry(doc, page_id);
             let mut render_rotation = 0u32;
             let mut render_warnings = Vec::new();
             if let Some(rendered) = render_page_words(
@@ -965,12 +1060,9 @@ pub(crate) fn extract_layout_with_ocr(
               "page {page_num}: OCR found no new words; {native_count} native words kept"
             ));
           }
-          if rotation == 90 || rotation == 270 {
-            warnings.push(format!(
-              "page {page_num}: native words are in the page's own frame while OCR words were turned {rotation}°"
-            ));
-          }
         }
+        let mut merged = merged;
+        turn_layout(&mut merged, &mut native.images, rotation, geo.bbox);
         let mut out = finish_ocr_layout(native, merged, &fonts, source, rotation);
         out.warnings.extend(warnings);
         out
@@ -984,26 +1076,6 @@ pub(crate) fn extract_layout_with_ocr(
 #[cfg(test)]
 mod layout_tests {
   use super::*;
-
-  #[test]
-  fn quarter_turns_swap_the_destination_rectangle() {
-    assert_eq!(
-      upright_dest([10.0, 20.0, 110.0, 220.0], 90),
-      [10.0, 20.0, 210.0, 120.0]
-    );
-    assert_eq!(
-      upright_dest([10.0, 20.0, 110.0, 220.0], 270),
-      [10.0, 20.0, 210.0, 120.0]
-    );
-    assert_eq!(
-      upright_dest([10.0, 20.0, 110.0, 220.0], 180),
-      [10.0, 20.0, 110.0, 220.0]
-    );
-    assert_eq!(
-      upright_dest([10.0, 20.0, 110.0, 220.0], 0),
-      [10.0, 20.0, 110.0, 220.0]
-    );
-  }
 
   #[test]
   fn pixel_boxes_map_onto_the_destination_rectangle() {
@@ -1215,5 +1287,79 @@ mod osd_tests {
     assert_eq!(osd_correction(90), 270);
     assert_eq!(osd_correction(180), 180);
     assert_eq!(osd_correction(0), 0);
+  }
+}
+
+#[cfg(test)]
+mod frame_tests {
+  use super::*;
+
+  #[test]
+  fn unrotating_a_pixel_box_undoes_the_raster_turn() {
+    // an 800×200 raster turned 90° clockwise is 200×800; a box in the turned raster maps back
+    assert_eq!(
+      unrotate_pixel_box([140, 10, 180, 110], 90, 200, 800),
+      [10, 20, 110, 60]
+    );
+    // 270° clockwise (= 90° counter-clockwise): the same original box lands elsewhere
+    assert_eq!(
+      unrotate_pixel_box([20, 690, 60, 790], 270, 200, 800),
+      [10, 20, 110, 60]
+    );
+    // 180° keeps the dimensions
+    assert_eq!(
+      unrotate_pixel_box([690, 140, 790, 180], 180, 800, 200),
+      [10, 20, 110, 60]
+    );
+    assert_eq!(
+      unrotate_pixel_box([10, 20, 110, 60], 0, 800, 200),
+      [10, 20, 110, 60]
+    );
+  }
+
+  #[test]
+  fn turning_a_box_in_the_page_frame_moves_its_corners() {
+    let page = [0.0, 0.0, 612.0, 792.0];
+    assert_eq!(
+      turn_box([0.0, 0.0, 10.0, 20.0], 90, page),
+      [0.0, 602.0, 20.0, 612.0]
+    );
+    assert_eq!(
+      turn_box([0.0, 0.0, 10.0, 20.0], 270, page),
+      [772.0, 0.0, 792.0, 10.0]
+    );
+    assert_eq!(
+      turn_box([0.0, 0.0, 10.0, 20.0], 180, page),
+      [602.0, 772.0, 612.0, 792.0]
+    );
+    assert_eq!(
+      turn_box([0.0, 0.0, 10.0, 20.0], 0, page),
+      [0.0, 0.0, 10.0, 20.0]
+    );
+    // a CropBox away from the origin keeps its origin
+    let cropped = [100.0, 50.0, 400.0, 250.0];
+    assert_eq!(
+      turn_box([100.0, 50.0, 110.0, 70.0], 90, cropped),
+      [100.0, 340.0, 120.0, 350.0]
+    );
+  }
+
+  #[test]
+  fn a_quarter_turn_followed_by_its_complement_is_the_identity() {
+    let page = [0.0, 0.0, 612.0, 792.0];
+    let turned_page = turn_box(page, 90, page);
+    let b = [50.0, 700.0, 300.0, 720.0];
+    assert_eq!(turn_box(turn_box(b, 90, page), 270, turned_page), b);
+  }
+
+  #[test]
+  fn the_image_with_the_most_words_sets_the_page_rotation() {
+    assert_eq!(dominant_rotation(&[(270, 10), (180, 3)]), 270);
+    assert_eq!(
+      dominant_rotation(&[(0, 5), (90, 5)]),
+      0,
+      "ties keep the first image"
+    );
+    assert_eq!(dominant_rotation(&[]), 0);
   }
 }
