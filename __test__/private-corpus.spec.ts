@@ -4,8 +4,8 @@
 // summary goes to ava's log, and the detailed results are written next to the
 // PDFs as report.json and report.ts (both inside the ignored directory).
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import { join, relative } from "path";
 
 import test from "ava";
 
@@ -18,9 +18,11 @@ import {
   pdfMetadata
 } from "../index";
 import type { Attachment, FormInfo, InvoiceResult, PageFormField, PageText, PdfMeta, TextSource } from "../index";
+import { discoverCorpus } from "../scripts/lib/corpus";
 
 /** One private invoice's results. Attachment payloads are omitted; everything else is verbatim. */
 interface PrivateCorpusEntry {
+  id: string;
   file: string;
   bytes: number;
   meta: Omit<PdfMeta, "form">;
@@ -57,12 +59,8 @@ interface PrivateCorpusReport {
 const PRIVATE = join(import.meta.dirname, "..", "ocr", "__test__", "fixtures", "private");
 
 // One level of subdirectories is allowed (the corpus may be grouped by id prefix).
-const files = existsSync(PRIVATE)
-  ? readdirSync(PRIVATE, { recursive: true })
-      .map(String)
-      .filter((n) => /\.pdf$/i.test(n))
-      .sort()
-  : [];
+const corpus = existsSync(PRIVATE) ? discoverCorpus(PRIVATE).filter((f) => f.kind === "pdf") : [];
+const files = corpus.map((f) => relative(PRIVATE, f.path));
 
 (files.length > 0 ? test : test.skip)(
   "private corpus: every invoice parses and every extractor returns a well-formed result",
@@ -72,8 +70,9 @@ const files = existsSync(PRIVATE)
     const entries: Array<PrivateCorpusEntry> = [];
     t.log(`${files.length} private invoice(s)`);
     t.log(`${"file".padEnd(widths.name)}  pages  nativeChars  words  form  attach  invoice`);
-    for (const name of files) {
-      const buf = readFileSync(join(PRIVATE, name));
+    for (const file of corpus) {
+      const name = relative(PRIVATE, file.path);
+      const buf = readFileSync(file.path);
       const meta = pdfMetadata(buf);
       const text = extractTextPerPage(buf);
       const fields = extractFormFieldsPerPage(buf);
@@ -125,6 +124,7 @@ const files = existsSync(PRIVATE)
       const nativeChars = text.reduce((n, p) => n + p.text.replace(/\s+/g, "").length, 0);
       const { form, ...metaRest } = meta;
       entries.push({
+        id: file.id,
         file: name,
         bytes: buf.length,
         meta: metaRest,
@@ -169,6 +169,7 @@ const files = existsSync(PRIVATE)
         'import type { Attachment, FormInfo, InvoiceResult, PageFormField, PageText, PdfMeta, TextSource } from "../../../../index";',
         "",
         "export interface PrivateCorpusEntry {",
+        "  id: string;",
         "  file: string;",
         "  bytes: number;",
         '  meta: Omit<PdfMeta, "form">;',

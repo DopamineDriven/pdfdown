@@ -4,11 +4,12 @@
 // package's private-corpus spec covers the native ones. Results go to
 // report-ocr.json next to the PDFs.
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import { join, relative } from "path";
 
 import test from "ava";
 
+import { discoverCorpus } from "../../scripts/lib/corpus";
 import { extractLayoutWithOcrPerPage, layoutPerPage } from "../index";
 import type { PageLayout, TextSource, TextWord } from "../index";
 
@@ -43,6 +44,7 @@ interface PrivateOcrPage {
 }
 
 interface PrivateOcrEntry {
+  id: string;
   file: string;
   pages: number;
   seconds: number;
@@ -56,11 +58,9 @@ const nativeChars = (pages: Array<PageLayout>) =>
 
 // One level of subdirectories is allowed (the corpus may be grouped by id prefix).
 const scanned = existsSync(PRIVATE)
-  ? readdirSync(PRIVATE, { recursive: true })
-      .map(String)
-      .filter((n) => /\.pdf$/i.test(n))
-      .sort()
-      .filter((n) => nativeChars(layoutPerPage(readFileSync(join(PRIVATE, n)))) <= SCANNED_MAX_NATIVE_CHARS)
+  ? discoverCorpus(PRIVATE)
+      .filter((f) => f.kind === "pdf")
+      .filter((f) => nativeChars(layoutPerPage(readFileSync(f.path))) <= SCANNED_MAX_NATIVE_CHARS)
   : [];
 
 (scanned.length > 0 ? test : test.skip)("private corpus: scanned invoices OCR into positioned pages", (t) => {
@@ -68,8 +68,9 @@ const scanned = existsSync(PRIVATE)
   t.timeout(20 * 60 * 1000, "OCR over every scanned document in the private corpus");
   const entries: Array<PrivateOcrEntry> = [];
   t.log(`${scanned.length} scanned invoice(s)`);
-  for (const name of scanned) {
-    const buf = readFileSync(join(PRIVATE, name));
+  for (const file of scanned) {
+    const name = relative(PRIVATE, file.path);
+    const buf = readFileSync(file.path);
     const t0 = performance.now();
     const pages = extractLayoutWithOcrPerPage(buf, { render: "Auto" });
     const native = layoutPerPage(buf);
@@ -124,7 +125,7 @@ const scanned = existsSync(PRIVATE)
         `${name} p${String(p.page).padStart(2)}  ${p.source.padEnd(8)}  rot ${String(p.contentRotation).padStart(3)}  words ${String(p.words.length).padStart(4)}  conf ${meanConfidence.toFixed(2)}`
       );
     }
-    entries.push({ file: name, pages: pages.length, seconds, layout });
+    entries.push({ id: file.id, file: name, pages: pages.length, seconds, layout });
     t.log(`${name}: ${pages.length} pages in ${seconds.toFixed(1)}s`);
   }
   const report = { generatedAt: new Date().toISOString(), files: entries.length, entries };

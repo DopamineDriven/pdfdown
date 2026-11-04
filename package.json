@@ -33,6 +33,8 @@
     "build": "node scripts/build.mjs",
     "build:debug": "node scripts/build.mjs --debug",
     "build:ocr": "node scripts/build.mjs --ocr",
+    "corpus:profile": "tsx scripts/corpus-profile.ts",
+    "invoice:eval": "tsx scripts/invoice-eval.ts",
     "create-npm-dirs:ocr": "napi create-npm-dirs --package-json-path ocr/package.json --npm-dir ocr/npm",
     "format": "run-p format:oxfmt format:rs format:toml",
     "format:oxfmt": "oxfmt",
@@ -46,7 +48,7 @@
     "preversion": "napi build --platform --no-const-enum && git add .",
     "version": "napi version",
     "prepare": "husky",
-    "typecheck": "tsgo --noEmit --strict --ignoreConfig --module esnext --moduleResolution bundler --types node __test__/forms.types.ts __test__/invoice.types.ts __test__/layout.types.ts ocr/__test__/forms.types.ts ocr/__test__/invoice.types.ts ocr/__test__/layout.types.ts"
+    "typecheck": "tsgo --noEmit --strict --ignoreConfig --module esnext --moduleResolution bundler --types node scripts/lib/*.ts scripts/__test__/*.spec.ts __test__/forms.types.ts __test__/invoice.types.ts __test__/layout.types.ts ocr/__test__/forms.types.ts ocr/__test__/invoice.types.ts ocr/__test__/layout.types.ts"
   },
   "devDependencies": {
     "@ava/typescript": "^7.0.0",
@@ -116,7 +118,8 @@
       "ts"
     ],
     "files": [
-      "__test__/**/*.spec.ts"
+      "__test__/**/*.spec.ts",
+      "scripts/__test__/*.spec.ts"
     ],
     "nodeArguments": [
       "--import",
