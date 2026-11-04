@@ -1,0 +1,20 @@
+{
+  "invoiceId": "INV-2026-0042",
+  "invoiceDate": "2026-11-01",
+  "invoiceTotal": 833,
+  "amountDue": 833,
+  "purchaseOrder": "PO-7788",
+  "documentType": "Invoice",
+  "vendorName": "Acme Aviation Parts GmbH",
+  "customerName": "Jet Support Services, Inc.",
+  "items": [
+    {
+      "productCode": "HPS-220",
+      "description": "Hydraulic pump seal kit",
+      "quantity": 4,
+      "unitPrice": 125,
+      "amount": 500
+    },
+    { "description": "Inspection labor", "quantity": 2.5, "unitPrice": 80, "amount": 200 }
+  ]
+}

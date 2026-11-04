@@ -91,11 +91,32 @@ export interface Profile {
   tables: ProfileTables;
 }
 
-const zeroed = <K extends string>(keys: ReadonlyArray<K>): Record<K, number> =>
-  Object.fromEntries(keys.map((k) => [k, 0])) as Record<K, number>;
+const zeroTextClasses = (): Record<TextClass, number> => ({ native: 0, scanned: 0, mixed: 0 });
+const zeroSizeClasses = (): Record<SizeClass, number> => ({ Letter: 0, A4: 0, landscape: 0, other: 0 });
+const zeroBuckets = (): Record<PageBucket, number> => ({
+  "1": 0,
+  "2": 0,
+  "3": 0,
+  "4": 0,
+  "5": 0,
+  "6-10": 0,
+  "11-20": 0,
+  "21-50": 0,
+  "51+": 0
+});
+const zeroKinds = (): Record<PageKind, number> => ({
+  imageOnly: 0,
+  stampOverScan: 0,
+  noGlyphsNoImages: 0,
+  sparseNative: 0
+});
 
 const pageBucket = (pages: number): PageBucket => {
-  if (pages <= 5) return String(Math.max(pages, 1)) as PageBucket;
+  if (pages <= 1) return "1";
+  if (pages === 2) return "2";
+  if (pages === 3) return "3";
+  if (pages === 4) return "4";
+  if (pages === 5) return "5";
   if (pages <= 10) return "6-10";
   if (pages <= 20) return "11-20";
   if (pages <= 50) return "21-50";
@@ -147,7 +168,7 @@ function profileFile(file: CorpusFile, root: string): ProfileEntry | ProfileFail
       size.pages += 1;
       sizes.set(key, size);
     }
-    const kinds = zeroed(PAGE_KINDS);
+    const kinds = zeroKinds();
     for (const p of layout) {
       const kind = pageKind(p.words.length, p.images.length);
       if (kind !== undefined) kinds[kind] += 1;
@@ -192,14 +213,16 @@ export function profileCorpus(files: ReadonlyArray<CorpusFile>, root: string): P
   }
   const workbooks = files.filter((f) => f.kind === "xlsx").length;
 
-  const textClassCounts = zeroed(TEXT_CLASSES);
-  const sizeClassCounts = zeroed(SIZE_CLASSES);
-  const pagesHistogram = zeroed(PAGE_BUCKETS);
+  const textClassCounts = zeroTextClasses();
+  const sizeClassCounts = zeroSizeClasses();
+  const pagesHistogram = zeroBuckets();
   const producers = new Map<string, number>();
-  const pageKinds = Object.fromEntries(PAGE_KINDS.map((k) => [k, { pages: 0, documents: 0 }])) as Record<
-    PageKind,
-    { pages: number; documents: number }
-  >;
+  const pageKinds: Record<PageKind, { pages: number; documents: number }> = {
+    imageOnly: { pages: 0, documents: 0 },
+    stampOverScan: { pages: 0, documents: 0 },
+    noGlyphsNoImages: { pages: 0, documents: 0 },
+    sparseNative: { pages: 0, documents: 0 }
+  };
   let layoutMsTotal = 0;
   let layoutMsMax = 0;
   for (const e of entries) {
@@ -216,9 +239,13 @@ export function profileCorpus(files: ReadonlyArray<CorpusFile>, root: string): P
   }
   const fontSizes = clusterSizes(entries, (e) => e.fingerprintFonts);
   const headerSizes = clusterSizes(entries, (e) => e.fingerprintHeader);
-  const coverage = Object.fromEntries(
-    COVERAGE_LEVELS.map((level) => [level, clustersToCover(headerSizes, entries.length, Number(level))])
-  ) as Record<CoverageLevel, number>;
+  const cover = (percent: number) => clustersToCover(headerSizes, entries.length, percent);
+  const coverage: Record<CoverageLevel, number> = {
+    "50": cover(50),
+    "80": cover(80),
+    "90": cover(90),
+    "95": cover(95)
+  };
 
   return {
     generatedAt: new Date().toISOString(),
