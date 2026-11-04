@@ -852,6 +852,48 @@ const amounts = amountHeader
 
 Runs in the same order of time as `extractTextPerPage` (single-digit milliseconds for a typical invoice page). For scanned pages use `extractLayoutWithOcrPerPage` from the OCR package, which fills the same shape from Tesseract word boxes: a page is OCR'd when its native text is under `minTextLength` or covers under 2% of a page that is mostly image or heavy with paths, native words stay on such a hybrid page, every page's coordinates share one frame (`contentRotation`), and raster orientation is settled by Tesseract's orientation detector before any blind retry. The OCR package README describes the cascade.
 
+## Measuring on your own corpus
+
+Two scripts run against any local directory of PDFs and print aggregates only; nothing from the corpus is committed, and nothing from it is printed unless you ask. The directory comes from `PDFDOWN_INVOICE_CORPUS` (default: `ocr/__test__/fixtures/private`, which is gitignored) and may be grouped one folder deep. A file's basename is its `id` (the corpus these were built on names files by a six-digit invoice id), and every per-document row in both outputs carries it.
+
+```bash
+PDFDOWN_INVOICE_CORPUS=/path/to/pdfs yarn corpus:profile                    # writes <root>/profile.json
+PDFDOWN_INVOICE_CORPUS=/path/to/pdfs yarn invoice:eval --ids critical.txt   # writes <root>/eval.json
+```
+
+`corpus:profile` runs `pdfMetadata`, `layoutPerPage`, `attachments` and `extractInvoice` once per PDF and prints the headline (parse failures, native layout cost, native / scanned / mixed, pages per document, page sizes, `/Rotate`, AcroForms, attachments and embedded XML), the producer families, the template clusters (a fonts fingerprint and a header fingerprint with digits masked, and how many header clusters cover 50/80/90/95% of the documents) and the page kinds (image-only, a native stamp over a scan, no glyphs and no images, sparse native).
+
+`invoice:eval` scores `extractInvoice` against an `<id>.expected.json` beside each `<id>.pdf`, skipping and counting the PDFs without one. Header fields are exact matches after trimming, case-folding and whitespace collapsing (dates as `YYYY-MM-DD`, amounts to the cent); items are matched on `(productCode | description, amount)` for precision and recall; totals reconcile when the extraction's items add up to its own net total within 1%. Every row is reported twice: document-weighted (each document counts one) and amount-weighted (each counts its expected `invoiceTotal`; a document without one counts 0 and is reported under `missingAmounts`). Rows: all documents, the scanned and mixed subsets, each template cluster from `profile.json` when it exists, and the `--ids` slice (one id per line; the harness does not know why those ids matter).
+
+Expected files use pdfdown's own `InvoiceFields` names, values only. A key you leave out is not scored; a key or value of the wrong type is reported and dropped, never thrown on:
+
+```json
+{
+  "invoiceId": "INV-2026-0042",
+  "invoiceDate": "2026-11-01",
+  "invoiceTotal": 833,
+  "amountDue": 833,
+  "purchaseOrder": "PO-7788",
+  "documentType": "Invoice",
+  "vendorName": "Acme Aviation Parts GmbH",
+  "customerName": "Jet Support Services, Inc.",
+  "shippingAddress": { "lines": ["1 Hangar Road", "Anytown"] },
+  "items": [
+    {
+      "productCode": "HPS-220",
+      "description": "Hydraulic pump seal kit",
+      "quantity": 4,
+      "unitPrice": 125,
+      "amount": 500
+    },
+    { "description": "Inspection labor", "quantity": 2.5, "unitPrice": 80, "amount": 200 }
+  ],
+  "aircraft": [{ "serialNumber": "20123" }]
+}
+```
+
+Both JSON outputs stay beside the PDFs. `--verbose` names, on the terminal only, the files whose basename is not a six-digit id, whose expected file was partly dropped, or that failed.
+
 ## Parallelism
 
 All extraction functions use [rayon](https://github.com/rayon-rs/rayon) for automatic multi-core parallelism. Per-page text extraction, image decoding, and annotation parsing run concurrently across CPU cores. The `pdfDocument` / `document()` call additionally runs text, image, and annotation extraction concurrently via nested `rayon::join`. This is internal to the native addon — the Node.js API surface is unchanged.
