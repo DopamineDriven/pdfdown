@@ -6,7 +6,8 @@ import test from "ava";
 
 import { extractInvoice } from "../../index";
 import { discoverCorpus } from "../lib/corpus";
-import { evaluateCorpus } from "../lib/evaluate";
+import { evaluateCorpus, renderEval } from "../lib/evaluate";
+import type { EvalReport } from "../lib/evaluate";
 import { parseExpected, readExpected, toExpected } from "../lib/expected";
 import type { ExpectedInvoice } from "../lib/expected";
 import { HEADER_FIELDS, aggregate, reconciles, scoreDocument } from "../lib/metrics";
@@ -148,4 +149,109 @@ test("baseline: sample invoices without a heuristic track score 0% with source N
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── Review fixes ─────────────────────────────────────────────────────────────
+
+const reportOf = (scores: Array<DocScore>, ids?: ReadonlySet<string>): EvalReport => ({
+  generatedAt: "2026-11-04T00:00:00.000Z",
+  documents: scores.length,
+  scored: scores.length,
+  skipped: 0,
+  failures: [],
+  expectedWarnings: [],
+  scores,
+  table: aggregate(scores, { ids })
+});
+
+test("default output never prints a single document's amount: totals appear only for rows of three or more documents", (t) => {
+  const result = extractInvoice(facturx);
+  const expected = readExpected(facturxExpected);
+  const score = scoreDocument(toExpected(result), expected);
+  const scores = [
+    asDoc("100001", score, "big"),
+    asDoc("100002", score, "big"),
+    asDoc("100003", score, "big"),
+    asDoc("100004", score, "lonely")
+  ];
+  const lines = renderEval(reportOf(scores, new Set(["100004"])));
+  const header = (label: string) => lines.find((l) => l.startsWith(`${label}:`)) ?? "";
+  t.true(header("all").includes("amount total"), header("all"));
+  t.true(header("big").includes("amount total"), header("big"));
+  t.false(header("lonely").includes("amount total"), header("lonely"));
+  t.false(header("ids slice (1 listed)").includes("amount total"), header("ids slice (1 listed)"));
+  t.false(
+    lines.some((l) => l.includes("833") && !l.includes("amount total")),
+    "no other line carries an amount"
+  );
+});
+
+test("aircraft serial numbers are scored like items", (t) => {
+  const actual: ExpectedInvoice = { aircraft: [{ serialNumber: "20123" }, { serialNumber: " 9000 " }] };
+  t.deepEqual(scoreDocument(actual, { aircraft: [{ serialNumber: "20123" }] }).aircraft, {
+    expected: 1,
+    actual: 2,
+    matched: 1,
+    precision: 0.5,
+    recall: 1
+  });
+  t.deepEqual(scoreDocument(actual, { aircraft: [{ serialNumber: "9000" }, { serialNumber: "1" }] }).aircraft, {
+    expected: 2,
+    actual: 2,
+    matched: 1,
+    precision: 0.5,
+    recall: 0.5
+  });
+  t.is(scoreDocument(actual, {}).aircraft.recall, null, "not stated, not scored");
+  const row = aggregate([asDoc("100001", scoreDocument(actual, { aircraft: [{ serialNumber: "20123" }] }))]).all;
+  t.deepEqual(row.aircraft, { documents: 1, precision: 0.5, recall: 1 });
+});
+
+test("a credit note's negative total weighs by its magnitude", (t) => {
+  const invoice = asDoc(
+    "100001",
+    scoreDocument({ invoiceId: "A", invoiceTotal: 1000 }, { invoiceId: "A", invoiceTotal: 1000 })
+  );
+  const credit = asDoc(
+    "100002",
+    scoreDocument({ invoiceId: "X", invoiceTotal: -900 }, { invoiceId: "C", invoiceTotal: -900 })
+  );
+  const row = aggregate([invoice, credit]).all;
+  t.is(row.amountTotal, 1900);
+  t.is(row.fields.invoiceId.documentWeighted, 0.5);
+  t.is(row.fields.invoiceId.amountWeighted, 1000 / 1900);
+});
+
+test("items match on product code when both sides have one, else on description; differing codes do not match", (t) => {
+  const items = (actual: ExpectedInvoice["items"], expected: ExpectedInvoice["items"]) =>
+    scoreDocument({ items: actual }, { items: expected }).items.matched;
+  t.is(
+    items(
+      [{ productCode: "HPS-220", description: "Seal kit", amount: 500 }],
+      [{ description: "Seal kit", amount: 500 }]
+    ),
+    1
+  );
+  t.is(
+    items(
+      [{ description: "Seal kit", amount: 500 }],
+      [{ productCode: "HPS-220", description: "Seal kit", amount: 500 }]
+    ),
+    1
+  );
+  t.is(
+    items(
+      [{ productCode: "A", description: "Seal kit", amount: 500 }],
+      [{ productCode: "B", description: "Seal kit", amount: 500 }]
+    ),
+    0
+  );
+  t.is(
+    items(
+      [{ productCode: "A", description: "Seal kit", amount: 500 }],
+      [{ productCode: "A", description: "Other", amount: 500 }]
+    ),
+    1
+  );
+  t.is(items([{ description: "Seal kit", amount: 500 }], [{ description: "Seal kit", amount: 501 }]), 0);
 });

@@ -1,5 +1,5 @@
 import type { InvoiceResult, InvoiceSource } from "../../index";
-import type { ExpectedInvoice, ExpectedItem } from "./expected";
+import type { ExpectedAircraft, ExpectedInvoice, ExpectedItem } from "./expected";
 import type { TextClass } from "./fingerprint";
 
 /** Header fields scored by exact match (after normalisation). */
@@ -16,7 +16,8 @@ export const HEADER_FIELDS = [
 ] as const;
 export type HeaderField = (typeof HEADER_FIELDS)[number];
 
-export interface ItemScore {
+/** A set comparison: items or aircraft, as a multiset match with precision and recall. */
+export interface SetScore {
   expected: number;
   actual: number;
   matched: number;
@@ -26,11 +27,15 @@ export interface ItemScore {
 
 /** One document compared with its expected file: 1 is a match, 0 a miss, null not stated by the expected file. */
 export interface Score {
-  /** The expected `invoiceTotal`, the document's weight in the amount-weighted rows; 0 when it is missing. */
+  /**
+   * The magnitude of the expected `invoiceTotal`, the document's weight in the amount-weighted
+   * rows (a credit note weighs what it credits); 0 when the expected file states no total.
+   */
   weight: number;
   hasAmount: boolean;
   fields: Record<HeaderField, number | null>;
-  items: ItemScore;
+  items: SetScore;
+  aircraft: SetScore;
 }
 
 export interface DocScore extends Score {
@@ -52,13 +57,20 @@ export interface FieldAccuracy {
   amountWeighted: number | null;
 }
 
+export interface SetAccuracy {
+  documents: number;
+  precision: number | null;
+  recall: number | null;
+}
+
 export interface Row {
   label: string;
   documents: number;
   missingAmounts: number;
   amountTotal: number;
   fields: Record<HeaderField, FieldAccuracy>;
-  items: { documents: number; precision: number | null; recall: number | null };
+  items: SetAccuracy;
+  aircraft: SetAccuracy;
   reconciled: { documents: number; rate: number | null };
 }
 
@@ -90,31 +102,81 @@ const matchText = (actual: string | undefined, expected: string | undefined): nu
   expected === undefined ? null : actual !== undefined && normText(actual) === normText(expected) ? 1 : 0;
 const matchAmount = (actual: number | undefined, expected: number | undefined): number | null =>
   expected === undefined ? null : actual !== undefined && cents(actual) === cents(expected) ? 1 : 0;
+const ratio = (numerator: number, denominator: number): number | null =>
+  denominator === 0 ? null : numerator / denominator;
 
-const itemKey = (item: ExpectedItem): string =>
-  `${normText(item.productCode ?? item.description ?? "")}|${item.amount === undefined ? "" : cents(item.amount)}`;
-
-function scoreItems(actual: ReadonlyArray<ExpectedItem>, expected: ReadonlyArray<ExpectedItem> | undefined): ItemScore {
-  if (expected === undefined) {
-    return { expected: 0, actual: actual.length, matched: 0, precision: null, recall: null };
+/**
+ * Greedy multiset match: every actual element is matched to at most one expected element with the
+ * same key, in order; returns the matched count and the elements left on each side.
+ */
+function matchByKey<T>(
+  actual: ReadonlyArray<T>,
+  expected: ReadonlyArray<T>,
+  key: (element: T) => string | undefined
+): { matched: number; actualLeft: Array<T>; expectedLeft: Array<T> } {
+  const pool = new Map<string, Array<T>>();
+  const expectedLeft: Array<T> = [];
+  for (const e of expected) {
+    const k = key(e);
+    if (k === undefined) expectedLeft.push(e);
+    else pool.set(k, [...(pool.get(k) ?? []), e]);
   }
-  const remaining = new Map<string, number>();
-  for (const item of expected) remaining.set(itemKey(item), (remaining.get(itemKey(item)) ?? 0) + 1);
   let matched = 0;
-  for (const item of actual) {
-    const left = remaining.get(itemKey(item)) ?? 0;
-    if (left > 0) {
+  const actualLeft: Array<T> = [];
+  for (const a of actual) {
+    const k = key(a);
+    const candidates = k === undefined ? undefined : pool.get(k);
+    if (candidates !== undefined && candidates.length > 0) {
+      candidates.pop();
       matched += 1;
-      remaining.set(itemKey(item), left - 1);
-    }
+    } else actualLeft.push(a);
   }
-  return {
-    expected: expected.length,
-    actual: actual.length,
-    matched,
-    precision: actual.length === 0 ? (expected.length === 0 ? null : 0) : matched / actual.length,
-    recall: expected.length === 0 ? null : matched / expected.length
-  };
+  for (const rest of pool.values()) expectedLeft.push(...rest);
+  return { matched, actualLeft, expectedLeft };
+}
+
+const setScore = (expected: number, actual: number, matched: number): SetScore => ({
+  expected,
+  actual,
+  matched,
+  precision: actual === 0 ? (expected === 0 ? null : 0) : matched / actual,
+  recall: expected === 0 ? null : matched / expected
+});
+
+const amountKey = (item: ExpectedItem): string => (item.amount === undefined ? "" : String(cents(item.amount)));
+const codeKey = (item: ExpectedItem): string | undefined =>
+  item.productCode === undefined ? undefined : `${normText(item.productCode)}|${amountKey(item)}`;
+const descriptionKey = (item: ExpectedItem): string | undefined =>
+  item.description === undefined ? undefined : `${normText(item.description)}|${amountKey(item)}`;
+
+/**
+ * Items match on `(productCode, amount)` when both sides carry a code, otherwise on
+ * `(description, amount)`; two different codes never match, whatever the descriptions say.
+ */
+function scoreItems(actual: ReadonlyArray<ExpectedItem>, expected: ReadonlyArray<ExpectedItem> | undefined): SetScore {
+  if (expected === undefined) return { expected: 0, actual: actual.length, matched: 0, precision: null, recall: null };
+  const byCode = matchByKey(actual, expected, codeKey);
+  // Only pairs where at least one side lacks a code may fall back to the description.
+  const uncodedLeft = (items: ReadonlyArray<ExpectedItem>) => items.filter((i) => i.productCode === undefined);
+  const codedLeft = (items: ReadonlyArray<ExpectedItem>) => items.filter((i) => i.productCode !== undefined);
+  const byDescriptionA = matchByKey(uncodedLeft(byCode.actualLeft), byCode.expectedLeft, descriptionKey);
+  const byDescriptionB = matchByKey(
+    codedLeft(byCode.actualLeft),
+    uncodedLeft(byDescriptionA.expectedLeft),
+    descriptionKey
+  );
+  return setScore(expected.length, actual.length, byCode.matched + byDescriptionA.matched + byDescriptionB.matched);
+}
+
+const serialKey = (a: ExpectedAircraft): string | undefined =>
+  a.serialNumber === undefined ? undefined : normText(a.serialNumber);
+
+function scoreAircraft(
+  actual: ReadonlyArray<ExpectedAircraft>,
+  expected: ReadonlyArray<ExpectedAircraft> | undefined
+): SetScore {
+  if (expected === undefined) return { expected: 0, actual: actual.length, matched: 0, precision: null, recall: null };
+  return setScore(expected.length, actual.length, matchByKey(actual, expected, serialKey).matched);
 }
 
 /**
@@ -136,10 +198,11 @@ export function scoreDocument(actual: ExpectedInvoice, expected: ExpectedInvoice
     }
   });
   return {
-    weight: expected.invoiceTotal ?? 0,
+    weight: Math.abs(expected.invoiceTotal ?? 0),
     hasAmount: expected.invoiceTotal !== undefined,
     fields,
-    items: scoreItems(actual.items ?? [], expected.items)
+    items: scoreItems(actual.items ?? [], expected.items),
+    aircraft: scoreAircraft(actual.aircraft ?? [], expected.aircraft)
   };
 }
 
@@ -158,8 +221,20 @@ export function reconciles(result: InvoiceResult): boolean | null {
   return Math.abs(sum - net) <= Math.abs(net) * 0.01 + 0.005;
 }
 
-const ratio = (numerator: number, denominator: number): number | null =>
-  denominator === 0 ? null : numerator / denominator;
+const setAccuracy = (scores: ReadonlyArray<DocScore>, pick: (s: DocScore) => SetScore): SetAccuracy => {
+  const stated = scores.filter((s) => pick(s).expected > 0);
+  return {
+    documents: stated.length,
+    precision: ratio(
+      stated.reduce((n, s) => n + pick(s).matched, 0),
+      stated.reduce((n, s) => n + pick(s).actual, 0)
+    ),
+    recall: ratio(
+      stated.reduce((n, s) => n + pick(s).matched, 0),
+      stated.reduce((n, s) => n + pick(s).expected, 0)
+    )
+  };
+};
 
 function row(label: string, scores: ReadonlyArray<DocScore>): Row {
   const fields = fieldRecord((field): FieldAccuracy => {
@@ -177,7 +252,6 @@ function row(label: string, scores: ReadonlyArray<DocScore>): Row {
       )
     };
   });
-  const withItems = scores.filter((s) => s.items.expected > 0);
   const reconciled = scores.filter((s) => s.reconciled !== null);
   return {
     label,
@@ -185,17 +259,8 @@ function row(label: string, scores: ReadonlyArray<DocScore>): Row {
     missingAmounts: scores.filter((s) => !s.hasAmount).length,
     amountTotal: scores.reduce((n, s) => n + s.weight, 0),
     fields,
-    items: {
-      documents: withItems.length,
-      precision: ratio(
-        withItems.reduce((n, s) => n + s.items.matched, 0),
-        withItems.reduce((n, s) => n + s.items.actual, 0)
-      ),
-      recall: ratio(
-        withItems.reduce((n, s) => n + s.items.matched, 0),
-        withItems.reduce((n, s) => n + s.items.expected, 0)
-      )
-    },
+    items: setAccuracy(scores, (s) => s.items),
+    aircraft: setAccuracy(scores, (s) => s.aircraft),
     reconciled: {
       documents: reconciled.length,
       rate: ratio(reconciled.filter((s) => s.reconciled === true).length, reconciled.length)

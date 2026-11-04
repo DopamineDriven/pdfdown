@@ -41,6 +41,12 @@ export interface EvaluateOptions {
   lookup?: ReadonlyMap<string, ProfileLookup>;
 }
 
+/**
+ * A row's amount total is printed only when it sums at least this many documents: with fewer, the
+ * figure is one invoice's total, which never reaches stdout by default.
+ */
+export const MIN_DOCUMENTS_FOR_AMOUNT = 3;
+
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isTextClass = (v: unknown): v is TextClass => v === "native" || v === "scanned" || v === "mixed";
 
@@ -120,10 +126,9 @@ const table = (rows: ReadonlyArray<ReadonlyArray<string>>): string => {
 };
 
 /** One row as a printed block: the header line, then a field table with both weightings. */
-function printRow(r: Row, out: Array<string>): void {
-  out.push(
-    `${r.label}: ${r.documents} documents, ${r.missingAmounts} without an expected total, amount total ${money(r.amountTotal)}`
-  );
+function renderRow(r: Row, out: Array<string>): void {
+  const amount = r.documents >= MIN_DOCUMENTS_FOR_AMOUNT ? `, amount total ${money(r.amountTotal)}` : "";
+  out.push(`${r.label}: ${r.documents} documents, ${r.missingAmounts} without an expected total${amount}`);
   out.push(
     table([
       ["field", "scored", "document-weighted", "amount-weighted"],
@@ -134,14 +139,15 @@ function printRow(r: Row, out: Array<string>): void {
         pct(r.fields[f].amountWeighted)
       ]),
       ["items (P / R)", String(r.items.documents), pct(r.items.precision), pct(r.items.recall)],
+      ["aircraft (P / R)", String(r.aircraft.documents), pct(r.aircraft.precision), pct(r.aircraft.recall)],
       ["totals reconcile", String(r.reconciled.documents), pct(r.reconciled.rate), ""]
     ])
   );
   out.push("");
 }
 
-/** Aggregates only: clusters are named by their fingerprint, never by a vendor or file. */
-export function printEval(report: EvalReport, maxClusters = 10): void {
+/** The report as printed lines, aggregates only: clusters are named by their fingerprint, never by a vendor or file. */
+export function renderEval(report: EvalReport, maxClusters = 10): Array<string> {
   const out: Array<string> = [];
   out.push(
     `${report.documents} PDFs; ${report.scored} scored against an expected file, ${report.skipped} without one, ${report.failures.length} failed`
@@ -151,16 +157,20 @@ export function printEval(report: EvalReport, maxClusters = 10): void {
   }
   if (report.scored === 0) {
     out.push("nothing to score: add <id>.expected.json files beside the PDFs (InvoiceFields vocabulary)");
-    console.log(out.join("\n"));
-    return;
+    return out;
   }
   out.push("");
-  printRow(report.table.all, out);
-  for (const r of report.table.textClasses) printRow(r, out);
-  for (const r of report.table.clusters.slice(0, maxClusters)) printRow(r, out);
+  renderRow(report.table.all, out);
+  for (const r of report.table.textClasses) renderRow(r, out);
+  for (const r of report.table.clusters.slice(0, maxClusters)) renderRow(r, out);
   if (report.table.clusters.length > maxClusters) {
     out.push(`… ${report.table.clusters.length - maxClusters} smaller clusters in eval.json`, "");
   }
-  if (report.table.slice !== null) printRow(report.table.slice, out);
-  console.log(out.join("\n").trimEnd());
+  if (report.table.slice !== null) renderRow(report.table.slice, out);
+  while (out.length > 0 && out[out.length - 1] === "") out.pop();
+  return out;
+}
+
+export function printEval(report: EvalReport, maxClusters = 10): void {
+  console.log(renderEval(report, maxClusters).join("\n"));
 }
