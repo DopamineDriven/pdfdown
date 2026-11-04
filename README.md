@@ -106,7 +106,7 @@ export interface PageLayout {
   height: number;
   rotate: number; // /Rotate, reported and not applied
   contentRotation: number; // 0 | 90 | 180 | 270: the page frame's turn, the one carrying the most confident OCR text across its images; words, lines and images all share it; the render tier's turn includes /Rotate (always 0 for Native). Displayed coordinates = this frame turned by rotate - contentRotation
-  source: TextSource; // "Native" here; "Ocr" | "Rendered" from the OCR package
+  source: TextSource; // "Native" here; "Ocr" | "Rendered" from the OCR package: the deepest cascade tier that ran, native words kept alongside
   words: Array<TextWord>;
   lines: Array<TextLine>;
   images: Array<PlacedImage>;

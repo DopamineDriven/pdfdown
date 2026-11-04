@@ -1,7 +1,12 @@
 use napi_derive::napi;
 
-/// Where a page's text came from. Present in every build; `Rendered` is only
-/// produced when the `render` feature rasterised the page.
+/// The deepest tier of the OCR cascade that ran for a page: `Native` when the
+/// page's own glyphs were the page, `Ocr` when its embedded rasters were OCR'd,
+/// `Rendered` when the page was rasterised and OCR'd (only with the `render`
+/// feature). A hybrid page keeps its native words alongside the OCR words and
+/// still reports the OCR tier, even when that tier added no words; tell the
+/// two apart by `confidence`, which only OCR words carry, and see the "native
+/// words kept" warnings. Present in every build.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[napi(string_enum)]
 pub enum TextSource {
@@ -82,6 +87,8 @@ pub struct PageLayout {
   /// For any page, displayed coordinates are this frame turned clockwise by
   /// `rotate - contentRotation` (mod 360).
   pub content_rotation: u32,
+  /// Deepest cascade tier that ran: `Native`, or `Ocr` / `Rendered` on a page
+  /// whose native words (if any) were kept alongside the OCR words.
   pub source: TextSource,
   pub words: Vec<TextWord>,
   pub lines: Vec<TextLine>,
