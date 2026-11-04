@@ -83,6 +83,15 @@ const ROTATION_RETRY_CONFIDENCE: f32 = 55.0;
 /// Tesseract's orientation detector is trusted from this confidence; below it the blind retry
 /// loop decides. Measured on copier scans: upright pages 3.9–13.8, turned pages 6.0–12.2.
 const OSD_MIN_CONFIDENCE: f32 = 3.0;
+/// An upright pass scoring at least this mean word confidence is accepted without consulting the
+/// detector. Measured: correctly oriented reads score ~96 on real and synthetic rasters; upside-down
+/// and sideways reads scored 40–62. Keeps the ~1 s detector off the common, upright page.
+const OSD_SKIP_CONFIDENCE: f32 = 80.0;
+
+/// Whether an upright pass is good enough to skip orientation detection altogether.
+fn upright_is_convincing(words: usize, mean_confidence: f32) -> bool {
+  words > 0 && mean_confidence >= OSD_SKIP_CONFIDENCE
+}
 
 /// Who decided a raster's orientation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,7 +128,9 @@ fn pick_first_rotation(osd: Option<(u32, f32)>) -> Option<u32> {
 }
 
 /// Orientation and confidence from Tesseract's OSD model, or `None` when `osd.traineddata` is not
-/// installed, the image is too sparse for the detector, or anything else goes wrong.
+/// installed, the image is too sparse for the detector, or anything else goes wrong. The detector
+/// sees the full raster: shrinking it to 1200 px drops its confidence below the trust threshold
+/// while saving almost no time.
 fn osd_rotation(img: &DynamicImage, datapath: &str, ppi: Option<i32>) -> Option<(u32, f32)> {
   use tesseract_rs::TessPageSegMode;
 
@@ -187,10 +198,9 @@ fn ocr_image_text(img: &DynamicImage, lang: &str) -> (String, f32) {
 /// confident; otherwise the upright pass and the retry over the other turns decide.
 fn ocr_dynamic_image(img: &DynamicImage, lang: &str) -> String {
   let datapath = get_tessdata_prefix().unwrap_or("");
-  let seed = pick_first_rotation(osd_rotation(img, datapath, None));
   let mut tried: Vec<u32> = Vec::new();
   let mut best: Option<(String, f32)> = None;
-  let mut consider = |degrees: u32, tried: &mut Vec<u32>| -> bool {
+  let mut consider = |degrees: u32, tried: &mut Vec<u32>| -> (bool, bool) {
     tried.push(degrees);
     let candidate = if degrees == 0 {
       ocr_image_text(img, lang)
@@ -200,20 +210,27 @@ fn ocr_dynamic_image(img: &DynamicImage, lang: &str) -> String {
     if best.as_ref().is_none_or(|b| candidate.1 > b.1) {
       best = Some(candidate);
     }
-    best
-      .as_ref()
-      .is_some_and(|b| !b.0.is_empty() && b.1 >= ROTATION_RETRY_CONFIDENCE)
+    let b = best.as_ref().expect("a pass was recorded");
+    (
+      !b.0.is_empty() && b.1 >= ROTATION_RETRY_CONFIDENCE,
+      upright_is_convincing(b.0.split_whitespace().count(), b.1),
+    )
   };
-  if let Some(degrees) = seed
-    && consider(degrees, &mut tried)
+  let (upright_ok, convincing) = consider(0, &mut tried);
+  if convincing {
+    return best.expect("a pass was recorded").0;
+  }
+  if let Some(degrees) = pick_first_rotation(osd_rotation(img, datapath, None))
+    && degrees != 0
+    && consider(degrees, &mut tried).0
   {
     return best.expect("a pass was recorded").0;
   }
-  if !tried.contains(&0) && consider(0, &mut tried) {
+  if upright_ok {
     return best.expect("a pass was recorded").0;
   }
   for degrees in ROTATIONS {
-    if !tried.contains(&degrees) && consider(degrees, &mut tried) {
+    if !tried.contains(&degrees) && consider(degrees, &mut tried).0 {
       break;
     }
   }
@@ -419,9 +436,9 @@ fn mean_confidence(words: &[OcrWord]) -> f32 {
 }
 
 /// Word boxes in the frame where the text reads upright: the image as given, or rotated by the
-/// returned clockwise angle. The OSD detector names the turn first when it is confident; that pass
-/// is accepted when it scores at least [`ROTATION_RETRY_CONFIDENCE`]. Otherwise the upright pass and
-/// the blind retry over the other turns decide, as before. Boxes are in pixels of the rotated image,
+/// returned clockwise angle. The upright pass runs first and is final when it is convincing
+/// ([`OSD_SKIP_CONFIDENCE`]); otherwise the OSD detector names the turn to try next, and the blind
+/// retry over the remaining turns is the last resort. Boxes are in pixels of the rotated image,
 /// whose size is also returned, together with who decided.
 fn ocr_words_best_orientation(
   img: &DynamicImage,
@@ -429,54 +446,58 @@ fn ocr_words_best_orientation(
   ppi: Option<i32>,
 ) -> (Vec<OcrWord>, u32, (u32, u32), OrientationSource) {
   let datapath = get_tessdata_prefix().unwrap_or("");
-  let seed = pick_first_rotation(osd_rotation(img, datapath, ppi));
   let mut tried: Vec<u32> = Vec::new();
   let mut best: Option<OrientedPass> = None;
 
-  let mut consider = |degrees: u32, source: OrientationSource, tried: &mut Vec<u32>| -> bool {
-    tried.push(degrees);
-    let (words, dims) = if degrees == 0 {
+  let mut consider =
+    |degrees: u32, source: OrientationSource, tried: &mut Vec<u32>| -> (bool, bool) {
+      tried.push(degrees);
+      let (words, dims) = if degrees == 0 {
+        (
+          ocr_dynamic_image_words(img, lang, ppi),
+          (img.width(), img.height()),
+        )
+      } else {
+        let rotated = rotate_image(img, degrees);
+        (
+          ocr_dynamic_image_words(&rotated, lang, ppi),
+          (rotated.width(), rotated.height()),
+        )
+      };
+      let confidence = mean_confidence(&words);
+      if best.as_ref().is_none_or(|b| confidence > b.confidence) {
+        best = Some(OrientedPass {
+          words,
+          degrees,
+          dims,
+          confidence,
+          source,
+        });
+      }
+      let b = best.as_ref().expect("a pass was recorded");
       (
-        ocr_dynamic_image_words(img, lang, ppi),
-        (img.width(), img.height()),
-      )
-    } else {
-      let rotated = rotate_image(img, degrees);
-      (
-        ocr_dynamic_image_words(&rotated, lang, ppi),
-        (rotated.width(), rotated.height()),
+        !b.words.is_empty() && b.confidence >= ROTATION_RETRY_CONFIDENCE,
+        upright_is_convincing(b.words.len(), b.confidence),
       )
     };
-    let confidence = mean_confidence(&words);
-    if best.as_ref().is_none_or(|b| confidence > b.confidence) {
-      best = Some(OrientedPass {
-        words,
-        degrees,
-        dims,
-        confidence,
-        source,
-      });
-    }
-    best
-      .as_ref()
-      .is_some_and(|b| !b.words.is_empty() && b.confidence >= ROTATION_RETRY_CONFIDENCE)
-  };
 
-  if let Some(degrees) = seed
-    && consider(
-      degrees,
-      if degrees == 0 {
-        OrientationSource::Upright
-      } else {
-        OrientationSource::Osd
-      },
-      &mut tried,
-    )
+  // Upright first: a convincing read needs no detector.
+  let (upright_ok, convincing) = consider(0, OrientationSource::Upright, &mut tried);
+  if convincing {
+    let b = best.expect("a pass was recorded");
+    return (b.words, b.degrees, b.dims, b.source);
+  }
+  // Not convincing: ask the detector which turn to try before the blind retry.
+  if let Some(degrees) = pick_first_rotation(osd_rotation(img, datapath, ppi))
+    && degrees != 0
+    && consider(degrees, OrientationSource::Osd, &mut tried).0
   {
     let b = best.expect("a pass was recorded");
     return (b.words, b.degrees, b.dims, b.source);
   }
-  if !tried.contains(&0) && consider(0, OrientationSource::Upright, &mut tried) {
+  // An acceptable upright read that the detector did not overturn stands; the blind retry is only
+  // for pages nothing has read well yet.
+  if upright_ok {
     let b = best.expect("a pass was recorded");
     return (b.words, b.degrees, b.dims, b.source);
   }
@@ -484,7 +505,7 @@ fn ocr_words_best_orientation(
     if tried.contains(&degrees) {
       continue;
     }
-    if consider(degrees, OrientationSource::Retry, &mut tried) {
+    if consider(degrees, OrientationSource::Retry, &mut tried).0 {
       break;
     }
   }
@@ -1167,6 +1188,23 @@ mod osd_tests {
   #[test]
   fn no_osd_means_no_seed() {
     assert_eq!(pick_first_rotation(None), None);
+  }
+
+  #[test]
+  fn convincing_upright_reads_skip_the_detector() {
+    assert!(upright_is_convincing(182, 95.6), "a real upright page");
+    assert!(
+      !upright_is_convincing(24, 62.4),
+      "the synthetic page read upside down"
+    );
+    assert!(
+      !upright_is_convincing(449, 41.4),
+      "a real page read sideways"
+    );
+    assert!(
+      !upright_is_convincing(0, 100.0),
+      "no words is never convincing"
+    );
   }
 
   #[test]
