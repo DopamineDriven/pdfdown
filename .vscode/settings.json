@@ -3,5 +3,6 @@
   "prettier.arrowParens": "always",
   "prettier.jsxSingleQuote": true,
   "prettier.bracketSameLine": true,
-  "prettier.trailingComma": "none"
+  "prettier.trailingComma": "none",
+  "js/ts.tsdk.path": "node_modules/@typescript/native-preview"
 }
