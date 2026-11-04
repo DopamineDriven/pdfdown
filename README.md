@@ -105,7 +105,7 @@ export interface PageLayout {
   width: number; // CropBox (fallback MediaBox) size in points
   height: number;
   rotate: number; // /Rotate, reported and not applied
-  contentRotation: number; // 0 | 90 | 180 | 270: the page frame's turn, that of the image with the most OCR words; words, lines and images all share it (always 0 for Native)
+  contentRotation: number; // 0 | 90 | 180 | 270: the page frame's turn, the one carrying the most confident OCR text across its images; words, lines and images all share it (always 0 for Native)
   source: TextSource; // "Native" here; "Ocr" | "Rendered" from the OCR package
   words: Array<TextWord>;
   lines: Array<TextLine>;

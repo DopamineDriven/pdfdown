@@ -72,11 +72,12 @@ pub struct PageLayout {
   /// `/Rotate`, reported and not applied.
   pub rotate: u32,
   /// Clockwise degrees (0, 90, 180, 270) the OCR tiers turned the page so its
-  /// text reads upright: the turn of the image carrying the most OCR words.
-  /// Every word, line and image placement is expressed in that turned frame,
-  /// and `width` and `height` swap for a quarter turn. An image whose own turn
-  /// differs reads sideways in that frame and is named in a warning. Always 0
-  /// for `Native` pages.
+  /// text reads upright: the turn carrying the most confident OCR text across
+  /// the page's images (the tiles of a tiled scan vote together). Every word,
+  /// line and image placement is expressed in that turned frame, and `width`
+  /// and `height` swap for a quarter turn. An image with more than a few words
+  /// that reads upright at a different turn is named in a warning: its words
+  /// read sideways in the page frame. Always 0 for `Native` pages.
   pub content_rotation: u32,
   pub source: TextSource,
   pub words: Vec<TextWord>,

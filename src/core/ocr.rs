@@ -617,13 +617,22 @@ fn turn_box(b: [f64; 4], degrees: u32, bbox: [f64; 4]) -> [f64; 4] {
   }
 }
 
-/// The page's turn is the turn of the image with the most OCR words; ties keep the first.
-fn dominant_rotation(per_image: &[(u32, usize)]) -> u32 {
-  per_image
+/// The page's turn is the one carrying the most confident OCR text, summed over the images that
+/// read upright at it (`ocr_score` per image), so the tiles of a tiled scan vote together and one
+/// tile a retry turned cannot outvote them. Ties keep the turn seen first.
+fn dominant_rotation(per_image: &[(u32, f64)]) -> u32 {
+  let mut totals: Vec<(u32, f64)> = Vec::new();
+  for &(degrees, score) in per_image {
+    match totals.iter_mut().find(|(d, _)| *d == degrees) {
+      Some((_, total)) => *total += score,
+      None => totals.push((degrees, score)),
+    }
+  }
+  totals
     .iter()
-    .fold(None::<(u32, usize)>, |best, &(degrees, n)| match best {
-      Some((_, best_n)) if best_n >= n => best,
-      _ => Some((degrees, n)),
+    .fold(None::<(u32, f64)>, |best, &(degrees, total)| match best {
+      Some((_, best_total)) if best_total >= total => best,
+      _ => Some((degrees, total)),
     })
     .map(|(degrees, _)| degrees)
     .unwrap_or(0)
@@ -689,7 +698,7 @@ fn ocr_page_image_words(
   placements: &[PlacedImage],
   warnings: &mut Vec<String>,
 ) -> (Vec<Word>, u32) {
-  let mut per_image: Vec<(String, Vec<Word>, u32)> = Vec::new();
+  let mut per_image: Vec<(String, Vec<Word>, u32, f64)> = Vec::new();
   for (name, img) in collect_page_decoded_images_named(doc, page_id) {
     let placed: Vec<&PlacedImage> = placements
       .iter()
@@ -708,12 +717,6 @@ fn ocr_page_image_words(
       ));
     }
     let (words, degrees, (rw, rh), decided) = ocr_words_best_orientation(&img, lang, None);
-    if degrees != 0 {
-      warnings.push(format!(
-        "image {name}: text reads upright after a {degrees}° turn ({})",
-        decided.label()
-      ));
-    }
     let painted = words_in_painted_raster(words, degrees, rw, rh);
     let mapped = map_ocr_words(
       painted,
@@ -721,18 +724,30 @@ fn ocr_page_image_words(
       img.height(),
       [first.x0, first.y0, first.x1, first.y1],
     );
-    per_image.push((name, mapped, degrees));
-  }
-  let counts: Vec<(u32, usize)> = per_image
-    .iter()
-    .map(|(_, words, degrees)| (*degrees, words.len()))
-    .collect();
-  let dominant = dominant_rotation(&counts);
-  let mut out = Vec::new();
-  for (name, words, degrees) in per_image {
-    if degrees != dominant && !words.is_empty() {
+    // A logo or rule that OCR read as a word or two has no orientation worth reporting.
+    if degrees != 0 && mapped.len() > WEAK_TIER2_WORDS {
       warnings.push(format!(
-        "image {name}: reads upright at {degrees}° but the page frame is turned {dominant}°; its words read sideways in it"
+        "image {name}: {} words read upright after a {degrees}° turn ({})",
+        mapped.len(),
+        decided.label()
+      ));
+    }
+    let score = ocr_score(&mapped);
+    per_image.push((name, mapped, degrees, score));
+  }
+  // An image that read as a word or two is no evidence of the page's turn; it does not vote.
+  let votes: Vec<(u32, f64)> = per_image
+    .iter()
+    .filter(|(_, words, _, _)| words.len() > WEAK_TIER2_WORDS)
+    .map(|(_, _, degrees, score)| (*degrees, *score))
+    .collect();
+  let dominant = dominant_rotation(&votes);
+  let mut out = Vec::new();
+  for (name, words, degrees, _) in per_image {
+    if degrees != dominant && words.len() > WEAK_TIER2_WORDS {
+      warnings.push(format!(
+        "image {name}: {} words read upright at {degrees}° but the page frame is turned {dominant}°; they read sideways in it",
+        words.len()
       ));
     }
     out.extend(words);
@@ -1353,12 +1368,14 @@ mod frame_tests {
   }
 
   #[test]
-  fn the_image_with_the_most_words_sets_the_page_rotation() {
-    assert_eq!(dominant_rotation(&[(270, 10), (180, 3)]), 270);
+  fn the_turn_carrying_the_most_confident_text_sets_the_page_rotation() {
+    assert_eq!(dominant_rotation(&[(270, 10.0), (180, 3.0)]), 270);
+    // tiles vote together: two upright tiles outweigh one bigger tile a retry turned
+    assert_eq!(dominant_rotation(&[(90, 6.0), (0, 4.0), (0, 4.0)]), 0);
     assert_eq!(
-      dominant_rotation(&[(0, 5), (90, 5)]),
+      dominant_rotation(&[(0, 5.0), (90, 5.0)]),
       0,
-      "ties keep the first image"
+      "ties keep the first turn seen"
     );
     assert_eq!(dominant_rotation(&[]), 0);
   }
