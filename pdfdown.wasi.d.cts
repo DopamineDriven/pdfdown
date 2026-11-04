@@ -59,10 +59,7 @@ export type IsExact<T, U> = [T] extends [U] ? ([U] extends [T] ? true : false) :
  * is true. But `Equal<{ a: string; b: string  }, { a: string; } & { b: string }>`
  * is false.
  */
-export type Equal<X, Y> =
-  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
-    ? true
-    : false;
+export type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
 
 export type UTR<
   TUnion extends Record<TKey, string>,
@@ -466,14 +463,16 @@ export interface PageLayout {
   /** `/Rotate`, reported and not applied. */
   rotate: number
   /**
-   * Clockwise degrees (0, 90, 180, 270) the OCR tiers had to turn the raster
-   * before its text read upright; `width` and `height` are swapped for a
-   * quarter turn. Always 0 for `Native` pages. Rotation is detected per image
-   * and this reports the last image that needed a turn: tier-2 words stay
-   * anchored at their own image placement, as painted or turned about its
-   * corner, so on a page whose images disagree, or whose image is painted
-   * away from the origin, words can lie outside the reported box. Every
-   * turned image adds a warning naming it.
+   * Clockwise degrees (0, 90, 180, 270) the OCR tiers turned the page so its
+   * text reads upright: the turn carrying the most confident OCR text across
+   * the page's images (the tiles of a tiled scan vote together). Every word,
+   * line and image placement is expressed in that turned frame, and `width`
+   * and `height` swap for a quarter turn. An image with more than a few words
+   * that reads upright at a different turn is named in a warning: its words
+   * read sideways in the page frame. The render tier reads the page as
+   * displayed, so its turn includes `/Rotate`. Always 0 for `Native` pages.
+   * For any page, displayed coordinates are this frame turned clockwise by
+   * `rotate - contentRotation` (mod 360).
    */
   contentRotation: number
   source: TextSource
@@ -624,9 +623,14 @@ export interface TextWord {
   fontSize?: number
   /** Native only: base font name with any subset prefix stripped. */
   fontName?: string
-  /** Native: from the font descriptor and name. OCR: not reported. */
+  /**
+   * Native: from the font descriptor and name; absent when the font gives no weight evidence
+   * (anonymous names such as `CIDFont+F1`) and for OCR words.
+   */
   bold?: boolean
   italic?: boolean
+  /** Native only: true when the word is set in a barcode font, so its glyphs are bars, not letters. */
+  symbolic?: boolean
   /** OCR only: Tesseract word confidence, 0..1. */
   confidence?: number
 }

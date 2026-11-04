@@ -850,13 +850,13 @@ const amounts = amountHeader
   : [];
 ```
 
-Runs in the same order of time as `extractTextPerPage` (single-digit milliseconds for a typical invoice page). For scanned pages use `extractLayoutWithOcrPerPage` from the OCR package, which fills the same shape from Tesseract word boxes.
+Runs in the same order of time as `extractTextPerPage` (single-digit milliseconds for a typical invoice page). For scanned pages use `extractLayoutWithOcrPerPage` from the OCR package, which fills the same shape from Tesseract word boxes: a page is OCR'd when its native text is under `minTextLength` or covers under 2% of a page that is mostly image or heavy with paths, native words stay on such a hybrid page, every page's coordinates share one frame (`contentRotation`), and raster orientation is settled by Tesseract's orientation detector before any blind retry. The OCR package README describes the cascade.
 
 ## Parallelism
 
 All extraction functions use [rayon](https://github.com/rayon-rs/rayon) for automatic multi-core parallelism. Per-page text extraction, image decoding, and annotation parsing run concurrently across CPU cores. The `pdfDocument` / `document()` call additionally runs text, image, and annotation extraction concurrently via nested `rayon::join`. This is internal to the native addon — the Node.js API surface is unchanged.
 
-OCR runs on a **dedicated capped thread pool** (default 4 threads, configurable via `maxThreads`) to prevent oversubscription when running inside a libuv worker thread. Non-OCR extraction uses the global rayon pool.
+OCR runs on a **dedicated capped thread pool** (default 4 threads, configurable via `maxThreads`) to prevent oversubscription when running inside a libuv worker thread, and the OCR package pins Tesseract's own OpenMP to one thread per worker (`OMP_THREAD_LIMIT=1` unless you set it) so those workers do not thrash each other. Non-OCR extraction uses the global rayon pool.
 
 ### Tuning Node.js worker threads
 
