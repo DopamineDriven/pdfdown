@@ -2,13 +2,15 @@
 //!
 //! Parts are found through relationships, never by conventional name. Cells keep their stored
 //! spelling (`raw`), their typed value, the formula stored on them or the shared master they
-//! follow, and whether a result was cached. Formatting of numeric `text` arrives with the
-//! format module; until then numeric `text` is the stored spelling.
+//! follow, and whether a result was cached. Numeric `text` is the format module's rendering of
+//! the value under the cell's format code; a code this release does not render leaves `text` as
+//! the stored spelling and marks the cell unsupported.
 
 use std::collections::{BTreeMap, HashMap};
 
 use roxmltree::Node;
 
+use super::format::{NumberFormat, iso_date};
 use super::package::{Package, SpreadsheetError, parse_xml};
 use crate::types::{SheetCell, SheetCells, SpreadsheetOptions};
 
@@ -23,11 +25,8 @@ pub(crate) enum CellValue {
   Number(f64),
   Boolean(bool),
   Error(String),
-  #[allow(dead_code)] // built by the format module once a date code renders the serial
-  Date {
-    serial: f64,
-    iso: String,
-  },
+  /// The ISO rendering of a serial under a date code; the serial itself stays in `raw`.
+  Date(String),
   Blank,
 }
 
@@ -205,11 +204,6 @@ fn builtin_format(id: u32) -> Option<&'static str> {
     49 => "@",
     _ => return None,
   })
-}
-
-/// Built-in ids that render a serial as a date or time.
-fn builtin_is_date(id: u32) -> bool {
-  matches!(id, 14..=22 | 27..=36 | 45..=47 | 50..=58)
 }
 
 /// The format code a cell style selects; `None` for General or an unknown style.
@@ -507,8 +501,11 @@ pub(crate) fn parse_workbook(package: &mut Package) -> Result<Workbook, Spreadsh
       &sheet_ref.name,
       index as u32,
       sheet_ref.hidden,
-      &shared,
-      &styles,
+      WorkbookContext {
+        shared: &shared,
+        styles: &styles,
+        date1904,
+      },
       print_areas.get(&index).copied(),
     )?;
     cells_total += sheet.cells.len();
@@ -544,14 +541,21 @@ struct RawCell {
   shared_ref: Option<String>,
 }
 
+/// What every sheet of a workbook shares: the string table, the styles and the date system.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct WorkbookContext<'a> {
+  pub shared: &'a [String],
+  pub styles: &'a Styles,
+  pub date1904: bool,
+}
+
 /// One worksheet part to a `Sheet`. Malformed references and ranges become warnings, never panics.
 pub(crate) fn parse_sheet(
   bytes: &[u8],
   name: &str,
   index: u32,
   hidden: bool,
-  shared: &[String],
-  styles: &Styles,
+  context: WorkbookContext<'_>,
   print_area: Option<CellRange>,
 ) -> Result<Sheet, SpreadsheetError> {
   let doc = parse_xml(bytes)?;
@@ -600,7 +604,7 @@ pub(crate) fn parse_sheet(
           }
         }
       }
-      "sheetData" => parse_rows(n, &mut sheet, shared, styles, &mut shared_masters),
+      "sheetData" => parse_rows(n, &mut sheet, context, &mut shared_masters),
       "mergeCells" => {
         for m in n
           .children()
@@ -624,14 +628,19 @@ pub(crate) fn parse_sheet(
       cell.merge = Some(*range);
     }
   }
+  let unsupported = sheet.cells.values().filter(|c| !c.format_supported).count();
+  if unsupported > 0 {
+    sheet.warnings.push(format!(
+      "{unsupported} cell(s) use number formats this release does not render"
+    ));
+  }
   Ok(sheet)
 }
 
 fn parse_rows(
   sheet_data: Node<'_, '_>,
   sheet: &mut Sheet,
-  shared: &[String],
-  styles: &Styles,
+  context: WorkbookContext<'_>,
   shared_masters: &mut HashMap<u32, (u32, u32)>,
 ) {
   let mut current_row: u32 = 0;
@@ -691,14 +700,8 @@ fn parse_rows(
           _ => {}
         }
       }
-      if let Some(cell) = resolve_cell(
-        raw,
-        position,
-        shared,
-        styles,
-        shared_masters,
-        &mut sheet.warnings,
-      ) {
+      if let Some(cell) = resolve_cell(raw, position, context, shared_masters, &mut sheet.warnings)
+      {
         sheet.cells.insert(position, cell);
       }
     }
@@ -709,11 +712,15 @@ fn parse_rows(
 fn resolve_cell(
   raw: RawCell,
   position: (u32, u32),
-  shared: &[String],
-  styles: &Styles,
+  context: WorkbookContext<'_>,
   shared_masters: &mut HashMap<u32, (u32, u32)>,
   warnings: &mut Vec<String>,
 ) -> Option<Cell> {
+  let WorkbookContext {
+    shared,
+    styles,
+    date1904,
+  } = context;
   let reference = cell_ref(position.0, position.1);
   let mut formula = raw.formula.clone();
   let mut shared_master = None;
@@ -770,22 +777,48 @@ fn resolve_cell(
       None => return None,
     },
   };
-  let format = format_code(styles, raw.style);
-  let date_styled = styles
-    .xfs
-    .get(raw.style)
-    .is_some_and(|xf| builtin_is_date(xf.num_fmt_id));
-  if date_styled && matches!(value, CellValue::Number(n) if n == 60.0) {
-    warnings.push(format!(
-      "{reference}: serial 60 is the 1900 leap day Excel never had; kept as a number"
-    ));
-  }
   let raw_text = match &value {
     CellValue::Text(_) | CellValue::Error(_) | CellValue::Boolean(_) => text.clone(),
     _ => stored,
   };
+  // Cell type comes before number format: only a number is rendered through its code.
+  let format = format_code(styles, raw.style);
+  let mut format_supported = true;
+  let (value, text) = match (value, &format) {
+    (CellValue::Number(n), Some(code)) => match NumberFormat::parse(code) {
+      Some(parsed) if parsed.is_date() => {
+        match (
+          parsed.render(n, date1904),
+          iso_date(n, date1904, parsed.has_time()),
+        ) {
+          (Some(rendered), Some(iso)) => (CellValue::Date(iso), rendered),
+          _ => {
+            warnings.push(if n == 60.0 && !date1904 {
+              format!(
+                "{reference}: serial 60 is the 1900 leap day Excel never had; kept as a number"
+              )
+            } else {
+              format!(
+                "{reference}: serial {raw_text} is not a date under {code:?}; kept as a number"
+              )
+            });
+            (CellValue::Number(n), text)
+          }
+        }
+      }
+      Some(parsed) => (
+        CellValue::Number(n),
+        parsed.render(n, date1904).unwrap_or(text),
+      ),
+      None => {
+        format_supported = false;
+        (CellValue::Number(n), text)
+      }
+    },
+    (value, _) => (value, text),
+  };
   Some(Cell {
-    format_supported: format.is_none(),
+    format_supported,
     value,
     raw: raw_text,
     text,
@@ -865,7 +898,7 @@ fn public_cell(row: u32, col: u32, cell: &Cell, hidden: bool) -> SheetCell {
     CellValue::Number(n) => SheetCell::number(common, *n),
     CellValue::Boolean(b) => SheetCell::boolean(common, *b),
     CellValue::Error(e) => SheetCell::error(common, e.clone()),
-    CellValue::Date { iso, .. } => SheetCell::date(common, iso.clone()),
+    CellValue::Date(iso) => SheetCell::date(common, iso.clone()),
     CellValue::Blank => SheetCell::blank(common),
   }
 }
@@ -908,7 +941,19 @@ mod tests {
   fn malformed_references_indices_and_merges_warn_and_skip() {
     let xml = br##"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="ZZZZ"><v>1</v></c><c r="B1" t="s"><v>99</v></c><c r="C1" t="s"><v>1</v></c></row></sheetData><mergeCells><mergeCell ref="nope"/></mergeCells></worksheet>"##;
     let shared = vec!["zero".to_string(), "one".to_string()];
-    let sheet = parse_sheet(xml, "S", 0, false, &shared, &Styles::default(), None).unwrap();
+    let sheet = parse_sheet(
+      xml,
+      "S",
+      0,
+      false,
+      WorkbookContext {
+        shared: &shared,
+        styles: &Styles::default(),
+        date1904: false,
+      },
+      None,
+    )
+    .unwrap();
     assert_eq!(sheet.warnings.len(), 3, "{:?}", sheet.warnings);
     assert_eq!(sheet.cells.len(), 1);
     assert_eq!(sheet.cells[&(0, 2)].text, "one");
