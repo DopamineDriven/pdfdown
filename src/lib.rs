@@ -56,8 +56,9 @@ use crate::core::document::extract_all_with_ocr;
 #[cfg(feature = "ocr")]
 use crate::core::ocr::{extract_layout_with_ocr, extract_text_with_ocr, normalize_max_threads};
 
-use crate::core::spreadsheet::package::{NOT_PDF_OR_ZIP, SpreadsheetError, detect};
-use crate::types::{DocumentFormat, FormatDetection};
+use crate::core::spreadsheet::package::{NOT_PDF_OR_ZIP, Package, SpreadsheetError, detect};
+use crate::core::spreadsheet::workbook::{Workbook, cells_of, parse_workbook};
+use crate::types::{DocumentFormat, FormatDetection, SheetCells, SpreadsheetOptions};
 
 fn load_doc(buf: &[u8]) -> Result<Document> {
   Document::load_mem(buf).map_err(|e| Error::from_reason(format!("Failed to load PDF: {e}")))
@@ -1137,9 +1138,15 @@ pub struct PdfState {
   raw: Arc<Vec<u8>>,
 }
 
-/// What a `PdfDown` holds. A PDF today; the workbook variant lands with the workbook reader.
+/// A parsed workbook; the field stays crate-private so the model's types need not be public.
+pub struct WorkbookState {
+  workbook: Workbook,
+}
+
+/// What a `PdfDown` holds: a parsed PDF or a parsed workbook.
 pub enum ParsedDocument {
   Pdf(PdfState),
+  Workbook(WorkbookState),
 }
 
 const _: () = {
@@ -1160,10 +1167,10 @@ fn parse_document(bytes: Vec<u8>) -> Result<ParsedDocument> {
   match detection.format {
     DocumentFormat::Pdf => {}
     DocumentFormat::Xlsx => {
-      return Err(
-        SpreadsheetError::UnsupportedFormat("workbook reading is not available yet".to_string())
-          .into(),
-      );
+      let mut package = Package::open(bytes)?;
+      return Ok(ParsedDocument::Workbook(WorkbookState {
+        workbook: parse_workbook(&mut package)?,
+      }));
     }
     DocumentFormat::Unknown => {
       let detail = detection.detail.unwrap_or_default();
@@ -1197,6 +1204,81 @@ impl Task for OpenDocumentTask {
   }
 }
 
+pub struct SharedCellsTask {
+  inner: Arc<ParsedDocument>,
+  opts: SpreadsheetOptions,
+}
+
+#[napi]
+impl Task for SharedCellsTask {
+  type Output = Vec<SheetCells>;
+  type JsValue = Vec<SheetCells>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    match &*self.inner {
+      ParsedDocument::Workbook(state) => Ok(cells_of(&state.workbook, &self.opts)),
+      ParsedDocument::Pdf(_) => Err(Error::from_reason(
+        "unsupported operation: spreadsheetCellsAsync reads a workbook; this document is a PDF",
+      )),
+    }
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+fn load_workbook(bytes: Vec<u8>) -> Result<Workbook> {
+  match parse_document(bytes)? {
+    ParsedDocument::Workbook(state) => Ok(state.workbook),
+    ParsedDocument::Pdf(_) => Err(Error::from_reason(
+      "unsupported format: this buffer is a PDF, not a workbook",
+    )),
+  }
+}
+
+/// The cells of a workbook buffer's selected sheets.
+#[napi]
+pub fn spreadsheet_cells(
+  buffer: Buffer,
+  opts: Option<SpreadsheetOptions>,
+) -> Result<Vec<SheetCells>> {
+  Ok(cells_of(
+    &load_workbook(buffer.to_vec())?,
+    &opts.unwrap_or_default(),
+  ))
+}
+
+pub struct SpreadsheetCellsTask(Vec<u8>, SpreadsheetOptions);
+
+#[napi]
+impl Task for SpreadsheetCellsTask {
+  type Output = Vec<SheetCells>;
+  type JsValue = Vec<SheetCells>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(cells_of(
+      &load_workbook(std::mem::take(&mut self.0))?,
+      &self.1,
+    ))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+pub fn spreadsheet_cells_async(
+  buffer: Buffer,
+  opts: Option<SpreadsheetOptions>,
+) -> AsyncTask<SpreadsheetCellsTask> {
+  AsyncTask::new(SpreadsheetCellsTask(
+    buffer.to_vec(),
+    opts.unwrap_or_default(),
+  ))
+}
+
 #[napi]
 pub struct PdfDown {
   inner: Arc<ParsedDocument>,
@@ -1222,6 +1304,7 @@ impl PdfDown {
   pub fn format(&self) -> DocumentFormat {
     match &*self.inner {
       ParsedDocument::Pdf(_) => DocumentFormat::Pdf,
+      ParsedDocument::Workbook(_) => DocumentFormat::Xlsx,
     }
   }
 
@@ -1229,9 +1312,39 @@ impl PdfDown {
   fn pdf(&self, operation: &str) -> Result<&PdfState> {
     match &*self.inner {
       ParsedDocument::Pdf(state) => Ok(state),
-      #[allow(unreachable_patterns)]
-      _ => Err(unsupported_operation(operation, "a workbook")),
+      ParsedDocument::Workbook(_) => Err(unsupported_operation(operation, "a workbook")),
     }
+  }
+
+  /// The workbook behind this document, or the unsupported-operation error naming `operation`.
+  fn workbook(&self, operation: &str) -> Result<&Workbook> {
+    match &*self.inner {
+      ParsedDocument::Workbook(state) => Ok(&state.workbook),
+      ParsedDocument::Pdf(_) => Err(Error::from_reason(format!(
+        "unsupported operation: {operation} reads a workbook; this document is a PDF"
+      ))),
+    }
+  }
+
+  /// The cells of a workbook's selected sheets, typed, with their display text and formulas.
+  #[napi]
+  pub fn spreadsheet_cells(&self, opts: Option<SpreadsheetOptions>) -> Result<Vec<SheetCells>> {
+    Ok(cells_of(
+      self.workbook("spreadsheetCells")?,
+      &opts.unwrap_or_default(),
+    ))
+  }
+
+  #[napi]
+  pub fn spreadsheet_cells_async(
+    &self,
+    opts: Option<SpreadsheetOptions>,
+  ) -> Result<AsyncTask<SharedCellsTask>> {
+    self.workbook("spreadsheetCellsAsync")?;
+    Ok(AsyncTask::new(SharedCellsTask {
+      inner: Arc::clone(&self.inner),
+      opts: opts.unwrap_or_default(),
+    }))
   }
 
   #[napi]

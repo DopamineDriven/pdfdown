@@ -1086,4 +1086,137 @@ fn spreadsheet_fixtures(out: &Path) {
   let mut ole = vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
   ole.resize(512, 0);
   std::fs::write(out.join("ole.bin"), ole).expect("ole fixture");
+  write_package(
+    &out.join("form.xlsx"),
+    &form_workbook_parts(),
+    zip::CompressionMethod::Deflated,
+  );
+  write_package(
+    &out.join("date1904.xlsx"),
+    &date1904_workbook_parts(),
+    zip::CompressionMethod::Stored,
+  );
+}
+
+const SHARED_STRINGS_REL: &str =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+const STYLES_REL: &str =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+const WORKSHEET_TYPE: &str =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+const SHARED_STRINGS_TYPE: &str =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml";
+const STYLES_TYPE: &str = "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml";
+const XML_HEAD: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
+
+/// A reimbursement-form look-alike: every edge case the cells and formatting specs assert.
+fn form_workbook_parts() -> Vec<(&'static str, String)> {
+  let shared = [
+    "Maintenance Reimbursement Form",
+    "Rate",
+    "Hours",
+    "Total",
+    "Date",
+    "Invoice",
+    "000123",
+    "Net",
+    "Pct",
+    "hidden value",
+    "Line one&#10;Line two",
+    "secret",
+  ];
+  let mut sst = format!(
+    "{XML_HEAD}<sst xmlns=\"{SML}\" count=\"{n}\" uniqueCount=\"{n}\">\n",
+    n = shared.len()
+  );
+  for text in shared {
+    sst.push_str(&format!("<si><t xml:space=\"preserve\">{text}</t></si>\n"));
+  }
+  sst.push_str("</sst>\n");
+
+  let alignment = "<alignment vertical=\"center\" wrapText=\"1\" indent=\"1\"/>";
+  let styles = format!(
+    "{XML_HEAD}<styleSheet xmlns=\"{SML}\">\n<numFmts count=\"5\">\n<numFmt numFmtId=\"164\" formatCode=\"#,##0.00&quot;/hr&quot;\"/>\n<numFmt numFmtId=\"165\" formatCode=\"0.0\"/>\n<numFmt numFmtId=\"166\" formatCode=\"mm/dd/yy\"/>\n<numFmt numFmtId=\"167\" formatCode=\"$#,##0.00;($#,##0.00)\"/>\n<numFmt numFmtId=\"168\" formatCode=\"0.00%\"/>\n</numFmts>\n<fonts count=\"2\">\n<font><sz val=\"11\"/><name val=\"Calibri\"/></font>\n<font><b/><sz val=\"10\"/><name val=\"Arial\"/></font>\n</fonts>\n<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\"/></cellStyleXfs>\n<cellXfs count=\"7\">\n<xf numFmtId=\"0\" fontId=\"0\"/>\n<xf numFmtId=\"164\" fontId=\"1\" applyNumberFormat=\"1\" applyAlignment=\"1\">{alignment}</xf>\n<xf numFmtId=\"165\" fontId=\"1\">{alignment}</xf>\n<xf numFmtId=\"4\" fontId=\"1\">{alignment}</xf>\n<xf numFmtId=\"14\" fontId=\"1\">{alignment}</xf>\n<xf numFmtId=\"167\" fontId=\"1\">{alignment}</xf>\n<xf numFmtId=\"168\" fontId=\"1\">{alignment}</xf>\n</cellXfs>\n<cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles>\n</styleSheet>\n"
+  );
+
+  let sheet1 = format!(
+    "{XML_HEAD}<worksheet xmlns=\"{SML}\">\n<dimension ref=\"A1:H30\"/>\n<sheetFormatPr defaultRowHeight=\"15\"/>\n<cols><col min=\"1\" max=\"1\" width=\"20\" customWidth=\"1\"/><col min=\"2\" max=\"2\" width=\"12\" customWidth=\"1\"/><col min=\"3\" max=\"3\" width=\"14\" customWidth=\"1\"/></cols>\n<sheetData>\n<row r=\"1\"><c r=\"A1\" s=\"1\" t=\"s\"><v>0</v></c></row>\n<row r=\"3\"><c r=\"B3\" t=\"s\"><v>1</v></c><c r=\"C3\" s=\"1\"><v>142.5</v></c></row>\n<row r=\"4\"><c r=\"B4\" t=\"s\"><v>2</v></c><c r=\"C4\" s=\"2\"><v>3</v></c></row>\n<row r=\"5\"><c r=\"B5\" t=\"s\"><v>3</v></c><c r=\"C5\" s=\"3\"><f>C3*C4</f><v>427.5</v></c></row>\n<row r=\"6\"><c r=\"B6\" t=\"s\"><v>4</v></c><c r=\"C6\" s=\"4\"><v>42247</v></c></row>\n<row r=\"7\"><c r=\"B7\" t=\"s\"><v>5</v></c><c r=\"C7\" t=\"s\"><v>6</v></c></row>\n<row r=\"8\"><c r=\"B8\" t=\"s\"><v>7</v></c><c r=\"C8\" s=\"5\"><v>-5</v></c></row>\n<row r=\"9\"><c r=\"B9\" t=\"s\"><v>8</v></c><c r=\"C9\" s=\"6\"><v>0.075</v></c></row>\n<row r=\"10\" hidden=\"1\"><c r=\"B10\" t=\"s\"><v>9</v></c></row>\n<row r=\"11\" ht=\"30\" customHeight=\"1\"><c r=\"A11\" s=\"1\" t=\"s\"><v>10</v></c></row>\n<row r=\"16\"><c r=\"B16\"><f t=\"shared\" ref=\"B16:B18\" si=\"0\">C3*2</f><v>285</v></c></row>\n<row r=\"17\"><c r=\"B17\" t=\"str\"><f t=\"shared\" si=\"0\"/><v></v></c></row>\n<row r=\"18\"><c r=\"B18\"><f t=\"shared\" si=\"0\"/></c></row>\n<row r=\"20\"><c r=\"D20\" t=\"e\"><v>#DIV/0!</v></c><c r=\"G20\" s=\"1\"/></row>\n<row r=\"21\"><c r=\"E21\" t=\"b\"><v>1</v></c></row>\n<row r=\"22\"><c r=\"C22\" s=\"4\"><v>60</v></c></row>\n<row r=\"30\"><c r=\"H30\" s=\"1\"/></row>\n</sheetData>\n<mergeCells count=\"2\"><mergeCell ref=\"A1:F1\"/><mergeCell ref=\"A11:A12\"/></mergeCells>\n</worksheet>\n"
+  );
+  let sheet2 = format!(
+    "{XML_HEAD}<worksheet xmlns=\"{SML}\">\n<dimension ref=\"A1:A1\"/>\n<sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>11</v></c></row></sheetData>\n</worksheet>\n"
+  );
+  vec![
+    (
+      "[Content_Types].xml",
+      content_types(
+        "xl/workbook.xml",
+        WORKBOOK_MAIN,
+        &[
+          ("xl/worksheets/sheet1.xml", WORKSHEET_TYPE),
+          ("xl/worksheets/sheet2.xml", WORKSHEET_TYPE),
+          ("xl/sharedStrings.xml", SHARED_STRINGS_TYPE),
+          ("xl/styles.xml", STYLES_TYPE),
+        ],
+      ),
+    ),
+    ("_rels/.rels", root_rels("xl/workbook.xml")),
+    (
+      "xl/workbook.xml",
+      format!(
+        "{XML_HEAD}<workbook xmlns=\"{SML}\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\n<sheets><sheet name=\"Form\" sheetId=\"1\" r:id=\"rId1\"/><sheet name=\"Notes\" sheetId=\"2\" state=\"hidden\" r:id=\"rId2\"/></sheets>\n<definedNames><definedName name=\"_xlnm.Print_Area\" localSheetId=\"0\">Form!$A$1:$F$12</definedName></definedNames>\n</workbook>\n"
+      ),
+    ),
+    (
+      "xl/_rels/workbook.xml.rels",
+      format!(
+        "{XML_HEAD}<Relationships xmlns=\"{REL_NS}\">\n<Relationship Id=\"rId1\" Type=\"{WORKSHEET_REL}\" Target=\"worksheets/sheet1.xml\"/>\n<Relationship Id=\"rId2\" Type=\"{WORKSHEET_REL}\" Target=\"worksheets/sheet2.xml\"/>\n<Relationship Id=\"rId3\" Type=\"{SHARED_STRINGS_REL}\" Target=\"sharedStrings.xml\"/>\n<Relationship Id=\"rId4\" Type=\"{STYLES_REL}\" Target=\"styles.xml\"/>\n</Relationships>\n"
+      ),
+    ),
+    ("xl/sharedStrings.xml", sst),
+    ("xl/styles.xml", styles),
+    ("xl/worksheets/sheet1.xml", sheet1),
+    ("xl/worksheets/sheet2.xml", sheet2),
+  ]
+}
+
+/// The 1904 date system: serial 0 under a date format is 1904-01-01.
+fn date1904_workbook_parts() -> Vec<(&'static str, String)> {
+  vec![
+    (
+      "[Content_Types].xml",
+      content_types(
+        "xl/workbook.xml",
+        WORKBOOK_MAIN,
+        &[
+          ("xl/worksheets/sheet1.xml", WORKSHEET_TYPE),
+          ("xl/styles.xml", STYLES_TYPE),
+        ],
+      ),
+    ),
+    ("_rels/.rels", root_rels("xl/workbook.xml")),
+    (
+      "xl/workbook.xml",
+      format!(
+        "{XML_HEAD}<workbook xmlns=\"{SML}\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\n<workbookPr date1904=\"1\"/>\n<sheets><sheet name=\"Dates\" sheetId=\"1\" r:id=\"rId1\"/></sheets>\n</workbook>\n"
+      ),
+    ),
+    (
+      "xl/_rels/workbook.xml.rels",
+      format!(
+        "{XML_HEAD}<Relationships xmlns=\"{REL_NS}\">\n<Relationship Id=\"rId1\" Type=\"{WORKSHEET_REL}\" Target=\"worksheets/sheet1.xml\"/>\n<Relationship Id=\"rId2\" Type=\"{STYLES_REL}\" Target=\"styles.xml\"/>\n</Relationships>\n"
+      ),
+    ),
+    (
+      "xl/styles.xml",
+      format!(
+        "{XML_HEAD}<styleSheet xmlns=\"{SML}\">\n<fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>\n<cellXfs count=\"2\"><xf numFmtId=\"0\" fontId=\"0\"/><xf numFmtId=\"14\" fontId=\"0\"/></cellXfs>\n</styleSheet>\n"
+      ),
+    ),
+    (
+      "xl/worksheets/sheet1.xml",
+      format!(
+        "{XML_HEAD}<worksheet xmlns=\"{SML}\">\n<dimension ref=\"A1:A1\"/>\n<sheetData><row r=\"1\"><c r=\"A1\" s=\"1\"><v>0</v></c></row></sheetData>\n</worksheet>\n"
+      ),
+    ),
+  ]
 }

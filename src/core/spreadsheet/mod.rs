@@ -3,3 +3,4 @@
 //! renders display text from format codes; `project` places cells on a logical page.
 
 pub(crate) mod package;
+pub(crate) mod workbook;

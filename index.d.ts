@@ -116,6 +116,9 @@ export declare class PdfDown {
   static openAsync(buffer: Buffer): Promise<PdfDown>;
   /** The format this document was opened as. */
   get format(): DocumentFormat;
+  /** The cells of a workbook's selected sheets, typed, with their display text and formulas. */
+  spreadsheetCells(opts?: SpreadsheetOptions | undefined | null): Array<SheetCells>;
+  spreadsheetCellsAsync(opts?: SpreadsheetOptions | undefined | null): Promise<Array<SheetCells>>;
   textPerPage(): Array<PageText>;
   imagesPerPage(): Array<PageImage>;
   annotationsPerPage(): Array<PageAnnotation>;
@@ -759,6 +762,151 @@ export declare function renderPagesAsync(
   buffer: Buffer,
   opts?: RenderOptions | undefined | null
 ): Promise<Array<RenderedPage>>;
+
+/**
+ * One cell of a worksheet: a discriminated union on `type` whose typed value is `value`
+ * (none for `Blank`). `text` is the display text, `raw` the stored spelling (the serial for
+ * dates), `format` the code that produced `text`, `formula` the expression stored on this
+ * cell, `sharedFormula` the master cell when this cell follows a shared formula, `cached`
+ * whether a result was stored, `merge` the range this cell anchors, `hidden` whether its row
+ * or column is hidden.
+ */
+export type SheetCell =
+  | {
+      type: "Text";
+      ref: string;
+      row: number;
+      col: number;
+      text: string;
+      raw: string;
+      format?: string;
+      formatSupported: boolean;
+      formula?: string;
+      sharedFormula?: string;
+      cached: boolean;
+      merge?: string;
+      hidden: boolean;
+      value: string;
+    }
+  | {
+      type: "Number";
+      ref: string;
+      row: number;
+      col: number;
+      text: string;
+      raw: string;
+      format?: string;
+      formatSupported: boolean;
+      formula?: string;
+      sharedFormula?: string;
+      cached: boolean;
+      merge?: string;
+      hidden: boolean;
+      value: number;
+    }
+  | {
+      type: "Boolean";
+      ref: string;
+      row: number;
+      col: number;
+      text: string;
+      raw: string;
+      format?: string;
+      formatSupported: boolean;
+      formula?: string;
+      sharedFormula?: string;
+      cached: boolean;
+      merge?: string;
+      hidden: boolean;
+      value: boolean;
+    }
+  | {
+      type: "Error";
+      ref: string;
+      row: number;
+      col: number;
+      text: string;
+      raw: string;
+      format?: string;
+      formatSupported: boolean;
+      formula?: string;
+      sharedFormula?: string;
+      cached: boolean;
+      merge?: string;
+      hidden: boolean;
+      value: string;
+    }
+  | {
+      type: "Date";
+      ref: string;
+      row: number;
+      col: number;
+      text: string;
+      raw: string;
+      format?: string;
+      formatSupported: boolean;
+      formula?: string;
+      sharedFormula?: string;
+      cached: boolean;
+      merge?: string;
+      hidden: boolean;
+      value: string;
+    }
+  | {
+      type: "Blank";
+      ref: string;
+      row: number;
+      col: number;
+      text: string;
+      raw: string;
+      format?: string;
+      formatSupported: boolean;
+      formula?: string;
+      sharedFormula?: string;
+      cached: boolean;
+      merge?: string;
+      hidden: boolean;
+    };
+
+/** One selected worksheet's cells, with the sheet facts a reader needs beside them. */
+export interface SheetCells {
+  sheet: string;
+  /** Position in the workbook, 0-based. */
+  index: number;
+  hidden: boolean;
+  /** The declared `<dimension>`, which a producer may overstate. */
+  dimension?: string;
+  printArea?: string;
+  /** Merged ranges in A1 form. */
+  merges: Array<string>;
+  warnings: Array<string>;
+  cells: Array<SheetCell>;
+}
+
+/** The cells of a workbook buffer's selected sheets. */
+export declare function spreadsheetCells(
+  buffer: Buffer,
+  opts?: SpreadsheetOptions | undefined | null
+): Array<SheetCells>;
+
+export declare function spreadsheetCellsAsync(
+  buffer: Buffer,
+  opts?: SpreadsheetOptions | undefined | null
+): Promise<Array<SheetCells>>;
+
+/** Workbook options shared by `spreadsheetCells` and `layout`. */
+export interface SpreadsheetOptions {
+  /** Sheet names to include, in workbook order; default: every visible sheet. */
+  sheets?: Array<string>;
+  /** Include hidden sheets (default false). */
+  hiddenSheets?: boolean;
+  /**
+   * Cells in hidden rows and columns. For `spreadsheetCells` the default is true: they are listed
+   * with `hidden: true`. For `layout` the default is false: zero extent and omitted; true gives
+   * them their real extents back.
+   */
+  hiddenCells?: boolean;
+}
 
 export interface StringField {
   value: string;

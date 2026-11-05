@@ -866,4 +866,6 @@ module.exports.pdfMetadata = nativeBinding.pdfMetadata
 module.exports.pdfMetadataAsync = nativeBinding.pdfMetadataAsync
 module.exports.RenderMode = nativeBinding.RenderMode
 module.exports.renderPagesAsync = nativeBinding.renderPagesAsync
+module.exports.spreadsheetCells = nativeBinding.spreadsheetCells
+module.exports.spreadsheetCellsAsync = nativeBinding.spreadsheetCellsAsync
 module.exports.TextSource = nativeBinding.TextSource
