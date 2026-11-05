@@ -32,7 +32,8 @@ enum DateToken {
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
   Literal(String),
-  Digit,
+  /// `0`, `#` or `?`.
+  Digit(char),
   Decimal,
   Comma,
   Percent,
@@ -67,6 +68,8 @@ pub(crate) struct NumberFormat {
   sections: Vec<Section>,
 }
 
+/// Excel refuses format codes longer than this; so do we, before any work on them.
+const MAX_CODE_CHARS: usize = 255;
 /// Excel serial of 1970-01-01 in the 1900 system.
 const SERIAL_AT_UNIX_EPOCH_1900: i64 = 25_569;
 /// Days from 1904-01-01 to 1970-01-01.
@@ -180,7 +183,7 @@ fn parse_section(text: &str) -> Option<Section> {
         i = end + 1;
       }
       '0' | '#' | '?' => {
-        tokens.push(Token::Digit);
+        tokens.push(Token::Digit(c));
         i += 1;
       }
       '.' => {
@@ -215,11 +218,15 @@ fn parse_section(text: &str) -> Option<Section> {
         i += 7;
       }
       'A' | 'a' => {
-        let rest: String = chars[i..].iter().take(5).collect();
-        if rest.eq_ignore_ascii_case("am/pm") {
+        let rest: Vec<char> = chars[i..]
+          .iter()
+          .take(5)
+          .map(|c| c.to_ascii_lowercase())
+          .collect();
+        if rest == ['a', 'm', '/', 'p', 'm'] {
           tokens.push(Token::Date(DateToken::AmPm));
           i += 5;
-        } else if rest.len() >= 3 && rest[..3].eq_ignore_ascii_case("a/p") {
+        } else if rest.len() >= 3 && rest[..3] == ['a', '/', 'p'] {
           tokens.push(Token::Date(DateToken::AmPm));
           i += 3;
         } else {
@@ -293,7 +300,7 @@ fn parse_section(text: &str) -> Option<Section> {
     }
   }
 
-  let has_number = tokens.iter().any(|t| matches!(t, Token::Digit));
+  let has_number = tokens.iter().any(|t| matches!(t, Token::Digit(_)));
   let is_date = tokens.iter().any(|t| matches!(t, Token::Date(_)));
   let has_time = tokens.iter().any(|t| {
     matches!(
@@ -312,13 +319,23 @@ fn parse_section(text: &str) -> Option<Section> {
   if is_date && has_number {
     return None;
   }
+  if is_date {
+    for t in tokens.iter_mut() {
+      match t {
+        Token::Decimal => *t = Token::Literal(".".to_string()),
+        Token::Comma => *t = Token::Literal(",".to_string()),
+        _ => {}
+      }
+    }
+  }
   // A bare slash among digit placeholders is a fraction, which this release does not render.
   if has_number && tokens.iter().any(|t| matches!(t, Token::Slash)) {
     return None;
   }
   let is_text = tokens.iter().any(|t| matches!(t, Token::Text)) && !has_number && !is_date;
 
-  // Number shape: digits before and after the point, grouping commas, scaling commas.
+  // Number shape: digits before and after the point, grouping commas, scaling commas. Every
+  // count comes from the tokens, so digits inside tags, quotes and padding markers do not count.
   let decimal_at = tokens.iter().position(|t| matches!(t, Token::Decimal));
   if tokens
     .iter()
@@ -330,15 +347,20 @@ fn parse_section(text: &str) -> Option<Section> {
   }
   let int_tokens = &tokens[..decimal_at.unwrap_or(tokens.len())];
   let frac_tokens = decimal_at.map(|at| &tokens[at + 1..]).unwrap_or(&[]);
-  let last_int_digit = int_tokens.iter().rposition(|t| matches!(t, Token::Digit));
-  let int_min = chars_in(text, int_tokens.len(), '0', true);
+  let last_int_digit = int_tokens
+    .iter()
+    .rposition(|t| matches!(t, Token::Digit(_)));
+  let int_min = int_tokens
+    .iter()
+    .filter(|t| matches!(t, Token::Digit('0')))
+    .count();
   let grouping = last_int_digit.is_some_and(|last| {
     int_tokens[..last].iter().enumerate().any(|(i, t)| {
-      matches!(t, Token::Comma) && int_tokens[..i].iter().any(|x| matches!(x, Token::Digit))
+      matches!(t, Token::Comma) && int_tokens[..i].iter().any(|x| matches!(x, Token::Digit(_)))
     })
   });
-  let scale = match last_int_digit {
-    Some(last) => int_tokens[last + 1..]
+  let scale = match tokens.iter().rposition(|t| matches!(t, Token::Digit(_))) {
+    Some(last) => tokens[last + 1..]
       .iter()
       .take_while(|t| matches!(t, Token::Comma))
       .count() as u32,
@@ -346,9 +368,12 @@ fn parse_section(text: &str) -> Option<Section> {
   };
   let decimals = frac_tokens
     .iter()
-    .filter(|t| matches!(t, Token::Digit))
+    .filter(|t| matches!(t, Token::Digit(_)))
     .count();
-  let optional_decimals = chars_in(text, frac_tokens.len(), '#', false);
+  let optional_decimals = frac_tokens
+    .iter()
+    .filter(|t| matches!(t, Token::Digit('#' | '?')))
+    .count();
   let percent = tokens.iter().any(|t| matches!(t, Token::Percent));
   Some(Section {
     tokens,
@@ -365,32 +390,12 @@ fn parse_section(text: &str) -> Option<Section> {
   })
 }
 
-/// Count a placeholder character in the integer (`before_point`) or fraction part of a code,
-/// outside quotes. The token slice lengths are only used to know which part exists.
-fn chars_in(text: &str, _tokens: usize, which: char, before_point: bool) -> usize {
-  let mut quoted = false;
-  let mut seen_point = false;
-  let mut count = 0;
-  let mut escape = false;
-  for c in text.chars() {
-    if escape {
-      escape = false;
-      continue;
-    }
-    match c {
-      '\\' => escape = true,
-      '"' => quoted = !quoted,
-      '.' if !quoted => seen_point = true,
-      c if !quoted && c == which && seen_point != before_point => count += 1,
-      _ => {}
-    }
-  }
-  count
-}
-
 impl NumberFormat {
   /// Parse a format code; `None` when any section uses something this release does not render.
   pub(crate) fn parse(code: &str) -> Option<NumberFormat> {
+    if code.chars().count() > MAX_CODE_CHARS {
+      return None;
+    }
     let sections = split_sections(code);
     if sections.is_empty() || sections.len() > 4 {
       return None;
@@ -453,8 +458,11 @@ fn render_number(section: &Section, magnitude: f64) -> String {
     if int_digits == "0" && section.int_min == 0 {
       int_digits.clear();
     }
-    while int_digits.len() < section.int_min {
-      int_digits.insert(0, '0');
+    if int_digits.len() < section.int_min {
+      int_digits = format!(
+        "{}{int_digits}",
+        "0".repeat(section.int_min - int_digits.len())
+      );
     }
     let grouped = if section.grouping {
       group_thousands(&int_digits)
@@ -484,7 +492,7 @@ fn render_number(section: &Section, magnitude: f64) -> String {
       Token::Slash => out.push('/'),
       Token::General => out.push_str(&render_general(magnitude)),
       Token::Percent => out.push('%'),
-      Token::Digit | Token::Decimal | Token::Comma => {
+      Token::Digit(_) | Token::Decimal | Token::Comma => {
         if !number_emitted {
           out.push_str(&number);
           number_emitted = true;
@@ -563,10 +571,16 @@ pub(crate) fn render_general(value: f64) -> String {
   if !value.is_finite() {
     return value.to_string();
   }
-  if value.fract() == 0.0 && value.abs() < 1e15 {
+  if value == 0.0 {
+    return "0".to_string();
+  }
+  let exponent = decimal_exponent(value.abs());
+  if !(-10..15).contains(&exponent) {
+    return render_scientific(value, exponent);
+  }
+  if value.fract() == 0.0 {
     return format!("{}", value as i64);
   }
-  let exponent = value.abs().log10().floor() as i32;
   let decimals = (10 - exponent).clamp(0, 20) as usize;
   let text = format!("{:.*}", decimals, value);
   let trimmed = text.trim_end_matches('0').trim_end_matches('.');
@@ -575,6 +589,33 @@ pub(crate) fn render_general(value: f64) -> String {
   } else {
     trimmed.to_string()
   }
+}
+
+/// The power of ten at or below `magnitude`, corrected for the rounding `log10` can introduce
+/// just below a power of ten.
+fn decimal_exponent(magnitude: f64) -> i32 {
+  let mut exponent = magnitude.log10().floor() as i32;
+  if 10f64.powi(exponent) > magnitude {
+    exponent -= 1;
+  } else if 10f64.powi(exponent + 1) <= magnitude {
+    exponent += 1;
+  }
+  exponent
+}
+
+/// `1.23457E+20`: a mantissa of up to six significant digits and a signed two-digit exponent.
+fn render_scientific(value: f64, exponent: i32) -> String {
+  let mut exponent = exponent;
+  let mut mantissa = value / 10f64.powi(exponent);
+  let rounded = (mantissa * 1e5).round() / 1e5;
+  if rounded.abs() >= 10.0 {
+    exponent += 1;
+    mantissa /= 10.0;
+  }
+  let text = format!("{:.5}", mantissa);
+  let mantissa = text.trim_end_matches('0').trim_end_matches('.');
+  let sign = if exponent < 0 { '-' } else { '+' };
+  format!("{mantissa}E{sign}{:02}", exponent.abs())
 }
 
 /// Days since 1970-01-01 for a serial, or `None` where the serial is not a date.
@@ -721,11 +762,67 @@ mod tests {
   }
 
   #[test]
+  fn review_findings_hostile_and_unusual_codes() {
+    let r = |code: &str, v: f64| NumberFormat::parse(code).unwrap().render(v, false).unwrap();
+    // A bare `a` followed by a multi-byte character is a literal, never a byte-sliced panic.
+    assert_eq!(r("0 a€", 5.0), "5 a€");
+    assert_eq!(r("0 aaé", 5.0), "5 aaé");
+    assert_eq!(r("0 A中", 5.0), "5 A中");
+    // Digits inside colour tags and after padding markers are not placeholders.
+    assert_eq!(r("[Color10]0.00", 1.5), "1.50");
+    assert_eq!(r("[Color50]#,##0", 1234.0), "1,234");
+    assert_eq!(r("_00.00", 1.5), "1.50");
+    assert_eq!(r("*00.00", 1.5), "1.50");
+    // Scaling commas after the decimals divide by a thousand each.
+    assert_eq!(r("0.0,,", 1234567.0), "1.2");
+    assert_eq!(r("#,##0.0,", 1234567.0), "1,234.6");
+    assert_eq!(r("#,##0,,\"M\"", 2500000.0), "3M");
+    // Points and commas inside a date code are separators.
+    assert_eq!(r("dd.mm.yyyy", 42247.0), "31.08.2015");
+    assert_eq!(r("mmmm d, yyyy", 42247.0), "August 31, 2015");
+    assert_eq!(r("yyyy.mm.dd hh:mm", 45161.5), "2023.08.23 12:00");
+    assert!(NumberFormat::parse("dd.mm.yyyy").unwrap().is_date());
+    // Excel caps a format code at 255 characters; longer codes are unsupported, not slow.
+    assert!(NumberFormat::parse(&"0".repeat(255)).is_some());
+    assert!(NumberFormat::parse(&"0".repeat(256)).is_none());
+    // Random codes over the whole token alphabet, multi-byte characters included, never panic.
+    let alphabet: Vec<char> = "0#?.,%;\"\\[]_*@/:-+ ()$€中😀aAmMdDhHsSyYeEgGbBpP"
+      .chars()
+      .collect();
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut next = || {
+      state ^= state << 13;
+      state ^= state >> 7;
+      state ^= state << 17;
+      state
+    };
+    for _ in 0..4000 {
+      let len = (next() % 24) as usize;
+      let code: String = (0..len)
+        .map(|_| alphabet[(next() % alphabet.len() as u64) as usize])
+        .collect();
+      if let Some(parsed) = NumberFormat::parse(&code) {
+        for v in [0.0, -1.5, 0.075, 42247.0, 1e300, -1e-300] {
+          let _ = parsed.render(v, false);
+          let _ = parsed.render(v, true);
+        }
+      }
+    }
+  }
+
+  #[test]
   fn general_and_serials() {
     assert_eq!(render_general(3.0), "3");
     assert_eq!(render_general(1234.567), "1234.567");
     assert_eq!(render_general(0.1 + 0.2), "0.3");
     assert_eq!(render_general(-0.0), "0");
+    assert_eq!(render_general(999_999_999_999_999.0), "999999999999999");
+    assert_eq!(render_general(1e15), "1E+15");
+    assert_eq!(render_general(123_456_789_012_345_680_000.0), "1.23457E+20");
+    assert_eq!(render_general(-2.5e20), "-2.5E+20");
+    assert_eq!(render_general(1e-10), "0.0000000001");
+    assert_eq!(render_general(1.5e-12), "1.5E-12");
+    assert_eq!(render_general(9.9999999e-12), "1E-11");
     assert_eq!(
       iso_date(42247.0, false, false).as_deref(),
       Some("2015-08-31")
