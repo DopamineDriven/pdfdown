@@ -3,7 +3,14 @@ import { join } from "path";
 
 import test from "ava";
 
-import { PdfDown, detectFormat, layoutFromXlsx, layoutPerPage, spreadsheetCells, spreadsheetCellsAsync } from "../index";
+import {
+  PdfDown,
+  detectFormat,
+  layoutFromXlsx,
+  layoutPerPage,
+  spreadsheetCells,
+  spreadsheetCellsAsync
+} from "../index";
 import type { SheetCell } from "../index";
 
 const FX = join(import.meta.dirname, "fixtures");
@@ -19,13 +26,18 @@ test("detectFormat names the format and the reason an input is unsupported", (t)
   t.is(detectFormat(Buffer.from("hello")).detail, "not a PDF or a zip package");
 });
 
-test("openAsync resolves to a PdfDown whose PDF methods work, and two instances do not interfere", async (t) => {
-  const [a, b] = await Promise.all([PdfDown.openAsync(pdf), PdfDown.openAsync(pdf)]);
-  t.true(a instanceof PdfDown);
+test("openAsync resolves to a PdfDown whose methods work; a PDF and a workbook opened concurrently keep their own state", async (t) => {
+  const [a, b] = await Promise.all([PdfDown.openAsync(pdf), PdfDown.openAsync(form)]);
+  t.true(a instanceof PdfDown && b instanceof PdfDown);
   t.is(a.format, "Pdf");
-  t.is(a.metadata().pageCount, b.metadata().pageCount);
+  t.is(b.format, "Xlsx");
+  t.is(a.metadata().pageCount, 2);
   t.deepEqual(await a.layoutAsync(), layoutPerPage(pdf));
-  t.is((await b.textPerPageAsync()).length, 2);
+  t.is((await a.textPerPageAsync()).length, 2);
+  t.is(b.spreadsheetCells()[0].sheet, "Form");
+  t.deepEqual(await b.layoutAsync(), layoutFromXlsx(form));
+  t.throws(() => b.metadata(), { message: /unsupported operation: metadata reads a PDF; this document is a workbook/ });
+  t.throws(() => a.spreadsheetCells(), { message: /unsupported operation: spreadsheetCells reads a workbook/ });
 });
 
 test("a PDF-only method on a workbook is an unsupported operation, and opening an unsupported package fails with its detail", async (t) => {
@@ -34,6 +46,15 @@ test("a PDF-only method on a workbook is an unsupported operation, and opening a
   });
   t.throws(() => new PdfDown(read("ole.bin")), { message: /unsupported format: OLE container/ });
   t.is((await PdfDown.openAsync(xlsx)).format, "Xlsx");
+});
+
+test("a zip past the input cap is a limit error, not an unsupported format", (t) => {
+  const big = Buffer.alloc(65 * 1024 * 1024);
+  big.write("PK\u0003\u0004", 0, "latin1");
+  t.throws(() => new PdfDown(big), { message: /^limit exceeded: the package is \d+ bytes/ });
+  t.throws(() => spreadsheetCells(big), { message: /^limit exceeded: / });
+  t.like(detectFormat(big), { format: "Unknown" });
+  t.regex(detectFormat(big).detail ?? "", /limit/);
 });
 
 // ── Cells ────────────────────────────────────────────────────────────────────

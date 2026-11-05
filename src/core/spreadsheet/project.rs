@@ -230,41 +230,60 @@ struct Placement<'a> {
   indent: f64,
 }
 
-/// The words of one cell, placed; `true` when wrapping broke a fragment.
+/// What placing a cell had to do beyond putting its text down.
+#[derive(Debug, Default, Clone, Copy)]
+struct Placed {
+  /// Wrapping broke a fragment at the estimated width.
+  wrapped: bool,
+  /// Fragments below the cell's bottom edge were dropped, as Excel clips them.
+  clipped: bool,
+}
+
+/// The words of one cell, placed in its rectangle.
 fn place_cell(
   p: &Placement<'_>,
   frame: &PageFrame,
   cell_index: usize,
   out: &mut Vec<Word>,
-) -> bool {
+) -> Placed {
   let size = if p.font.size > 0.0 { p.font.size } else { 11.0 };
   let cw = CHAR_EM * size;
   let fh = LINE_EM * size;
   let (x0, y0, x1, y1) = p.rect;
   let avail = (x1 - x0 - p.indent).max(cw);
-  let mut wrapped = false;
+  let mut placed = Placed::default();
   let mut fragments: Vec<String> = Vec::new();
   for part in p.cell.text.split('\n') {
     let part = part.trim_end_matches('\r');
     if p.wrap {
       let lines = wrap(part, ((avail / cw).floor() as usize).max(1));
-      wrapped |= lines.len() > 1;
+      placed.wrapped |= lines.len() > 1;
       fragments.extend(lines);
     } else {
       fragments.push(part.to_string());
     }
   }
   let block = fh * fragments.len() as f64;
-  let top = match p.vertical {
-    Vertical::Top => y1,
-    Vertical::Center => y1 - ((y1 - y0) - block) / 2.0,
-    Vertical::Bottom => y0 + block,
+  // Text taller than its cell starts at the top and is clipped at the bottom, as Excel shows it;
+  // a fragment crossing the bottom edge would otherwise cluster with the row below.
+  let top = if block > (y1 - y0) + 1e-9 {
+    y1
+  } else {
+    match p.vertical {
+      Vertical::Top => y1,
+      Vertical::Center => y1 - ((y1 - y0) - block) / 2.0,
+      Vertical::Bottom => y0 + block,
+    }
   };
   let general_right = matches!(p.cell.value, CellValue::Number(_) | CellValue::Date(_));
   let general_center = matches!(p.cell.value, CellValue::Boolean(_) | CellValue::Error(_));
   for (i, fragment) in fragments.iter().enumerate() {
     let fy1 = top - fh * i as f64;
     let fy0 = fy1 - fh;
+    if fy0 < y0 - 1e-6 {
+      placed.clipped = true;
+      break;
+    }
     let fw = fragment.chars().count() as f64 * cw;
     let fx0 = match p.horizontal {
       Horizontal::Left => x0 + p.indent,
@@ -297,7 +316,7 @@ fn place_cell(
       });
     }
   }
-  wrapped
+  placed
 }
 
 fn project_sheet(sheet: &Sheet, styles: &Styles, page: u32, hidden_cells: bool) -> PageLayout {
@@ -317,6 +336,7 @@ fn project_sheet(sheet: &Sheet, styles: &Styles, page: u32, hidden_cells: bool) 
   let mut off_page = 0usize;
   let mut omitted = 0usize;
   let mut wrapped = 0usize;
+  let mut clipped = 0usize;
   for (&(row, col), cell) in &sheet.cells {
     if !frame.contains(row, col) {
       off_page += 1;
@@ -344,9 +364,9 @@ fn project_sheet(sheet: &Sheet, styles: &Styles, page: u32, hidden_cells: bool) 
       indent: xf.map(|x| x.indent as f64 * font.size).unwrap_or(0.0),
     };
     refs.push(cell_ref(row, col));
-    if place_cell(&placement, &frame, refs.len() - 1, &mut words) {
-      wrapped += 1;
-    }
+    let placed = place_cell(&placement, &frame, refs.len() - 1, &mut words);
+    wrapped += usize::from(placed.wrapped);
+    clipped += usize::from(placed.clipped);
   }
 
   if let Some(area) = sheet.print_area {
@@ -371,6 +391,11 @@ fn project_sheet(sheet: &Sheet, styles: &Styles, page: u32, hidden_cells: bool) 
   }
   if wrapped > 0 {
     warnings.push(format!("{wrapped} wrapped cell(s) use estimated widths"));
+  }
+  if clipped > 0 {
+    warnings.push(format!(
+      "{clipped} cell(s) hold text taller than their row; the overflow is clipped"
+    ));
   }
   if sheet.drawings > 0 {
     warnings.push(format!("{} drawing(s) are not projected", sheet.drawings));
@@ -416,7 +441,64 @@ fn finish(
 
 #[cfg(test)]
 mod tests {
+  use super::super::workbook::{WorkbookContext, parse_sheet};
   use super::*;
+
+  fn page_of(xml: &[u8]) -> PageLayout {
+    let styles = Styles::default();
+    let sheet = parse_sheet(
+      xml,
+      "S",
+      0,
+      false,
+      WorkbookContext {
+        shared: &[],
+        styles: &styles,
+        date1904: false,
+      },
+      None,
+    )
+    .unwrap();
+    project_sheet(&sheet, &styles, 1, false)
+  }
+
+  #[test]
+  fn text_taller_than_its_row_is_clipped_to_the_cell_and_never_joins_the_row_above() {
+    let xml = br##"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Above</t></is></c><c r="B1" t="inlineStr"><is><t>Right</t></is></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Line one&#10;Line two</t></is></c><c r="B2" t="inlineStr"><is><t>Beside</t></is></c></row><row r="3"><c r="A3" t="inlineStr"><is><t>Below</t></is></c></row></sheetData></worksheet>"##;
+    let page = page_of(xml);
+    assert_eq!(
+      page
+        .lines
+        .iter()
+        .map(|l| l.text.as_str())
+        .collect::<Vec<_>>(),
+      ["Above Right", "Line one Beside", "Below"]
+    );
+    assert!(
+      page
+        .words
+        .iter()
+        .all(|w| w.y0 >= 0.0 && w.y1 <= page.height)
+    );
+    assert!(
+      page.warnings.iter().any(|w| w.contains("clipped")),
+      "{:?}",
+      page.warnings
+    );
+  }
+
+  #[test]
+  fn a_reference_past_the_grid_does_not_grow_the_page() {
+    let xml = br##"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>1</v></c><c r="A999999999"><v>2</v></c></row></sheetData></worksheet>"##;
+    let page = page_of(xml);
+    assert_eq!((page.width, page.height), (48.0, 15.0));
+    assert_eq!(page.words.len(), 1);
+    assert!(
+      page.warnings.iter().any(|w| w.contains("malformed")),
+      "{:?}",
+      page.warnings
+    );
+  }
 
   #[test]
   fn column_widths_follow_the_spreadsheetml_pixel_formula() {

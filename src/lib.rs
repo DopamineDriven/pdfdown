@@ -56,7 +56,9 @@ use crate::core::document::extract_all_with_ocr;
 #[cfg(feature = "ocr")]
 use crate::core::ocr::{extract_layout_with_ocr, extract_text_with_ocr, normalize_max_threads};
 
-use crate::core::spreadsheet::package::{NOT_PDF_OR_ZIP, Package, SpreadsheetError, detect};
+use crate::core::spreadsheet::package::{
+  NOT_PDF_OR_ZIP, Package, PackageKind, SpreadsheetError, ZIP_MAGIC, detect, has_pdf_header,
+};
 use crate::core::spreadsheet::project::project;
 use crate::core::spreadsheet::workbook::{Workbook, cells_of, parse_workbook};
 use crate::types::{DocumentFormat, FormatDetection, SheetCells, SpreadsheetOptions};
@@ -1164,23 +1166,32 @@ fn unsupported_operation(operation: &str, document: &str) -> Error {
   ))
 }
 
-/// Detect the format, then parse. A buffer detection cannot place still goes to lopdf, which
-/// accepts a PDF with junk before its header and reports its own error otherwise.
+/// Detect the format, then parse. A PDF header goes to lopdf; a zip is opened once as a package,
+/// so a limit hit while sizing it is reported as `limit exceeded`, a non-workbook package as
+/// `unsupported format`, and a workbook is parsed from that same package. A buffer detection
+/// cannot place still goes to lopdf, which accepts a PDF with junk before its header and reports
+/// its own error otherwise.
 fn parse_document(bytes: Vec<u8>) -> Result<ParsedDocument> {
-  let detection = detect(&bytes);
-  match detection.format {
-    DocumentFormat::Pdf => {}
-    DocumentFormat::Xlsx => {
+  if !has_pdf_header(&bytes) {
+    if bytes.starts_with(ZIP_MAGIC) {
       let mut package = Package::open(bytes)?;
-      return Ok(ParsedDocument::Workbook(WorkbookState {
-        workbook: parse_workbook(&mut package)?,
-      }));
+      let kind = match package.kind() {
+        Ok(kind) => kind,
+        Err(limit @ SpreadsheetError::LimitExceeded(_)) => return Err(limit.into()),
+        Err(_) => PackageKind::Other,
+      };
+      return match kind {
+        PackageKind::Workbook => Ok(ParsedDocument::Workbook(WorkbookState {
+          workbook: parse_workbook(&mut package)?,
+        })),
+        other => Err(SpreadsheetError::UnsupportedFormat(other.detail().to_string()).into()),
+      };
     }
-    DocumentFormat::Unknown => {
-      let detail = detection.detail.unwrap_or_default();
-      if detail != NOT_PDF_OR_ZIP {
-        return Err(SpreadsheetError::UnsupportedFormat(detail).into());
-      }
+    let detection = detect(&bytes);
+    if let Some(detail) = detection.detail
+      && detail != NOT_PDF_OR_ZIP
+    {
+      return Err(SpreadsheetError::UnsupportedFormat(detail).into());
     }
   }
   let doc = load_doc(&bytes)?;

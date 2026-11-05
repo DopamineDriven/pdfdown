@@ -306,21 +306,28 @@ impl Package {
 
 /// `Pdf` by header, `Xlsx` by a workbook main part behind the package relationships, else
 /// `Unknown` with what the input was instead.
+/// A `%PDF-` header within the first KiB, where lopdf also looks for it.
+pub(crate) fn has_pdf_header(bytes: &[u8]) -> bool {
+  bytes[..bytes.len().min(1024)]
+    .windows(5)
+    .any(|w| w == b"%PDF-")
+}
+
+/// The zip local-file-header signature.
+pub(crate) const ZIP_MAGIC: &[u8; 4] = b"PK\x03\x04";
+
 pub(crate) fn detect(bytes: &[u8]) -> FormatDetection {
   let unknown = |detail: String| FormatDetection {
     format: DocumentFormat::Unknown,
     detail: Some(detail),
   };
-  if bytes[..bytes.len().min(1024)]
-    .windows(5)
-    .any(|w| w == b"%PDF-")
-  {
+  if has_pdf_header(bytes) {
     return FormatDetection {
       format: DocumentFormat::Pdf,
       detail: None,
     };
   }
-  if bytes.starts_with(b"PK\x03\x04") {
+  if bytes.starts_with(ZIP_MAGIC) {
     return match Package::open(bytes.to_vec()).and_then(|mut p| p.kind()) {
       Ok(PackageKind::Workbook) => FormatDetection {
         format: DocumentFormat::Xlsx,
