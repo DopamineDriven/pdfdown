@@ -141,3 +141,46 @@ test("profile of the public invoice fixtures: deterministic counts, every entry 
     "file is relative to the root"
   );
 });
+
+test("profile of the public workbook fixtures: every .xlsx is a row led by its id; a Strict OOXML workbook is a failure, not a crash", (t) => {
+  const files = discoverCorpus(join(FIXTURES, "spreadsheet"));
+  t.deepEqual(
+    files.map((f) => f.id),
+    ["date1904", "form", "minimal", "strict"],
+    ".xlsm, .docx and .bin are not corpus files"
+  );
+  const profile = profileCorpus(files, FIXTURES);
+  const { headline } = profile.tables;
+  t.is(headline.pdfs, 0);
+  t.is(headline.workbooks, 4);
+  t.is(headline.workbooksParsed, 3);
+  t.is(headline.parseFailures, 0, "PDF failures only");
+  t.deepEqual(
+    profile.workbooks.map((w) => w.id),
+    ["date1904", "form", "minimal"]
+  );
+  t.deepEqual(
+    profile.failures.map((f) => [f.id, f.kind]),
+    [["strict", "xlsx"]]
+  );
+  t.regex(profile.failures[0]?.error ?? "", /Strict OOXML/);
+  const form = profile.workbooks.find((w) => w.id === "form");
+  t.like(form, {
+    file: "spreadsheet/form.xlsx",
+    sheets: 2,
+    hiddenSheets: 1,
+    cells: 24,
+    merges: 2,
+    formulas: 2,
+    unsupportedFormats: 0,
+    pages: 1,
+    cellTypes: { Text: 13, Number: 7, Boolean: 1, Error: 1, Date: 1, Blank: 1 }
+  });
+  t.is(Object.keys(form?.formats ?? {}).length, 6, "six distinct codes on the numeric cells");
+  t.is(form?.formats["m/d/yyyy"], 2, "the date column and the serial-60 cell share built-in 14");
+  t.true((form?.layoutMs ?? -1) >= 0);
+  t.true(
+    profile.workbooks.every((w) => !w.file.startsWith("/")),
+    "file is relative to the root"
+  );
+});

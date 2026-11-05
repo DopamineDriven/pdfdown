@@ -107,15 +107,31 @@ export declare const __napiBindingTarget: 'wasm32-wasi'
 
 export declare class PdfDown {
   constructor(buffer: Buffer)
+  /** Open a PDF or a workbook off the JavaScript thread; resolves to a `PdfDown`. */
+  static openAsync(buffer: Buffer): Promise<PdfDown>
+  /** The format this document was opened as. */
+  get format(): DocumentFormat
+  /** The cells of a workbook's selected sheets, typed, with their display text and formulas. */
+  spreadsheetCells(opts?: SpreadsheetOptions | undefined | null): Array<SheetCells>
+  spreadsheetCellsAsync(opts?: SpreadsheetOptions | undefined | null): Promise<Array<SheetCells>>
   textPerPage(): Array<PageText>
   imagesPerPage(): Array<PageImage>
   annotationsPerPage(): Array<PageAnnotation>
   metadata(): PdfMeta
-  /** Positioned words and lines per page from the content stream (native text only). */
-  layout(): Array<PageLayout>
-  layoutAsync(): Promise<Array<PageLayout>>
+  /**
+   * Positioned words and lines per page: a PDF's content stream (native text only), or one
+   * logical page per selected sheet of a workbook, where `opts` picks the sheets and whether
+   * hidden rows and columns keep their extents. A PDF ignores `opts`.
+   */
+  layout(opts?: SpreadsheetOptions | undefined | null): Array<PageLayout>
+  layoutAsync(opts?: SpreadsheetOptions | undefined | null): Promise<Array<PageLayout>>
   attachments(): Array<Attachment>
   attachmentsAsync(): Promise<Array<Attachment>>
+  /**
+   * Structured invoice data. A PDF reads its embedded Factur-X / ZUGFeRD / XRechnung / UBL
+   * XML; a workbook returns `source: "None"` with a warning until the layout-based engine
+   * reads spreadsheet pages.
+   */
   invoice(opts?: InvoiceOptions | undefined | null): InvoiceResult
   invoiceAsync(opts?: InvoiceOptions | undefined | null): Promise<InvoiceResult>
   textPerPageAsync(): Promise<Array<PageText>>
@@ -208,6 +224,12 @@ export interface DateField {
 
 export type DateOrder = 'Auto' | 'MDY' | 'DMY' | 'YMD'
 
+/** `Pdf`, `Xlsx`, or `Unknown` with what the buffer was instead. */
+export declare function detectFormat(buffer: Buffer): FormatDetection
+
+/** What `detectFormat` and `PdfDown` recognise. */
+export type DocumentFormat = 'Pdf' | 'Xlsx' | 'Unknown'
+
 export type EInvoiceStandard = 'FacturX' | 'ZUGFeRD' | 'XRechnung' | 'UBL' | 'Unknown'
 
 export interface EmbeddedInvoiceXml {
@@ -256,6 +278,12 @@ export interface FieldSpan {
   y0: number
   x1: number
   y1: number
+}
+
+/** The outcome of `detectFormat`: the format, and for `Unknown` what the input was instead. */
+export interface FormatDetection {
+  format: DocumentFormat
+  detail?: string
 }
 
 /**
@@ -375,6 +403,14 @@ export interface InvoiceResult {
 export type InvoiceSource = 'EmbeddedXml' | 'Native' | 'Ocr' | 'Rendered' | 'Mixed' | 'None'
 
 /**
+ * The logical pages of a workbook buffer's selected sheets, as `PageLayout` with
+ * `source: "Spreadsheet"`.
+ */
+export declare function layoutFromXlsx(buffer: Buffer, opts?: SpreadsheetOptions | undefined | null): Array<PageLayout>
+
+export declare function layoutFromXlsxAsync(buffer: Buffer, opts?: SpreadsheetOptions | undefined | null): Promise<Array<PageLayout>>
+
+/**
  * Positioned words and lines per page from the content stream (native text only).
  * Coordinates are PDF user space in points, y up.
  */
@@ -480,6 +516,8 @@ export interface PageLayout {
    * whose native words (if any) were kept alongside the OCR words.
    */
   source: TextSource
+  /** Spreadsheet pages only: the sheet this logical page projects. */
+  sheet?: string
   words: Array<TextWord>
   lines: Array<TextLine>
   images: Array<PlacedImage>
@@ -572,6 +610,56 @@ export interface RenderOptions {
 
 export declare function renderPagesAsync(buffer: Buffer, opts?: RenderOptions | undefined | null): Promise<Array<RenderedPage>>
 
+/**
+ * One cell of a worksheet: a discriminated union on `type` whose typed value is `value`
+ * (none for `Blank`). `text` is the display text, `raw` the stored spelling (the serial for
+ * dates), `format` the code that produced `text`, `formula` the expression stored on this
+ * cell, `sharedFormula` the master cell when this cell follows a shared formula, `cached`
+ * whether a result was stored, `merge` the range this cell anchors, `hidden` whether its row
+ * or column is hidden.
+ */
+export type SheetCell =
+  | { type: 'Text'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; value: string }
+  | { type: 'Number'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; value: number }
+  | { type: 'Boolean'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; value: boolean }
+  | { type: 'Error'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; value: string }
+  | { type: 'Date'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; value: string }
+  | { type: 'Blank'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean }
+
+/** One selected worksheet's cells, with the sheet facts a reader needs beside them. */
+export interface SheetCells {
+  sheet: string
+  /** Position in the workbook, 0-based. */
+  index: number
+  hidden: boolean
+  /** The declared `<dimension>`, which a producer may overstate. */
+  dimension?: string
+  printArea?: string
+  /** Merged ranges in A1 form. */
+  merges: Array<string>
+  warnings: Array<string>
+  cells: Array<SheetCell>
+}
+
+/** The cells of a workbook buffer's selected sheets. */
+export declare function spreadsheetCells(buffer: Buffer, opts?: SpreadsheetOptions | undefined | null): Array<SheetCells>
+
+export declare function spreadsheetCellsAsync(buffer: Buffer, opts?: SpreadsheetOptions | undefined | null): Promise<Array<SheetCells>>
+
+/** Workbook options shared by `spreadsheetCells` and `layout`. */
+export interface SpreadsheetOptions {
+  /** Sheet names to include, in workbook order; default: every visible sheet. */
+  sheets?: Array<string>
+  /** Include hidden sheets (default false). */
+  hiddenSheets?: boolean
+  /**
+   * Cells in hidden rows and columns. For `spreadsheetCells` the default is true: they are listed
+   * with `hidden: true`. For `layout` the default is false: zero extent and omitted; true gives
+   * them their real extents back.
+   */
+  hiddenCells?: boolean
+}
+
 export interface StringField {
   value: string
   /** The exact source text the value was derived from. */
@@ -615,9 +703,10 @@ export interface TextLine {
  * feature). A hybrid page keeps its native words alongside the OCR words and
  * still reports the OCR tier, even when that tier added no words; tell the
  * two apart by `confidence`, which only OCR words carry, and see the "native
- * words kept" warnings. Present in every build.
+ * words kept" warnings. `Spreadsheet` is the logical page of a workbook sheet,
+ * laid out from column widths and row heights. Present in every build.
  */
-export type TextSource = 'Native' | 'Ocr' | 'Rendered'
+export type TextSource = 'Native' | 'Ocr' | 'Rendered' | 'Spreadsheet'
 
 /** One word with its box in PDF user space (points, y up). */
 export interface TextWord {
@@ -642,6 +731,11 @@ export interface TextWord {
   symbolic?: boolean
   /** OCR only: Tesseract word confidence, 0..1. */
   confidence?: number
+  /**
+   * Spreadsheet only: the reference of the cell this word was laid out from (`"C3"`); the
+   * anchor for a merged range.
+   */
+  cell?: string
 }
 
 /**

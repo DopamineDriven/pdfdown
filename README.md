@@ -33,6 +33,11 @@ export declare function extractStructuredTextPerPage(buffer: Buffer): Array<Stru
 export declare function pdfMetadata(buffer: Buffer): PdfMeta;
 export declare function pdfDocument(buffer: Buffer): PdfDocument;
 export declare function extractFormFieldsPerPage(buffer: Buffer): Array<PageFormField>;
+
+// Any buffer: what it is. Workbooks (.xlsx): typed cells and logical pages.
+export declare function detectFormat(buffer: Buffer): FormatDetection;
+export declare function spreadsheetCells(buffer: Buffer, opts?: SpreadsheetOptions): Array<SheetCells>;
+export declare function layoutFromXlsx(buffer: Buffer, opts?: SpreadsheetOptions): Array<PageLayout>;
 ```
 
 #### Async (libuv thread pool)
@@ -50,21 +55,26 @@ export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promi
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>;
 export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>;
 export declare function extractFormFieldsPerPageAsync(buffer: Buffer): Promise<Array<PageFormField>>;
+export declare function spreadsheetCellsAsync(buffer: Buffer, opts?: SpreadsheetOptions): Promise<Array<SheetCells>>;
+export declare function layoutFromXlsxAsync(buffer: Buffer, opts?: SpreadsheetOptions): Promise<Array<PageLayout>>;
 ```
 
 ### `PdfDown` class
 
-Parse once, call many. The constructor parses the PDF document once and reuses it across all sync method calls. Async methods share the parsed document across worker threads via `Arc` (atomic reference counting) with zero re-parsing overhead.
+Parse once, call many. The constructor parses the document once, a PDF or an `.xlsx` workbook, and reuses it across all sync method calls; `openAsync` does the same parse off the JavaScript thread. Async methods share the parsed document across worker threads via `Arc` (atomic reference counting) with zero re-parsing overhead. `format` says which kind was opened; a method that reads the other kind throws an `unsupported operation` error (see [Workbooks](#workbooks)).
 
 ```typescript
 export declare class PdfDown {
   constructor(buffer: Buffer);
+  static openAsync(buffer: Buffer): Promise<PdfDown>;
+  readonly format: DocumentFormat; // "Pdf" | "Xlsx"
   textPerPage(): Array<PageText>;
   imagesPerPage(): Array<PageImage>;
   annotationsPerPage(): Array<PageAnnotation>;
   attachments(): Array<Attachment>;
   invoice(opts?: InvoiceOptions): InvoiceResult;
-  layout(): Array<PageLayout>;
+  layout(opts?: SpreadsheetOptions): Array<PageLayout>; // a PDF ignores opts; a workbook yields one logical page per sheet
+  spreadsheetCells(opts?: SpreadsheetOptions): Array<SheetCells>; // workbooks only
   structuredText(): Array<StructuredPageText>;
   metadata(): PdfMeta;
   document(): PdfDocument;
@@ -73,7 +83,8 @@ export declare class PdfDown {
   annotationsPerPageAsync(): Promise<Array<PageAnnotation>>;
   attachmentsAsync(): Promise<Array<Attachment>>;
   invoiceAsync(opts?: InvoiceOptions): Promise<InvoiceResult>;
-  layoutAsync(): Promise<Array<PageLayout>>;
+  layoutAsync(opts?: SpreadsheetOptions): Promise<Array<PageLayout>>;
+  spreadsheetCellsAsync(opts?: SpreadsheetOptions): Promise<Array<SheetCells>>;
   structuredTextAsync(): Promise<Array<StructuredPageText>>;
   metadataAsync(): Promise<PdfMeta>;
   documentAsync(): Promise<PdfDocument>;
@@ -106,7 +117,8 @@ export interface PageLayout {
   height: number;
   rotate: number; // /Rotate, reported and not applied
   contentRotation: number; // 0 | 90 | 180 | 270: the page frame's turn, the one carrying the most confident OCR text across its images; words, lines and images all share it; the render tier's turn includes /Rotate (always 0 for Native). Displayed coordinates = this frame turned by rotate - contentRotation
-  source: TextSource; // "Native" here; "Ocr" | "Rendered" from the OCR package: the deepest cascade tier that ran, native words kept alongside
+  source: TextSource; // "Native" for a PDF here; "Ocr" | "Rendered" from the OCR package: the deepest cascade tier that ran, native words kept alongside; "Spreadsheet" for a workbook's logical page
+  sheet?: string; // spreadsheet pages only: the sheet this page projects
   words: Array<TextWord>;
   lines: Array<TextLine>;
   images: Array<PlacedImage>;
@@ -126,6 +138,7 @@ export interface TextWord {
   italic?: boolean;
   symbolic?: boolean; // native only: set in a barcode font, so the glyphs are bars, not letters
   confidence?: number; // OCR only: 0..1
+  cell?: string; // spreadsheet only: the cell this word was laid out from ("C3"); the anchor of a merged range
 }
 
 export interface TextLine {
@@ -146,7 +159,7 @@ export interface PlacedImage {
   y1: number;
 }
 
-export type TextSource = "Native" | "Ocr" | "Rendered";
+export type TextSource = "Native" | "Ocr" | "Rendered" | "Spreadsheet";
 
 export interface PageImage {
   page: number;
@@ -852,16 +865,90 @@ const amounts = amountHeader
 
 Runs in the same order of time as `extractTextPerPage` (single-digit milliseconds for a typical invoice page). For scanned pages use `extractLayoutWithOcrPerPage` from the OCR package, which fills the same shape from Tesseract word boxes: a page is OCR'd when its native text is under `minTextLength` or covers under 2% of a page that is mostly image or heavy with paths, native words stay on such a hybrid page, every page's coordinates share one frame (`contentRotation`), and raster orientation is settled by Tesseract's orientation detector before any blind retry. The OCR package README describes the cascade.
 
+## Workbooks
+
+`PdfDown` opens `.xlsx` workbooks as well as PDFs, in both packages and in the WASI build, with no native dependency: a workbook is a zip of XML, read in pure Rust through the package relationships (never by conventional part names). Hand pdfdown any buffer: `detectFormat` says what it is, `format` says what a document was opened as, and a method that reads the other kind throws an `unsupported operation` error rather than returning a wrong answer. Nothing is evaluated: formulas keep their cached results, and no cell is ever written.
+
+```typescript
+import { PdfDown, detectFormat } from "@d0paminedriven/pdfdown";
+
+detectFormat(buf); // { format: "Pdf" } | { format: "Xlsx" } | { format: "Unknown", detail: "Word document package" }
+
+const doc = await PdfDown.openAsync(buf); // or new PdfDown(buf); either parses once
+doc.format; // "Pdf" | "Xlsx"
+
+const sheets = doc.spreadsheetCells(); // every visible sheet's non-empty cells, typed
+const pages = doc.layout(); // one logical PageLayout per visible sheet, source "Spreadsheet"
+doc.textPerPage(); // throws: unsupported operation: textPerPage reads a PDF; this document is a workbook
+```
+
+### Cells
+
+`spreadsheetCells(opts?)` returns one `SheetCells` per selected sheet: `sheet`, `index` (0-based position in the workbook), `hidden`, `dimension?` (the declared range, which a producer may overstate), `printArea?`, `merges` (A1 ranges), `warnings` and `cells`. A cell is non-empty when it holds a value, an error, or a formula (even with an empty cache); a merely styled cell is not listed.
+
+`SheetCell` is a flat discriminated union on `type`, so it narrows on one field and composes with the `UTR` helper:
+
+```typescript
+export type SheetCell =
+  | { type: "Text"; value: string; ...common }
+  | { type: "Number"; value: number; ...common } // the typed value; `text` is the display text under the cell's format
+  | { type: "Boolean"; value: boolean; ...common }
+  | { type: "Error"; value: string; ...common } // "#DIV/0!", "#N/A", ...
+  | { type: "Date"; value: string; ...common } // ISO date, with the time when the format shows one; the serial stays in `raw`
+  | { type: "Blank"; ...common }; // a formula cell with no cached result
+
+// ...common on every variant:
+//   ref: string;             // "C3"
+//   row: number; col: number; // 0-based
+//   text: string;            // display text: the format applied to the value, or the stored text
+//   raw: string;             // the stored spelling (the serial for dates, "1" for TRUE)
+//   format?: string;         // the number format code the cell's style selects; absent for General
+//   formatSupported: boolean;// false when this release does not render that code (then text === raw)
+//   formula?: string;        // the expression stored on this cell
+//   sharedFormula?: string;  // the master cell's ref when this cell follows a shared formula
+//   cached: boolean;         // a result was stored for this cell
+//   merge?: string;          // the range this cell anchors, e.g. "A1:F1"
+//   hidden: boolean;         // in a hidden row or column
+```
+
+Cell type comes before number format: a shared string under a date format is still `Text`. Serial 60 in the 1900 date system is the leap day Excel never had and stays a `Number` with a warning; the 1904 date system is honoured.
+
+### Logical pages
+
+`layout(opts?)` on a workbook (and the standalone `layoutFromXlsx`) yields one `PageLayout` per selected sheet with `source: "Spreadsheet"`, `sheet` set, `rotate` and `contentRotation` 0, `images` empty and every word carrying `cell`. Pages are numbered from 1 in selection order. The page is the print area when the sheet declares one, else the bounding box of its non-empty cells; `width` is the sum of the visible column widths and `height` the sum of the visible row heights, in points, y up from the bottom-left like every page. Column widths follow the SpreadsheetML conversion from the stored character count to pixels with Calibri 11 as the Normal font (maximum digit width 7 px at 96 dpi), then 72/96; a default column is 48 pt and a default row 15 pt.
+
+Each cell's display text is placed in its rectangle (a merged range is one rectangle) by the style's alignment: General puts numbers and dates at the right edge, booleans and errors in the middle and text at the left; explicit left, centre and right are honoured, indent adds one em per level, and vertical alignment is bottom unless the style says otherwise. The text extent is an estimate, half an em per character at the cell's font size, so `x0`/`x1` are approximate while rows and columns are exact; explicit newlines make fragments, `wrapText` wraps at the cell width with the same estimate (the page warns that wraps are estimated), and unwrapped text overflows its cell and is clipped to the page. Words are the fragments split on whitespace, with `fontName`, `fontSize`, `bold` and `italic` from the cell font, `symbolic` false and no `confidence`; they go through the same line clusterer as PDF words. Drawings, charts and images are not projected (a warning counts them).
+
+`invoice()` on a workbook returns `source: "None"` with a warning: the layout-based extractor does not read spreadsheet pages yet, and the cells are available from `spreadsheetCells`.
+
+### Options
+
+`SpreadsheetOptions`, accepted by `spreadsheetCells`, `layout` and `layoutFromXlsx` (a PDF ignores them):
+
+- `sheets?: string[]`: sheet names to include, in workbook order; default every visible sheet.
+- `hiddenSheets?: boolean`: include hidden sheets (default `false`).
+- `hiddenCells?: boolean`: cells in hidden rows and columns. For `spreadsheetCells` the default is `true` (listed with `hidden: true`); for `layout` the default is `false` (zero extent and omitted, with a warning), and `true` gives them their real extents back.
+
+### Number formats
+
+Display text follows the cell's format code, parsed as sections and tokens, with en-US separators and symbol placement only where the code leaves a choice. Rendered in this release: General (integers without a point, otherwise up to 11 significant digits); fixed decimals with and without grouping (`0`, `0.00`, `#,##0`, `#,##0.00`) and zero padding (`00000`); percent (`0%`, `0.00%`); quoted and escaped literals anywhere, such as a unit suffix (`#,##0.00"/hr"`); currency and accounting codes with their negative, zero and text sections, parentheses, `_x` padding (one space) and `*x` fill (dropped), colour tags dropped; date and time codes from the built-ins 14 to 22 and custom codes using `y`, `m`, `d`, `h`, `s`, `AM/PM`, where `m` means minutes next to `h` or `s`; the text section `@`. Not rendered (the cell keeps `text === raw`, `formatSupported: false`, and the sheet warns once with the count): elapsed durations (`[h]:mm:ss`), scientific notation, fractions, conditional sections, locale directives (`[$-409]`), era and calendar tokens.
+
+### Unsupported inputs and limits
+
+`detectFormat` names what an input is when it is not a PDF or a workbook, and opening it fails with the same detail: `unsupported format: macro-enabled workbook (not supported in this release)` (`.xlsm`), `template workbook (…)` (`.xltx`), `Strict OOXML workbook (…)`, `Word document package`, `PowerPoint presentation package`, `zip package that is not an Office document`, `OLE container (legacy .xls or an encrypted Office file)`, and `TIFF image`, `JPEG image`, `PNG image` or `RTF document` for files served under a misleading extension. A buffer that is neither a PDF header nor a zip is handed to the PDF parser, whose error names it.
+
+Limits, enforced while reading: input at most 64 MiB compressed, at most 10,000 zip entries, each part at most 64 MiB decompressed and all parts at most 256 MiB, at most 2,000,000 cells and 200,000 merged ranges per workbook; exceeding one throws `limit exceeded: …`. A part that is not well-formed XML throws `malformed workbook: …`; a malformed cell reference, shared-string index or merge range inside an otherwise sound sheet is skipped with a warning instead.
+
 ## Measuring on your own corpus
 
-Two scripts run against any local directory of PDFs and print aggregates only; nothing from the corpus is committed, and nothing from it is printed unless you ask. The directory comes from `PDFDOWN_INVOICE_CORPUS` (default: `ocr/__test__/fixtures/private`, which is gitignored) and may be grouped one folder deep. A file's basename is its `id` (the corpus these were built on names files by a six-digit invoice id), and every per-document row in both outputs carries it.
+Two scripts run against any local directory of PDFs and `.xlsx` workbooks and print aggregates only; nothing from the corpus is committed, and nothing from it is printed unless you ask. The directory comes from `PDFDOWN_INVOICE_CORPUS` (default: `ocr/__test__/fixtures/private`, which is gitignored) and may be grouped one folder deep. A file's basename is its `id` (the corpus these were built on names files by a six-digit invoice id), and every per-document row in both outputs carries it.
 
 ```bash
 PDFDOWN_INVOICE_CORPUS=/path/to/pdfs yarn corpus:profile                    # writes <root>/profile.json
 PDFDOWN_INVOICE_CORPUS=/path/to/pdfs yarn invoice:eval --ids critical.txt   # writes <root>/eval.json
 ```
 
-`corpus:profile` runs `pdfMetadata`, `layoutPerPage`, `attachments` and `extractInvoice` once per PDF and prints the headline (parse failures, native layout cost, native / scanned / mixed, pages per document, page sizes, `/Rotate`, AcroForms, attachments and embedded XML), the producer families, the template clusters (a fonts fingerprint and a header fingerprint with digits masked, and how many header clusters cover 50/80/90/95% of the documents) and the page kinds (image-only, a native stamp over a scan, no glyphs and no images, sparse native).
+`corpus:profile` runs `pdfMetadata`, `layoutPerPage`, `attachments` and `extractInvoice` once per PDF and prints the headline (parse failures, native layout cost, native / scanned / mixed, pages per document, page sizes, `/Rotate`, AcroForms, attachments and embedded XML), the producer families, the template clusters (a fonts fingerprint and a header fingerprint with digits masked, and how many header clusters cover 50/80/90/95% of the documents) and the page kinds (image-only, a native stamp over a scan, no glyphs and no images, sparse native). Each workbook is opened through `spreadsheetCells` and `layoutFromXlsx` and the Workbooks table follows: how many opened, sheets, cells and merged ranges, cell types, formulas, how many distinct number-format codes appear and how many cells this release does not render, logical pages and their cost. A workbook the reader refuses is a failure row carrying its id, like a PDF.
 
 `invoice:eval` scores `extractInvoice` against an `<id>.expected.json` beside each `<id>.pdf`, skipping and counting the PDFs without one. Header fields are exact matches after trimming, case-folding and whitespace collapsing (dates as `YYYY-MM-DD`, amounts to the cent); items are matched for precision and recall on `(productCode, amount)` when both sides carry a code, else on `(description, amount)`; aircraft on their serial numbers; totals reconcile when the extraction's items add up to its own net total within 1%. Every row is reported twice: document-weighted (each document counts one) and amount-weighted (each counts the magnitude of its expected `invoiceTotal`, so a credit note weighs what it credits; a document without one counts 0 and is reported under `missingAmounts`). A row's amount total is printed only when it sums three or more documents, so no single invoice's total reaches the terminal by default. Rows: all documents, the scanned and mixed subsets, each template cluster from `profile.json` when it exists, and the `--ids` slice (one id per line; the harness does not know why those ids matter).
 

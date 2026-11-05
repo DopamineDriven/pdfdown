@@ -2,7 +2,8 @@
 // The directory is gitignored: the files, and anything derived from them, never
 // reach the repository. The assertions here are structural; the per-file
 // summary goes to ava's log, and the detailed results are written next to the
-// PDFs as report.json and report.ts (both inside the ignored directory).
+// PDFs as report.json and report.ts (both inside the ignored directory). The
+// corpus's workbooks get the same treatment with aggregates only in the log.
 
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join, relative } from "path";
@@ -10,6 +11,7 @@ import { join, relative } from "path";
 import test from "ava";
 
 import {
+  PdfDown,
   attachments,
   detectFormat,
   extractFormFieldsPerPage,
@@ -218,5 +220,94 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
       ].join("\n")
     );
     t.log(`wrote ${join(PRIVATE, "report.json")} and report.ts`);
+  }
+);
+
+// ── Workbooks ────────────────────────────────────────────────────────────────
+
+const CELL_TYPES: ReadonlySet<string> = new Set(["Text", "Number", "Boolean", "Error", "Date", "Blank"]);
+const CELL_REF = /^[A-Z]+[1-9]\d*$/;
+const workbooks = existsSync(PRIVATE) ? discoverCorpus(PRIVATE).filter((f) => f.kind === "xlsx") : [];
+
+(workbooks.length > 0 ? test : test.skip)(
+  "private corpus: every workbook opens, its cells resolve and its logical pages hold finite ordered boxes",
+  (t) => {
+    t.timeout(5 * 60 * 1000, "every workbook in the private corpus through spreadsheetCells and layout");
+    const started = performance.now();
+    const totals = { sheets: 0, cells: 0, unsupported: 0, pages: 0, words: 0 };
+    const unsupportedCodes = new Set<string>();
+    for (const file of workbooks) {
+      const buf = readFileSync(file.path);
+      t.is(detectFormat(buf).format, "Xlsx", `${file.id}: detected as a workbook`);
+      let doc: PdfDown;
+      try {
+        doc = new PdfDown(buf);
+      } catch (error) {
+        t.fail(`${file.id}: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
+      t.is(doc.format, "Xlsx", `${file.id}: format`);
+      const sheets = doc.spreadsheetCells({ hiddenSheets: true });
+      t.true(sheets.length >= 1, `${file.id}: at least one sheet`);
+      for (const s of sheets) {
+        totals.sheets += 1;
+        totals.cells += s.cells.length;
+        const malformed = s.cells.filter(
+          (c) =>
+            !CELL_TYPES.has(c.type) ||
+            typeof c.text !== "string" ||
+            typeof c.raw !== "string" ||
+            !Number.isInteger(c.row) ||
+            !Number.isInteger(c.col) ||
+            !CELL_REF.test(c.ref)
+        );
+        t.is(malformed.length, 0, `${file.id} sheet ${s.index}: every cell is well formed`);
+        for (const c of s.cells) {
+          if (c.formatSupported) continue;
+          totals.unsupported += 1;
+          if (c.format !== undefined) unsupportedCodes.add(c.format);
+        }
+      }
+      const pages = doc.layout();
+      t.is(pages.length, sheets.filter((s) => !s.hidden).length, `${file.id}: one logical page per visible sheet`);
+      for (const p of pages) {
+        totals.pages += 1;
+        totals.words += p.words.length;
+        t.is(p.source, "Spreadsheet", `${file.id} p${p.page}: source`);
+        t.truthy(p.sheet, `${file.id} p${p.page}: sheet name`);
+        t.true(p.width > 0 && p.height > 0 && Number.isFinite(p.width + p.height), `${file.id} p${p.page}: page size`);
+        const offPage = p.words.filter(
+          (w) =>
+            ![w.x0, w.y0, w.x1, w.y1].every(Number.isFinite) ||
+            w.x0 > w.x1 ||
+            w.y0 > w.y1 ||
+            w.x0 < 0 ||
+            w.y0 < 0 ||
+            w.x1 > p.width + 1e-6 ||
+            w.y1 > p.height + 1e-6 ||
+            w.cell === undefined
+        );
+        t.is(offPage.length, 0, `${file.id} p${p.page}: every word is a finite box on the page carrying its cell`);
+        let next = 0;
+        for (const [i, line] of p.lines.entries()) {
+          t.is(line.firstWord, next, `${file.id} p${p.page} line ${i}: contiguous firstWord`);
+          const slice = p.words.slice(line.firstWord, line.firstWord + line.wordCount);
+          t.is(slice.length, line.wordCount, `${file.id} p${p.page} line ${i}: wordCount in range`);
+          t.true(
+            slice.every((w) => w.line === i),
+            `${file.id} p${p.page} line ${i}: words point back`
+          );
+          if (i > 0) {
+            t.true(line.y1 <= p.lines[i - 1].y1 + 0.5, `${file.id} p${p.page} line ${i}: top-to-bottom`);
+          }
+          next += line.wordCount;
+        }
+        t.is(next, p.words.length, `${file.id} p${p.page}: lines cover every word`);
+      }
+    }
+    const seconds = ((performance.now() - started) / 1000).toFixed(1);
+    t.log(
+      `${workbooks.length} workbook(s): ${totals.sheets} sheet(s), ${totals.cells} cells, ${totals.unsupported} cell(s) with number formats this release does not render (${unsupportedCodes.size} distinct codes), ${totals.pages} logical page(s), ${totals.words} words, ${seconds}s`
+    );
   }
 );

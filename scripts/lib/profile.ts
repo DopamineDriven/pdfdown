@@ -6,6 +6,8 @@ import type { EInvoiceStandard, InvoiceSource } from "../../index";
 import type { CorpusFile } from "./corpus";
 import { fingerprintFonts, fingerprintHeader, producerFamily, sizeClass, textClass } from "./fingerprint";
 import type { SizeClass, TextClass } from "./fingerprint";
+import { CELL_TYPES, profileWorkbook } from "./workbook";
+import type { WorkbookEntry } from "./workbook";
 
 /** Spec §2.4: pages that are not what their producer says, by word and image count alone. */
 export type PageKind = "imageOnly" | "stampOverScan" | "noGlyphsNoImages" | "sparseNative";
@@ -45,11 +47,12 @@ export interface ProfileEntry {
   pageKinds: Record<PageKind, number>;
 }
 
-/** A file one of the extractors refused; it still carries its id. */
+/** A file one of the extractors refused; it still carries its id and what it was taken for. */
 export interface ProfileFailure {
   id: string;
   file: string;
   bytes: number;
+  kind: "pdf" | "xlsx";
   error: string;
 }
 
@@ -64,6 +67,9 @@ export interface ProfileTables {
   headline: {
     pdfs: number;
     workbooks: number;
+    /** Workbooks the reader opened; the rest are in `failures` with `kind: "xlsx"`. */
+    workbooksParsed: number;
+    /** PDFs that failed to parse. */
     parseFailures: number;
     layoutWarnings: number;
     layoutMs: { total: number; mean: number; max: number };
@@ -87,6 +93,7 @@ export interface Profile {
   generatedAt: string;
   files: number;
   entries: Array<ProfileEntry>;
+  workbooks: Array<WorkbookEntry>;
   failures: Array<ProfileFailure>;
   tables: ProfileTables;
 }
@@ -197,21 +204,32 @@ function profileFile(file: CorpusFile, root: string): ProfileEntry | ProfileFail
       pageKinds: kinds
     };
   } catch (error) {
-    return { ...base, error: error instanceof Error ? error.message : String(error) };
+    return { ...base, kind: "pdf", error: error instanceof Error ? error.message : String(error) };
   }
 }
 
-/** Run every public extractor once per PDF and fold the per-file facts into the §2 tables. */
+/**
+ * Run every public extractor once per PDF, open every workbook through the public API, and fold
+ * the per-file facts into the §2 tables plus the workbook table.
+ */
 export function profileCorpus(files: ReadonlyArray<CorpusFile>, root: string): Profile {
   const entries: Array<ProfileEntry> = [];
+  const workbookEntries: Array<WorkbookEntry> = [];
   const failures: Array<ProfileFailure> = [];
+  let workbooks = 0;
   for (const file of files) {
-    if (file.kind !== "pdf") continue;
+    if (file.kind === "xlsx") {
+      workbooks += 1;
+      const result = profileWorkbook(file, root);
+      if ("error" in result) failures.push(result);
+      else workbookEntries.push(result);
+      continue;
+    }
     const result = profileFile(file, root);
     if ("error" in result) failures.push(result);
     else entries.push(result);
   }
-  const workbooks = files.filter((f) => f.kind === "xlsx").length;
+  const pdfFailures = failures.filter((f) => f.kind === "pdf").length;
 
   const textClassCounts = zeroTextClasses();
   const sizeClassCounts = zeroSizeClasses();
@@ -251,12 +269,14 @@ export function profileCorpus(files: ReadonlyArray<CorpusFile>, root: string): P
     generatedAt: new Date().toISOString(),
     files: files.length,
     entries,
+    workbooks: workbookEntries,
     failures,
     tables: {
       headline: {
-        pdfs: entries.length + failures.length,
+        pdfs: entries.length + pdfFailures,
         workbooks,
-        parseFailures: failures.length,
+        workbooksParsed: workbookEntries.length,
+        parseFailures: pdfFailures,
         layoutWarnings: entries.reduce((n, e) => n + e.layoutWarnings, 0),
         layoutMs: {
           total: Math.round(layoutMsTotal),
@@ -295,9 +315,12 @@ const table = (rows: ReadonlyArray<ReadonlyArray<string>>): string => {
     .join("\n");
 };
 
-/** The §2 tables, aggregates only: no id, file name or page text appears here. */
+const sum = <T>(items: ReadonlyArray<T>, pick: (item: T) => number): number => items.reduce((n, i) => n + pick(i), 0);
+
+/** The §2 tables, aggregates only: no id, file name, format code or page text appears here. */
 export function printProfile(profile: Profile): void {
   const { headline, producers, clusters, pageKinds } = profile.tables;
+  const workbooks = profile.workbooks;
   const out: Array<string> = [];
   out.push("Headline");
   out.push(
@@ -341,5 +364,31 @@ export function printProfile(profile: Profile): void {
       ...PAGE_KINDS.map((k) => [k, String(pageKinds[k].pages), String(pageKinds[k].documents)])
     ])
   );
+  if (headline.workbooks > 0) {
+    const codes = new Set(workbooks.flatMap((w) => Object.keys(w.formats)));
+    const layoutMs = sum(workbooks, (w) => w.layoutMs);
+    out.push("", "Workbooks");
+    out.push(
+      table([
+        ["workbooks", `${headline.workbooksParsed} opened of ${headline.workbooks}`],
+        ["sheets", `${sum(workbooks, (w) => w.sheets)} (${sum(workbooks, (w) => w.hiddenSheets)} hidden)`],
+        ["cells", `${sum(workbooks, (w) => w.cells)} in ${sum(workbooks, (w) => w.merges)} merged ranges`],
+        ["cell types", CELL_TYPES.map((k) => `${sum(workbooks, (w) => w.cellTypes[k])} ${k}`).join(" · ")],
+        [
+          "formulas",
+          `${sum(workbooks, (w) => w.formulas)} own, ${sum(workbooks, (w) => w.sharedFormulaFollowers)} shared followers`
+        ],
+        [
+          "number formats",
+          `${codes.size} distinct codes; ${sum(workbooks, (w) => w.unsupportedFormats)} cells not rendered`
+        ],
+        ["pages", `${sum(workbooks, (w) => w.pages)} logical pages in ${(layoutMs / 1000).toFixed(1)} s`],
+        [
+          "warnings",
+          `${sum(workbooks, (w) => w.cellWarnings)} on sheets, ${sum(workbooks, (w) => w.layoutWarnings)} on pages`
+        ]
+      ])
+    );
+  }
   console.log(out.join("\n"));
 }

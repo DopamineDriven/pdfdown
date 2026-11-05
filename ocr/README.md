@@ -78,7 +78,9 @@ export declare function extractLayoutWithOcrPerPageAsync(buffer: Buffer, opts?: 
 
 ```typescript
 export declare class PdfDown {
-  constructor(buffer: Buffer);
+  constructor(buffer: Buffer); // a PDF or an .xlsx workbook
+  static openAsync(buffer: Buffer): Promise<PdfDown>;
+  readonly format: DocumentFormat; // "Pdf" | "Xlsx"
 
   // ── Base methods ──
   textPerPage(): Array<PageText>;
@@ -91,6 +93,10 @@ export declare class PdfDown {
   attachmentsAsync(): Promise<Array<Attachment>>;
   invoice(opts?: InvoiceOptions): InvoiceResult;
   invoiceAsync(opts?: InvoiceOptions): Promise<InvoiceResult>;
+  layout(opts?: SpreadsheetOptions): Array<PageLayout>; // a PDF ignores opts; a workbook yields one logical page per sheet
+  layoutAsync(opts?: SpreadsheetOptions): Promise<Array<PageLayout>>;
+  spreadsheetCells(opts?: SpreadsheetOptions): Array<SheetCells>; // workbooks only
+  spreadsheetCellsAsync(opts?: SpreadsheetOptions): Promise<Array<SheetCells>>;
   structuredText(): Array<StructuredPageText>;
   structuredTextAsync(): Promise<Array<StructuredPageText>>;
   metadata(): PdfMeta;
@@ -113,7 +119,9 @@ export declare class PdfDown {
 ### Types
 
 ```typescript
-export type TextSource = "Native" | "Ocr" | "Rendered";
+// The deepest cascade tier that produced a page's text, or the logical page of a workbook sheet.
+// Spreadsheet pages carry `PageLayout.sheet` and every word carries `TextWord.cell` ("C3").
+export type TextSource = "Native" | "Ocr" | "Rendered" | "Spreadsheet";
 
 export interface OcrPageText {
   page: number;
@@ -271,6 +279,10 @@ for (const page of extractLayoutWithOcrPerPage(readFileSync("scan.pdf"), { rende
   }
 }
 ```
+
+## Workbooks
+
+This package inherits the base package's workbook support: `detectFormat`, `PdfDown.openAsync`, `format`, `spreadsheetCells`, `layout` on a workbook and the standalone `layoutFromXlsx`, with the same options, number-format subset, logical-page contract and limits (see the base README's "Workbooks" section). A workbook's text is already text, so it never needs OCR: the OCR methods read PDFs, and on a workbook `textWithOcrPerPage`, `documentOcr` and `layoutWithOcr` fail with `unsupported operation: <method> reads a PDF; this document is a workbook`.
 
 ## How it works
 
