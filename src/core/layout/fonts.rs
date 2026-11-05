@@ -3,6 +3,8 @@
 
 use super::standard14;
 use lopdf::{Dictionary, Document, Encoding, Object};
+
+use super::tounicode::ToUnicode;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +19,9 @@ pub(crate) enum WidthSource {
 
 pub(crate) struct FontInfo<'a> {
   pub name: String,
+  /// The font's `/ToUnicode` map, consulted before `encoding`: it is the producer's own statement
+  /// of what each code means, and the one a viewer's copy-and-paste follows.
+  pub to_unicode: Option<ToUnicode>,
   pub encoding: Option<Encoding<'a>>,
   /// Composite (Type0) fonts consume two bytes per code.
   pub two_byte: bool,
@@ -158,9 +163,19 @@ pub(crate) fn load_font<'a>(doc: &'a Document, dict: &'a Dictionary) -> FontInfo
   // Name, ForceBold flag and FontWeight only: StemV is unreliable (Microsoft
   // Print To PDF writes 833 for regular Times New Roman).
   let lower = name.to_ascii_lowercase();
-  let bold = lower.contains("bold")
-    || lower.contains("black")
-    || lower.contains("heavy")
+  let compact: String = lower
+    .chars()
+    .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_')
+    .collect();
+  // "Ultra" alone is the heaviest cut of a family; "UltraLight" and "UltraThin" are the lightest.
+  let ultra =
+    compact.contains("ultra") && !compact.contains("ultralight") && !compact.contains("ultrathin");
+  // "fett" covers the German cuts: Halbfett (600), Dreiviertelfett (700), Fett (800), Extrafett.
+  let bold = compact.contains("bold")
+    || compact.contains("black")
+    || compact.contains("heavy")
+    || compact.contains("fett")
+    || ultra
     || flags & (1 << 18) != 0
     || weight >= 600.0;
   let italic = lower.contains("italic") || lower.contains("oblique") || flags & (1 << 6) != 0;
@@ -241,8 +256,21 @@ pub(crate) fn load_font<'a>(doc: &'a Document, dict: &'a Dictionary) -> FontInfo
     }
   }
 
+  let to_unicode = dict
+    .get(b"ToUnicode")
+    .ok()
+    .and_then(|o| deref(doc, o))
+    .and_then(|o| o.as_stream().ok())
+    .and_then(|s| {
+      s.decompressed_content()
+        .or_else(|_| s.get_plain_content())
+        .ok()
+    })
+    .map(|bytes| ToUnicode::parse(&bytes));
+
   FontInfo {
     name,
+    to_unicode,
     encoding: dict.get_font_encoding(doc).ok(),
     two_byte: is_type0,
     widths,
@@ -313,9 +341,14 @@ impl FontInfo<'_> {
       })
   }
 
-  /// Decode one code's bytes to text. Falls back to the byte as Latin-1 for
-  /// simple fonts, and to U+FFFD for composite fonts without a usable map.
+  /// Decode one code's bytes to text: the `/ToUnicode` map first, then the encoding. Falls back
+  /// to the byte as Latin-1 for simple fonts, and to U+FFFD for composite fonts without a usable map.
   pub(crate) fn decode(&self, bytes: &[u8]) -> String {
+    if let Some(map) = &self.to_unicode
+      && let Some(text) = map.lookup(bytes)
+    {
+      return text;
+    }
     if let Some(enc) = &self.encoding
       && let Ok(s) = enc.bytes_to_string(bytes)
       && !s.is_empty()
@@ -334,7 +367,7 @@ impl FontInfo<'_> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use lopdf::dictionary;
+  use lopdf::{Stream, dictionary};
 
   #[test]
   fn subset_prefix_is_stripped_only_when_well_formed() {
@@ -482,5 +515,60 @@ mod tests {
     assert!(f.two_byte);
     assert_eq!(f.width(36), 0.64);
     assert_eq!(f.width(37), 0.7);
+  }
+
+  #[test]
+  fn to_unicode_wins_over_a_differences_encoding_lopdf_cannot_build() {
+    // Acrobat PDFMaker: custom codes 28..31 named /ygrave /lacute /pdotaccent /idotaccent over
+    // WinAnsi; lopdf knows no /idotaccent and drops the whole encoding for StandardEncoding,
+    // while the ToUnicode map says exactly what every code is.
+    let mut doc = Document::with_version("1.7");
+    let cmap = doc.add_object(Stream::new(
+      dictionary! {},
+      b"1 begincodespacerange <00> <FF> endcodespacerange\n6 beginbfchar <1C> <1EF3> <1D> <013A> <1E> <1E57> <1F> <0069> <44> <0044> <9A> <0161> endbfchar\n".to_vec(),
+    ));
+    let font = dictionary! {
+      "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "NDVFQS+SFProDisplay-Bold",
+      "Encoding" => dictionary! {
+        "BaseEncoding" => "WinAnsiEncoding",
+        "Differences" => vec![Object::Integer(28), "ygrave".into(), "lacute".into(), "pdotaccent".into(), "idotaccent".into()]
+      },
+      "ToUnicode" => Object::Reference(cmap)
+    };
+    let f = load_font(&doc, &font);
+    assert_eq!(f.decode(b"\x1f"), "i");
+    assert_eq!(f.decode(b"\x1c"), "\u{1EF3}");
+    assert_eq!(
+      f.decode(b"\x9a"),
+      "\u{0161}",
+      "WinAnsi's upper range survives through the map"
+    );
+    assert_eq!(f.decode(b"D"), "D");
+    assert_eq!(
+      f.decode(b"a"),
+      "a",
+      "a code the map omits still decodes through the encoding"
+    );
+  }
+
+  #[test]
+  fn ultra_fett_and_semibold_names_are_bold_but_ultralight_is_not() {
+    let doc = Document::with_version("1.7");
+    let bold = |base: &str| {
+      load_font(
+        &doc,
+        &dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => base },
+      )
+      .bold
+    };
+    assert!(bold("USNFKE+GothamCond-Ultra"));
+    assert!(bold("Sohne-Halbfett"), "Halbfett is 600");
+    assert!(bold("Sohne-Fett"));
+    assert!(bold("NotoSansJP-SemiBold"));
+    assert!(bold("Lato-DemiBold"));
+    assert!(!bold("Gotham-UltraLight"));
+    assert!(!bold("Gotham-Ultra-Thin"));
+    assert!(!bold("NotoSerifKR-Medium"));
+    assert!(!bold("Sohne-Kraftig"), "500 is not bold");
   }
 }

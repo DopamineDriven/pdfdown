@@ -4,6 +4,7 @@
 pub(crate) mod fonts;
 pub(crate) mod interpreter;
 pub(crate) mod standard14;
+pub(crate) mod tounicode;
 pub(crate) mod words;
 
 use crate::core::images::get_inherited_resources;

@@ -13,6 +13,7 @@ import type { PageLayout, TextWord } from "../index";
 const sample = readFileSync(join(import.meta.dirname, "fixtures", "layout", "layout-sample.pdf"));
 const imageOnly = readFileSync(join(import.meta.dirname, "fixtures", "ascii85-dct-scan.pdf"));
 const fontsSample = readFileSync(join(import.meta.dirname, "fixtures", "layout", "fonts-sample.pdf"));
+const fontsSampleII = readFileSync(join(import.meta.dirname, "fixtures", "layout", "fonts-sample-II.pdf"));
 const PUBLIC = join(import.meta.dirname, "fixtures", "invoices");
 const wordpress = readFileSync(join(PUBLIC, "wordpress-pdf-invoice-plugin-sample.pdf"));
 const addOnSamples = readFileSync(join(PUBLIC, "Downloadable-PDF-Invoices-Add-On-Samples.pdf"));
@@ -210,4 +211,38 @@ test("fonts-sample: barcode glyphs are flagged symbolic, anonymous fonts carry n
   const bold = byFont("Helvetica-Bold");
   t.is(bold.length, 2);
   t.true(bold.every((w) => w.bold === true && w.symbolic === false));
+});
+
+test("fonts-sample-II: a Word export decodes through ToUnicode, names weights, keeps CJK lines and the signature image", (t) => {
+  const [p1] = layoutPerPage(fontsSampleII);
+  t.is(p1.source, "Native");
+  t.deepEqual(
+    p1.lines.map((l) => l.text),
+    [
+      "Gotham Text in many forms",
+      "Söhne Mono and Halbfett",
+      // Acrobat PDFMaker wrote these glyphs for "Display": the file's glyph names, ToUnicode map and
+      // rendering all say so, and viewers copy the same text. Before the ToUnicode-first decode the
+      // custom codes came out as control characters.
+      "SF Pro on Dišṗĺaỳ",
+      "変化や多様性が人生を豊かにする",
+      // The file's own ToUnicode map for the Simplified Chinese run is wrong, and one code is not
+      // stated at all: that one is U+FFFD, the rest read exactly as poppler reads them.
+      "犈扞\uFFFD嬨",
+      "단조로운 삶보다 변화 있는 삶이 더 가치 있다",
+      "The variety at hand makes for solid testing"
+    ]
+  );
+  const word = (text: string) => p1.words.find((w) => w.text === text);
+  t.is(word("in")?.fontName, "GothamCond-Ultra");
+  t.true(word("in")?.bold, "Ultra is the heaviest cut of the family");
+  t.true(word("Halbfett")?.bold, "Halbfett is a 600 weight");
+  t.true(word("변화")?.bold, "Noto Sans KR Black");
+  t.false(word("forms")?.bold, "Thin");
+  t.false(word("단조로운")?.bold);
+  t.true(
+    p1.words.every((w) => w.symbolic === false && w.italic === false),
+    "no barcode glyphs and no italics on this sheet"
+  );
+  t.is(p1.images.length, 1, "the signature scan");
 });
