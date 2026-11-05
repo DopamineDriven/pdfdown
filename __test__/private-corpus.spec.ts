@@ -11,6 +11,7 @@ import test from "ava";
 
 import {
   attachments,
+  detectFormat,
   extractFormFieldsPerPage,
   extractInvoice,
   extractTextPerPage,
@@ -58,8 +59,12 @@ interface PrivateCorpusReport {
 
 const PRIVATE = join(import.meta.dirname, "..", "ocr", "__test__", "fixtures", "private");
 
-// One level of subdirectories is allowed (the corpus may be grouped by id prefix).
-const corpus = existsSync(PRIVATE) ? discoverCorpus(PRIVATE).filter((f) => f.kind === "pdf") : [];
+// One level of subdirectories is allowed (the corpus may be grouped by id prefix). The document
+// store names everything .pdf, so files are sorted by what they are, not by their extension.
+const named = existsSync(PRIVATE) ? discoverCorpus(PRIVATE).filter((f) => f.kind === "pdf") : [];
+const sniffed = named.map((f) => ({ file: f, detection: detectFormat(readFileSync(f.path)) }));
+const corpus = sniffed.filter((s) => s.detection.format === "Pdf").map((s) => s.file);
+const notPdf = sniffed.filter((s) => s.detection.format !== "Pdf");
 const files = corpus.map((f) => relative(PRIVATE, f.path));
 
 (files.length > 0 ? test : test.skip)(
@@ -69,6 +74,12 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
     const widths = { name: Math.max(...files.map((n) => n.length), 4) };
     const entries: Array<PrivateCorpusEntry> = [];
     t.log(`${files.length} private invoice(s)`);
+    if (notPdf.length > 0) {
+      const kinds = new Map<string, number>();
+      for (const s of notPdf)
+        kinds.set(s.detection.detail ?? "unknown", (kinds.get(s.detection.detail ?? "unknown") ?? 0) + 1);
+      t.log(`${notPdf.length} file(s) named .pdf are not PDFs: ${[...kinds].map(([k, n]) => `${k} ${n}`).join(", ")}`);
+    }
     t.log(`${"file".padEnd(widths.name)}  pages  nativeChars  words  form  attach  invoice`);
     for (const file of corpus) {
       const name = relative(PRIVATE, file.path);

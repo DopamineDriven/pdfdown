@@ -10,7 +10,7 @@ import { join, relative } from "path";
 import test from "ava";
 
 import { discoverCorpus } from "../../scripts/lib/corpus";
-import { extractLayoutWithOcrPerPage, layoutPerPage } from "../index";
+import { detectFormat, extractLayoutWithOcrPerPage, layoutPerPage } from "../index";
 import type { PageLayout, TextSource, TextWord } from "../index";
 
 type Box = [number, number, number, number];
@@ -57,10 +57,14 @@ const nativeChars = (pages: Array<PageLayout>) =>
   pages.reduce((n, p) => n + p.words.reduce((m, w) => m + w.text.replace(/\s+/g, "").length, 0), 0);
 
 // One level of subdirectories is allowed (the corpus may be grouped by id prefix).
+// The document store names everything .pdf; only real PDFs are read.
 const scanned = existsSync(PRIVATE)
   ? discoverCorpus(PRIVATE)
       .filter((f) => f.kind === "pdf")
-      .filter((f) => nativeChars(layoutPerPage(readFileSync(f.path))) <= SCANNED_MAX_NATIVE_CHARS)
+      .filter((f) => {
+        const buf = readFileSync(f.path);
+        return detectFormat(buf).format === "Pdf" && nativeChars(layoutPerPage(buf)) <= SCANNED_MAX_NATIVE_CHARS;
+      })
   : [];
 
 (scanned.length > 0 ? test : test.skip)("private corpus: scanned invoices OCR into positioned pages", (t) => {

@@ -112,6 +112,10 @@ export declare const __napiBindingTarget: "native" | "wasm32-wasi" | "wasm32-was
 
 export declare class PdfDown {
   constructor(buffer: Buffer);
+  /** Open a PDF or a workbook off the JavaScript thread; resolves to a `PdfDown`. */
+  static openAsync(buffer: Buffer): Promise<PdfDown>;
+  /** The format this document was opened as. */
+  get format(): DocumentFormat;
   textPerPage(): Array<PageText>;
   imagesPerPage(): Array<PageImage>;
   annotationsPerPage(): Array<PageAnnotation>;
@@ -213,6 +217,12 @@ export interface DateField {
 
 export type DateOrder = "Auto" | "MDY" | "DMY" | "YMD";
 
+/** `Pdf`, `Xlsx`, or `Unknown` with what the buffer was instead. */
+export declare function detectFormat(buffer: Buffer): FormatDetection;
+
+/** What `detectFormat` and `PdfDown` recognise. */
+export type DocumentFormat = "Pdf" | "Xlsx" | "Unknown";
+
 export type EInvoiceStandard = "FacturX" | "ZUGFeRD" | "XRechnung" | "UBL" | "Unknown";
 
 export interface EmbeddedInvoiceXml {
@@ -264,6 +274,12 @@ export interface FieldSpan {
   y0: number;
   x1: number;
   y1: number;
+}
+
+/** The outcome of `detectFormat`: the format, and for `Unknown` what the input was instead. */
+export interface FormatDetection {
+  format: DocumentFormat;
+  detail?: string;
 }
 
 /**

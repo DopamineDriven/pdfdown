@@ -957,4 +957,133 @@ fn main() {
     .parent()
     .unwrap_or_else(|| Path::new("__test__/fixtures"));
   ccitt_tiny(fixtures_root);
+
+  // Spreadsheet fixtures: hand-written OOXML packages and the inputs detection must refuse.
+  let spreadsheet = fixtures_root.join("spreadsheet");
+  std::fs::create_dir_all(&spreadsheet).expect("spreadsheet fixture dir");
+  spreadsheet_fixtures(&spreadsheet);
+}
+
+// ── Spreadsheet fixtures ──────────────────────────────────────────────────────
+
+const WORKBOOK_MAIN: &str =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
+const MACRO_MAIN: &str = "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
+const SML: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const SML_STRICT: &str = "http://purl.oclc.org/ooxml/spreadsheetml/main";
+const REL_NS: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
+const OFFICE_DOC_REL: &str =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
+const WORKSHEET_REL: &str =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
+
+/// Write one zip package from `(path, xml)` parts with the given compression.
+fn write_package(path: &Path, parts: &[(&str, String)], method: zip::CompressionMethod) {
+  let file = std::fs::File::create(path).expect("package file");
+  let mut writer = zip::ZipWriter::new(file);
+  let options = zip::write::SimpleFileOptions::default().compression_method(method);
+  for (name, xml) in parts {
+    writer.start_file(*name, options).expect("start part");
+    std::io::Write::write_all(&mut writer, xml.as_bytes()).expect("write part");
+  }
+  writer.finish().expect("finish package");
+}
+
+fn content_types(main_part: &str, main_type: &str, others: &[(&str, &str)]) -> String {
+  let mut xml = String::from(
+    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n<Default Extension=\"xml\" ContentType=\"application/xml\"/>\n",
+  );
+  xml.push_str(&format!(
+    "<Override PartName=\"/{main_part}\" ContentType=\"{main_type}\"/>\n"
+  ));
+  for (part, kind) in others {
+    xml.push_str(&format!(
+      "<Override PartName=\"/{part}\" ContentType=\"{kind}\"/>\n"
+    ));
+  }
+  xml.push_str("</Types>\n");
+  xml
+}
+
+fn root_rels(main_part: &str) -> String {
+  format!(
+    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"{REL_NS}\">\n<Relationship Id=\"rId1\" Type=\"{OFFICE_DOC_REL}\" Target=\"{main_part}\"/>\n</Relationships>\n"
+  )
+}
+
+/// The parts of a one-sheet workbook with inline strings, a number, a boolean and an error, and
+/// no shared strings or styles: the smallest package that is still a workbook.
+fn minimal_workbook_parts(main_type: &str, sml: &str) -> Vec<(&'static str, String)> {
+  vec![
+    (
+      "[Content_Types].xml",
+      content_types(
+        "xl/workbook.xml",
+        main_type,
+        &[(
+          "xl/worksheets/sheet1.xml",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml",
+        )],
+      ),
+    ),
+    ("_rels/.rels", root_rels("xl/workbook.xml")),
+    (
+      "xl/workbook.xml",
+      format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<workbook xmlns=\"{sml}\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\n<sheets><sheet name=\"Form\" sheetId=\"1\" r:id=\"rId1\"/></sheets>\n</workbook>\n"
+      ),
+    ),
+    (
+      "xl/_rels/workbook.xml.rels",
+      format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"{REL_NS}\">\n<Relationship Id=\"rId1\" Type=\"{WORKSHEET_REL}\" Target=\"worksheets/sheet1.xml\"/>\n</Relationships>\n"
+      ),
+    ),
+    (
+      "xl/worksheets/sheet1.xml",
+      format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<worksheet xmlns=\"{sml}\">\n<dimension ref=\"A1:B2\"/>\n<sheetData>\n<row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Total</t></is></c><c r=\"B1\"><v>427.5</v></c></row>\n<row r=\"2\"><c r=\"A2\" t=\"b\"><v>1</v></c><c r=\"B2\" t=\"e\"><v>#DIV/0!</v></c></row>\n</sheetData>\n</worksheet>\n"
+      ),
+    ),
+  ]
+}
+
+fn spreadsheet_fixtures(out: &Path) {
+  write_package(
+    &out.join("minimal.xlsx"),
+    &minimal_workbook_parts(WORKBOOK_MAIN, SML),
+    zip::CompressionMethod::Deflated,
+  );
+  write_package(
+    &out.join("macro.xlsm"),
+    &minimal_workbook_parts(MACRO_MAIN, SML),
+    zip::CompressionMethod::Deflated,
+  );
+  write_package(
+    &out.join("strict.xlsx"),
+    &minimal_workbook_parts(WORKBOOK_MAIN, SML_STRICT),
+    zip::CompressionMethod::Deflated,
+  );
+  write_package(
+    &out.join("not-a-workbook.docx"),
+    &[
+      (
+        "[Content_Types].xml",
+        content_types(
+          "word/document.xml",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+          &[],
+        ),
+      ),
+      ("_rels/.rels", root_rels("word/document.xml")),
+      (
+        "word/document.xml",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body/></w:document>\n".to_string(),
+      ),
+    ],
+    zip::CompressionMethod::Stored,
+  );
+  let mut ole = vec![0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+  ole.resize(512, 0);
+  std::fs::write(out.join("ole.bin"), ole).expect("ole fixture");
 }

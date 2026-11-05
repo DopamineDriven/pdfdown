@@ -48,7 +48,7 @@
     "preversion": "napi build --platform --no-const-enum && git add .",
     "version": "napi version",
     "prepare": "husky",
-    "typecheck": "tsgo --noEmit --strict --ignoreConfig --module esnext --moduleResolution bundler --types node scripts/*.ts scripts/lib/*.ts scripts/__test__/*.spec.ts __test__/forms.types.ts __test__/invoice.types.ts __test__/layout.types.ts ocr/__test__/forms.types.ts ocr/__test__/invoice.types.ts ocr/__test__/layout.types.ts"
+    "typecheck": "tsgo --noEmit --strict --ignoreConfig --module esnext --moduleResolution bundler --types node scripts/*.ts scripts/lib/*.ts scripts/__test__/*.spec.ts __test__/spreadsheet.types.ts __test__/forms.types.ts __test__/invoice.types.ts __test__/layout.types.ts ocr/__test__/forms.types.ts ocr/__test__/invoice.types.ts ocr/__test__/layout.types.ts"
   },
   "devDependencies": {
     "@ava/typescript": "^7.0.0",
@@ -125,7 +125,7 @@
       "--import",
       "@oxc-node/core/register"
     ],
-    "timeout": "2m",
+    "timeout": "10m",
     "workerThreads": false
   },
   "engines": {

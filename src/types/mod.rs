@@ -339,6 +339,8 @@ impl From<RawPdfDocumentOcr> for PdfDocumentOcr {
 mod forms;
 mod invoice;
 mod layout;
+mod spreadsheet;
 pub use forms::*;
 pub use invoice::*;
 pub use layout::*;
+pub use spreadsheet::*;
