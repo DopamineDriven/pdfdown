@@ -92,6 +92,7 @@ pub(crate) fn native_layout(doc: &Document, page_num: u32, page_id: ObjectId) ->
     rotate: geo.rotate,
     content_rotation: 0,
     source: TextSource::Native,
+    sheet: None,
     words: Vec::new(),
     lines: Vec::new(),
     images: Vec::new(),
@@ -118,7 +119,7 @@ pub(crate) fn native_layout(doc: &Document, page_num: u32, page_id: ObjectId) ->
   interp.run(&content, &resources, Matrix::IDENTITY);
   let fonts = interp.font_metas();
   let raw = words::glyphs_to_words(&interp.glyphs);
-  let (words, lines) = words::words_to_lines(raw.clone(), &fonts);
+  let (words, lines) = words::words_to_lines(raw.clone(), &fonts, &[]);
   layout.words = words;
   layout.lines = lines;
   layout.images = interp.images;

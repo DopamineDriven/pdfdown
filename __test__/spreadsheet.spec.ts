@@ -3,7 +3,7 @@ import { join } from "path";
 
 import test from "ava";
 
-import { PdfDown, detectFormat, layoutPerPage, spreadsheetCells, spreadsheetCellsAsync } from "../index";
+import { PdfDown, detectFormat, layoutFromXlsx, layoutPerPage, spreadsheetCells, spreadsheetCellsAsync } from "../index";
 import type { SheetCell } from "../index";
 
 const FX = join(import.meta.dirname, "fixtures");
@@ -126,4 +126,54 @@ test("spreadsheetCells: display text follows the format code; dates are typed", 
     text: "1/1/1904"
   });
   t.like(cell(new PdfDown(xlsx).spreadsheetCells()[0].cells, "B1"), { text: "427.5", formatSupported: true });
+});
+
+// ── Layout ───────────────────────────────────────────────────────────────────
+
+test("layout on a workbook: one logical page per visible sheet, words carry their cell, geometry from widths and heights", (t) => {
+  const doc = new PdfDown(form);
+  const pages = doc.layout();
+  t.is(pages.length, 1);
+  const [p] = pages;
+  t.like(p, { page: 1, source: "Spreadsheet", sheet: "Form", rotate: 0, contentRotation: 0, images: [] });
+  t.is(p.width, 385.5, "A 20 + B 12 + C 14 + three default columns of 48 pt");
+  t.is(p.height, 180, "rows 1..12 at 15 pt, row 11 at 30 pt, hidden row 10 omitted");
+  const word = (text: string) => p.words.find((w) => w.text === text);
+  t.like(word("142.50/hr"), { cell: "C3", fontName: "Arial", fontSize: 10, bold: true, confidence: undefined });
+  const rate = word("142.50/hr");
+  t.true(
+    rate !== undefined && Math.abs(rate.x1 - 241.5) < 0.01 && Math.abs(rate.x0 - 196.5) < 0.01,
+    "numbers in General alignment sit on the column's right edge"
+  );
+  t.deepEqual(
+    p.words.filter((w) => w.cell === "A11").map((w) => w.text),
+    ["Line", "one", "Line", "two"]
+  );
+  t.true(p.words.every((w) => w.x0 >= 0 && w.x1 <= p.width && w.y0 >= 0 && w.y1 <= p.height && w.cell !== undefined));
+  t.is(word("hidden value"), undefined);
+  t.true(p.warnings.some((w) => /print area A1:F12/.test(w)));
+  for (let i = 1; i < p.lines.length; i++) t.true(p.lines[i].y1 <= p.lines[i - 1].y1 + 0.5);
+});
+
+test("layout options on a workbook: hidden cells restore their extents; hidden sheets add pages; the standalone agrees", async (t) => {
+  const doc = new PdfDown(form);
+  const grown = doc.layout({ hiddenCells: true })[0];
+  t.is(grown.height, 195);
+  t.is(grown.words.find((w) => w.text === "hidden")?.cell, "B10");
+  t.deepEqual(
+    doc.layout({ hiddenSheets: true }).map((p) => [p.page, p.sheet]),
+    [
+      [1, "Form"],
+      [2, "Notes"]
+    ]
+  );
+  t.deepEqual(await doc.layoutAsync({ sheets: ["Form"] }), layoutFromXlsx(form, { sheets: ["Form"] }));
+  t.deepEqual(layoutPerPage(pdf), new PdfDown(pdf).layout(), "PDF layout ignores the options");
+});
+
+test("invoice on a workbook returns the no-source shape until the shared engine exists", async (t) => {
+  const result = await new PdfDown(form).invoiceAsync();
+  t.like(result, { source: "None", documentType: "Unknown", confidence: 0 });
+  t.deepEqual(result.fields.items, []);
+  t.true(result.warnings.some((w) => /layout-based extraction is not available yet/.test(w)));
 });

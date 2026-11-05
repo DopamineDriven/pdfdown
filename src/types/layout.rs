@@ -6,13 +6,15 @@ use napi_derive::napi;
 /// feature). A hybrid page keeps its native words alongside the OCR words and
 /// still reports the OCR tier, even when that tier added no words; tell the
 /// two apart by `confidence`, which only OCR words carry, and see the "native
-/// words kept" warnings. Present in every build.
+/// words kept" warnings. `Spreadsheet` is the logical page of a workbook sheet,
+/// laid out from column widths and row heights. Present in every build.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[napi(string_enum)]
 pub enum TextSource {
   Native,
   Ocr,
   Rendered,
+  Spreadsheet,
 }
 
 /// One word with its box in PDF user space (points, y up).
@@ -38,6 +40,9 @@ pub struct TextWord {
   pub symbolic: Option<bool>,
   /// OCR only: Tesseract word confidence, 0..1.
   pub confidence: Option<f64>,
+  /// Spreadsheet only: the reference of the cell this word was laid out from (`"C3"`); the
+  /// anchor for a merged range.
+  pub cell: Option<String>,
 }
 
 /// Words sharing a baseline band, left to right. `firstWord` / `wordCount`
@@ -90,6 +95,8 @@ pub struct PageLayout {
   /// Deepest cascade tier that ran: `Native`, or `Ocr` / `Rendered` on a page
   /// whose native words (if any) were kept alongside the OCR words.
   pub source: TextSource,
+  /// Spreadsheet pages only: the sheet this logical page projects.
+  pub sheet: Option<String>,
   pub words: Vec<TextWord>,
   pub lines: Vec<TextLine>,
   pub images: Vec<PlacedImage>,

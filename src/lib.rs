@@ -57,6 +57,7 @@ use crate::core::document::extract_all_with_ocr;
 use crate::core::ocr::{extract_layout_with_ocr, extract_text_with_ocr, normalize_max_threads};
 
 use crate::core::spreadsheet::package::{NOT_PDF_OR_ZIP, Package, SpreadsheetError, detect};
+use crate::core::spreadsheet::project::project;
 use crate::core::spreadsheet::workbook::{Workbook, cells_of, parse_workbook};
 use crate::types::{DocumentFormat, FormatDetection, SheetCells, SpreadsheetOptions};
 
@@ -845,7 +846,10 @@ impl Task for SharedExtractAnnotationsTask {
   }
 }
 
-pub struct SharedLayoutTask(Arc<Document>);
+pub struct SharedLayoutTask {
+  inner: Arc<ParsedDocument>,
+  opts: Option<SpreadsheetOptions>,
+}
 
 #[napi]
 impl Task for SharedLayoutTask {
@@ -853,7 +857,7 @@ impl Task for SharedLayoutTask {
   type JsValue = Vec<PageLayout>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    Ok(extract_layout(&self.0))
+    Ok(layout_of(&self.inner, self.opts.as_ref()))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -878,7 +882,7 @@ impl Task for SharedAttachmentsTask {
 }
 
 pub struct SharedInvoiceTask {
-  doc: Arc<Document>,
+  inner: Arc<ParsedDocument>,
   opts: Option<InvoiceOptions>,
 }
 
@@ -888,7 +892,7 @@ impl Task for SharedInvoiceTask {
   type JsValue = InvoiceResult;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    Ok(extract_invoice_impl(&self.doc, self.opts.as_ref()))
+    Ok(invoice_of(&self.inner, self.opts.as_ref()))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -1279,6 +1283,75 @@ pub fn spreadsheet_cells_async(
   ))
 }
 
+/// The logical pages of a workbook buffer's selected sheets, as `PageLayout` with
+/// `source: "Spreadsheet"`.
+#[napi]
+pub fn layout_from_xlsx(
+  buffer: Buffer,
+  opts: Option<SpreadsheetOptions>,
+) -> Result<Vec<PageLayout>> {
+  Ok(project(
+    &load_workbook(buffer.to_vec())?,
+    &opts.unwrap_or_default(),
+  ))
+}
+
+pub struct LayoutFromXlsxTask(Vec<u8>, SpreadsheetOptions);
+
+#[napi]
+impl Task for LayoutFromXlsxTask {
+  type Output = Vec<PageLayout>;
+  type JsValue = Vec<PageLayout>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(project(
+      &load_workbook(std::mem::take(&mut self.0))?,
+      &self.1,
+    ))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+pub fn layout_from_xlsx_async(
+  buffer: Buffer,
+  opts: Option<SpreadsheetOptions>,
+) -> AsyncTask<LayoutFromXlsxTask> {
+  AsyncTask::new(LayoutFromXlsxTask(
+    buffer.to_vec(),
+    opts.unwrap_or_default(),
+  ))
+}
+
+/// Positioned words and lines per page: the content stream of a PDF, or the logical pages of a
+/// workbook's selected sheets. A PDF ignores `opts`.
+fn layout_of(inner: &ParsedDocument, opts: Option<&SpreadsheetOptions>) -> Vec<PageLayout> {
+  match inner {
+    ParsedDocument::Pdf(state) => extract_layout(&state.doc),
+    ParsedDocument::Workbook(state) => project(&state.workbook, &opts.cloned().unwrap_or_default()),
+  }
+}
+
+/// What `invoice` returns for a workbook until the layout-based engine reads spreadsheet pages.
+const WORKBOOK_INVOICE_WARNING: &str = "layout-based extraction is not available yet; the workbook's cells are available from spreadsheetCells";
+
+fn invoice_of(inner: &ParsedDocument, opts: Option<&InvoiceOptions>) -> InvoiceResult {
+  match inner {
+    ParsedDocument::Pdf(state) => extract_invoice_impl(&state.doc, opts),
+    ParsedDocument::Workbook(_) => InvoiceResult {
+      source: InvoiceSource::None,
+      document_type: InvoiceDocumentType::Unknown,
+      confidence: 0.0,
+      fields: InvoiceFields::default(),
+      warnings: vec![WORKBOOK_INVOICE_WARNING.to_string()],
+      embedded_xml: None,
+    },
+  }
+}
+
 #[napi]
 pub struct PdfDown {
   inner: Arc<ParsedDocument>,
@@ -1372,17 +1445,23 @@ impl PdfDown {
     Ok(extract_metadata(&self.pdf("metadata")?.doc))
   }
 
+  /// Positioned words and lines per page: a PDF's content stream (native text only), or one
+  /// logical page per selected sheet of a workbook, where `opts` picks the sheets and whether
+  /// hidden rows and columns keep their extents. A PDF ignores `opts`.
   #[napi]
-  /// Positioned words and lines per page from the content stream (native text only).
-  pub fn layout(&self) -> Result<Vec<PageLayout>> {
-    Ok(extract_layout(&self.pdf("layout")?.doc))
+  pub fn layout(&self, opts: Option<SpreadsheetOptions>) -> Result<Vec<PageLayout>> {
+    Ok(layout_of(&self.inner, opts.as_ref()))
   }
 
   #[napi]
-  pub fn layout_async(&self) -> Result<AsyncTask<SharedLayoutTask>> {
-    Ok(AsyncTask::new(SharedLayoutTask(Arc::clone(
-      &self.pdf("layoutAsync")?.doc,
-    ))))
+  pub fn layout_async(
+    &self,
+    opts: Option<SpreadsheetOptions>,
+  ) -> Result<AsyncTask<SharedLayoutTask>> {
+    Ok(AsyncTask::new(SharedLayoutTask {
+      inner: Arc::clone(&self.inner),
+      opts,
+    }))
   }
 
   #[napi]
@@ -1402,12 +1481,12 @@ impl PdfDown {
     ))))
   }
 
+  /// Structured invoice data. A PDF reads its embedded Factur-X / ZUGFeRD / XRechnung / UBL
+  /// XML; a workbook returns `source: "None"` with a warning until the layout-based engine
+  /// reads spreadsheet pages.
   #[napi]
   pub fn invoice(&self, opts: Option<InvoiceOptions>) -> Result<InvoiceResult> {
-    Ok(extract_invoice_impl(
-      &self.pdf("invoice")?.doc,
-      opts.as_ref(),
-    ))
+    Ok(invoice_of(&self.inner, opts.as_ref()))
   }
 
   #[napi]
@@ -1416,7 +1495,7 @@ impl PdfDown {
     opts: Option<InvoiceOptions>,
   ) -> Result<AsyncTask<SharedInvoiceTask>> {
     Ok(AsyncTask::new(SharedInvoiceTask {
-      doc: Arc::clone(&self.pdf("invoiceAsync")?.doc),
+      inner: Arc::clone(&self.inner),
       opts,
     }))
   }

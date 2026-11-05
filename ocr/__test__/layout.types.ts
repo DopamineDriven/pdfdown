@@ -13,19 +13,22 @@ import type {
 } from "../index";
 import type { layoutPerPage } from "../index";
 
-// `TextSource` is one union in every build; `Rendered` only ever appears at runtime with PDFium.
-true satisfies IsExact<TextSource, "Native" | "Ocr" | "Rendered">;
+// `TextSource` is one union in every build; `Rendered` only ever appears at runtime with PDFium,
+// and `Spreadsheet` on the logical pages of a workbook.
+true satisfies IsExact<TextSource, "Native" | "Ocr" | "Rendered" | "Spreadsheet">;
 true satisfies IsExact<PageLayout["source"], TextSource>;
 
-// Native-only and OCR-only word fields are optional; geometry and the line index never are.
+// Native-only, OCR-only and spreadsheet-only word fields are optional; geometry and the line
+// index never are.
 true satisfies IsExact<
   keyof OnlyOptional<TextWord>,
-  "fontSize" | "fontName" | "bold" | "italic" | "symbolic" | "confidence"
+  "fontSize" | "fontName" | "bold" | "italic" | "symbolic" | "confidence" | "cell"
 >;
 true satisfies IsExact<keyof OnlyRequired<TextWord>, "text" | "x0" | "y0" | "x1" | "y1" | "line">;
 
-// Page-level fields are all required; contentRotation is a plain number (0 on native pages).
-true satisfies IsExact<keyof OnlyOptional<PageLayout>, never>;
+// Page-level fields are required apart from the workbook sheet name; contentRotation is a plain
+// number (0 on native pages).
+true satisfies IsExact<keyof OnlyOptional<PageLayout>, "sheet">;
 true satisfies IsExact<PageLayout["contentRotation"], number>;
 
 // Lines and placements are fully required.

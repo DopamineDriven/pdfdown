@@ -123,11 +123,20 @@ export declare class PdfDown {
   imagesPerPage(): Array<PageImage>;
   annotationsPerPage(): Array<PageAnnotation>;
   metadata(): PdfMeta;
-  /** Positioned words and lines per page from the content stream (native text only). */
-  layout(): Array<PageLayout>;
-  layoutAsync(): Promise<Array<PageLayout>>;
+  /**
+   * Positioned words and lines per page: a PDF's content stream (native text only), or one
+   * logical page per selected sheet of a workbook, where `opts` picks the sheets and whether
+   * hidden rows and columns keep their extents. A PDF ignores `opts`.
+   */
+  layout(opts?: SpreadsheetOptions | undefined | null): Array<PageLayout>;
+  layoutAsync(opts?: SpreadsheetOptions | undefined | null): Promise<Array<PageLayout>>;
   attachments(): Array<Attachment>;
   attachmentsAsync(): Promise<Array<Attachment>>;
+  /**
+   * Structured invoice data. A PDF reads its embedded Factur-X / ZUGFeRD / XRechnung / UBL
+   * XML; a workbook returns `source: "None"` with a warning until the layout-based engine
+   * reads spreadsheet pages.
+   */
   invoice(opts?: InvoiceOptions | undefined | null): InvoiceResult;
   invoiceAsync(opts?: InvoiceOptions | undefined | null): Promise<InvoiceResult>;
   textPerPageAsync(): Promise<Array<PageText>>;
@@ -434,6 +443,17 @@ export interface InvoiceResult {
 export type InvoiceSource = "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "None";
 
 /**
+ * The logical pages of a workbook buffer's selected sheets, as `PageLayout` with
+ * `source: "Spreadsheet"`.
+ */
+export declare function layoutFromXlsx(buffer: Buffer, opts?: SpreadsheetOptions | undefined | null): Array<PageLayout>;
+
+export declare function layoutFromXlsxAsync(
+  buffer: Buffer,
+  opts?: SpreadsheetOptions | undefined | null
+): Promise<Array<PageLayout>>;
+
+/**
  * Positioned words and lines per page from the content stream (native text only).
  * Coordinates are PDF user space in points, y up.
  */
@@ -723,6 +743,8 @@ export interface PageLayout {
    * whose native words (if any) were kept alongside the OCR words.
    */
   source: TextSource;
+  /** Spreadsheet pages only: the sheet this logical page projects. */
+  sheet?: string;
   words: Array<TextWord>;
   lines: Array<TextLine>;
   images: Array<PlacedImage>;
@@ -1036,9 +1058,10 @@ export interface TextLine {
  * feature). A hybrid page keeps its native words alongside the OCR words and
  * still reports the OCR tier, even when that tier added no words; tell the
  * two apart by `confidence`, which only OCR words carry, and see the "native
- * words kept" warnings. Present in every build.
+ * words kept" warnings. `Spreadsheet` is the logical page of a workbook sheet,
+ * laid out from column widths and row heights. Present in every build.
  */
-export type TextSource = "Native" | "Ocr" | "Rendered";
+export type TextSource = "Native" | "Ocr" | "Rendered" | "Spreadsheet";
 
 /** One word with its box in PDF user space (points, y up). */
 export interface TextWord {
@@ -1063,6 +1086,11 @@ export interface TextWord {
   symbolic?: boolean;
   /** OCR only: Tesseract word confidence, 0..1. */
   confidence?: number;
+  /**
+   * Spreadsheet only: the reference of the cell this word was laid out from (`"C3"`); the
+   * anchor for a merged range.
+   */
+  cell?: string;
 }
 
 /**

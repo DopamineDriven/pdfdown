@@ -589,6 +589,7 @@ fn map_ocr_words(words: Vec<OcrWord>, img_w: u32, img_h: u32, dest: [f64; 4]) ->
         font_size: None,
         font: None,
         confidence: Some((f64::from(w.confidence) / 100.0).clamp(0.0, 1.0)),
+        cell: None,
       }
     })
     .collect()
@@ -829,7 +830,7 @@ fn finish_ocr_layout(
   source: TextSource,
   rotation: u32,
 ) -> PageLayout {
-  let (words, lines) = words_to_lines(words, fonts);
+  let (words, lines) = words_to_lines(words, fonts, &[]);
   layout.words = words;
   layout.lines = lines;
   layout.source = source;
@@ -1164,6 +1165,7 @@ mod cascade_tests {
       rotate: 0,
       content_rotation: 0,
       source: TextSource::Native,
+      sheet: None,
       words: words
         .iter()
         .map(|&(x0, y0, x1, y1, t)| TextWord {
@@ -1179,6 +1181,7 @@ mod cascade_tests {
           italic: None,
           symbolic: None,
           confidence: None,
+          cell: None,
         })
         .collect(),
       lines: Vec::new(),
@@ -1260,6 +1263,7 @@ mod cascade_tests {
       font_size: None,
       font: None,
       confidence,
+      cell: None,
     }
   }
 

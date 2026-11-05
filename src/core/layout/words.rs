@@ -21,6 +21,8 @@ pub(crate) struct Word {
   pub font_size: Option<f64>,
   pub font: Option<usize>,
   pub confidence: Option<f64>,
+  /// Spreadsheet words: index into the page's cell references.
+  pub cell: Option<usize>,
 }
 
 impl Word {
@@ -35,6 +37,7 @@ impl Word {
       font_size: Some(g.font_size),
       font: Some(g.font),
       confidence: None,
+      cell: None,
     }
   }
 
@@ -108,10 +111,13 @@ fn vertical_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
 }
 
 /// Cluster words into baseline bands, order bands top to bottom and words
-/// left to right, and emit the public `TextWord` / `TextLine` arrays.
+/// left to right, and emit the public `TextWord` / `TextLine` arrays. `cells`
+/// resolves a spreadsheet word's cell index to its reference; PDF callers pass
+/// an empty slice.
 pub(crate) fn words_to_lines(
   words: Vec<Word>,
   fonts: &[FontMeta],
+  cells: &[String],
 ) -> (Vec<TextWord>, Vec<TextLine>) {
   if words.is_empty() {
     return (Vec::new(), Vec::new());
@@ -185,6 +191,7 @@ pub(crate) fn words_to_lines(
         italic: meta.and_then(|m| m.weight_known.then_some(m.italic)),
         symbolic: meta.map(|m| m.symbolic),
         confidence: w.confidence,
+        cell: w.cell.and_then(|i| cells.get(i).cloned()),
       });
     }
     out_lines.push(TextLine {
@@ -267,7 +274,7 @@ mod tests {
       glyph("right", 200.0, 700.5, 30.0, 10.0),
       glyph("left", 10.0, 700.0, 25.0, 10.0),
     ];
-    let (words, lines) = words_to_lines(glyphs_to_words(&g), &fonts);
+    let (words, lines) = words_to_lines(glyphs_to_words(&g), &fonts, &[]);
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0].text, "left right");
     assert_eq!(lines[1].text, "low");

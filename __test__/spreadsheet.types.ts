@@ -10,6 +10,9 @@ true satisfies IsExact<keyof OnlyOptional<FormatDetection>, "detail">;
 true satisfies IsExact<ReturnType<typeof PdfDown.openAsync>, Promise<PdfDown>>;
 true satisfies IsExact<PdfDown["format"], DocumentFormat>;
 
+// `layout` takes the workbook options; a PDF ignores them.
+true satisfies IsExact<Parameters<PdfDown["layout"]>, [opts?: SpreadsheetOptions | null | undefined]>;
+
 // Cells are a flat discriminated union on `type`; the typed value is `value`, and Blank has none.
 true satisfies IsExact<SheetCell["type"], "Text" | "Number" | "Boolean" | "Error" | "Date" | "Blank">;
 true satisfies IsExact<Extract<SheetCell, { type: "Number" }>["value"], number>;

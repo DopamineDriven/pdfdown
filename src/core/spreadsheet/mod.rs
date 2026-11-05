@@ -4,4 +4,5 @@
 
 pub(crate) mod format;
 pub(crate) mod package;
+pub(crate) mod project;
 pub(crate) mod workbook;
