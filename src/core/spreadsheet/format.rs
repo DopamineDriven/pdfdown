@@ -5,8 +5,8 @@
 //! escaped literals, padding (`_x`, one space) and fill (`*x`, dropped) tokens, colour tags
 //! (dropped), currency and accounting codes with negative sections, the date and time tokens
 //! `y m d h s AM/PM` (where `m` is minutes next to `h` or `s`), the text section `@`. Unsupported,
-//! returning `None` from `parse`: elapsed durations, scientific notation, fractions, conditions,
-//! locale directives, era and Buddhist-year tokens.
+//! returning `None` from `parse`: elapsed durations, scientific notation, fractions (a bare slash
+//! among digit placeholders), conditions, locale directives, era and Buddhist-year tokens.
 
 #[derive(Debug, Clone, PartialEq)]
 enum DateToken {
@@ -39,6 +39,8 @@ enum Token {
   General,
   Text,
   Date(DateToken),
+  /// A bare `/`: a separator between date tokens, a fraction bar between digit placeholders.
+  Slash,
   /// A run of `m` whose meaning (month or minute) is settled once the whole section is read.
   Ambiguous(usize),
 }
@@ -197,6 +199,10 @@ fn parse_section(text: &str) -> Option<Section> {
         tokens.push(Token::Text);
         i += 1;
       }
+      '/' => {
+        tokens.push(Token::Slash);
+        i += 1;
+      }
       'E' | 'e' if matches!(chars.get(i + 1), Some('+' | '-')) => return None,
       'G' | 'g'
         if chars[i..]
@@ -304,6 +310,10 @@ fn parse_section(text: &str) -> Option<Section> {
     )
   });
   if is_date && has_number {
+    return None;
+  }
+  // A bare slash among digit placeholders is a fraction, which this release does not render.
+  if has_number && tokens.iter().any(|t| matches!(t, Token::Slash)) {
     return None;
   }
   let is_text = tokens.iter().any(|t| matches!(t, Token::Text)) && !has_number && !is_date;
@@ -471,6 +481,7 @@ fn render_number(section: &Section, magnitude: f64) -> String {
   for token in &section.tokens {
     match token {
       Token::Literal(text) => out.push_str(text),
+      Token::Slash => out.push('/'),
       Token::General => out.push_str(&render_general(magnitude)),
       Token::Percent => out.push('%'),
       Token::Digit | Token::Decimal | Token::Comma => {
@@ -507,6 +518,7 @@ fn render_date(section: &Section, serial: f64, date1904: bool) -> Option<String>
   for token in &section.tokens {
     match token {
       Token::Literal(text) => out.push_str(text),
+      Token::Slash => out.push('/'),
       Token::Date(t) => out.push_str(&match t {
         DateToken::Year2 => format!("{:02}", year.rem_euclid(100)),
         DateToken::Year4 => format!("{year:04}"),
@@ -681,6 +693,22 @@ mod tests {
       "elapsed time is unsupported"
     );
     assert!(NumberFormat::parse("0.00E+00").is_none());
+    assert!(
+      NumberFormat::parse("# ?/?").is_none(),
+      "fractions are unsupported"
+    );
+    assert!(
+      NumberFormat::parse("# ??/16").is_none(),
+      "fixed-denominator fractions are unsupported"
+    );
+    assert!(
+      NumberFormat::parse("m/d/yyyy").is_some(),
+      "a slash between date tokens is a separator"
+    );
+    assert!(
+      NumberFormat::parse("0.00\"/hr\"").is_some(),
+      "a quoted slash is a literal"
+    );
     assert!(
       NumberFormat::parse("[$-409]mmmm d, yyyy").is_none(),
       "locale directives are unsupported"
