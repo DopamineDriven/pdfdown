@@ -10,10 +10,11 @@ import type {
   SheetCell,
   SpreadsheetOptions
 } from "../index";
-import type { detectFormat } from "../index";
+import type { detectFormat, detectFormatAsync } from "../index";
 
 true satisfies IsExact<DocumentFormat, "Pdf" | "Xlsx" | "Unknown">;
 true satisfies IsExact<ReturnType<typeof detectFormat>, FormatDetection>;
+true satisfies IsExact<ReturnType<typeof detectFormatAsync>, Promise<FormatDetection>>;
 true satisfies IsExact<keyof OnlyOptional<FormatDetection>, "detail">;
 true satisfies IsExact<ReturnType<typeof PdfDown.openAsync>, Promise<PdfDown>>;
 true satisfies IsExact<PdfDown["format"], DocumentFormat>;

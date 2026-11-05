@@ -1447,6 +1447,7 @@ export const BoxType = __napiModule.exports.BoxType
 export const capabilities = __napiModule.exports.capabilities
 export const DateOrder = __napiModule.exports.DateOrder
 export const detectFormat = __napiModule.exports.detectFormat
+export const detectFormatAsync = __napiModule.exports.detectFormatAsync
 export const DocumentFormat = __napiModule.exports.DocumentFormat
 export const EInvoiceStandard = __napiModule.exports.EInvoiceStandard
 export const extractAnnotationsPerPage = __napiModule.exports.extractAnnotationsPerPage

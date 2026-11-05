@@ -149,6 +149,28 @@ pub fn detect_format(buffer: Buffer) -> FormatDetection {
   detect(&buffer)
 }
 
+pub struct DetectFormatTask(Vec<u8>);
+
+#[napi]
+impl Task for DetectFormatTask {
+  type Output = FormatDetection;
+  type JsValue = FormatDetection;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(detect(&self.0))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+/// `detectFormat` off the JavaScript thread: a zip's package directory is read to name it.
+#[napi]
+pub fn detect_format_async(buffer: Buffer) -> AsyncTask<DetectFormatTask> {
+  AsyncTask::new(DetectFormatTask(buffer.to_vec()))
+}
+
 #[napi]
 pub fn pdf_metadata(buffer: Buffer) -> Result<PdfMeta> {
   let doc = load_doc(buffer.as_ref())?;
@@ -798,9 +820,10 @@ pub fn pdf_document_ocr_async(
 
 // ── Step 3: Class-based API with Arc<Document> ──────────────────
 
-/// Shared-document task types for class async methods.
-/// These use Arc<Document> instead of raw bytes, avoiding re-parsing.
-pub struct SharedExtractTextTask(Arc<Document>);
+/// Shared-document task types for class async methods. They hold the parsed document, never raw
+/// bytes, and check the document kind inside `compute`, so a workbook handed a PDF-only method
+/// rejects the promise rather than throwing before it exists.
+pub struct SharedExtractTextTask(Arc<ParsedDocument>);
 
 #[napi]
 impl Task for SharedExtractTextTask {
@@ -808,7 +831,7 @@ impl Task for SharedExtractTextTask {
   type JsValue = Vec<PageText>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    extract_text(&self.0)
+    extract_text(&pdf_of(&self.0, "textPerPageAsync")?.doc)
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -816,7 +839,7 @@ impl Task for SharedExtractTextTask {
   }
 }
 
-pub struct SharedExtractImagesTask(Arc<Document>);
+pub struct SharedExtractImagesTask(Arc<ParsedDocument>);
 
 #[napi]
 impl Task for SharedExtractImagesTask {
@@ -824,7 +847,9 @@ impl Task for SharedExtractImagesTask {
   type JsValue = Vec<PageImage>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    Ok(extract_images_raw(&self.0))
+    Ok(extract_images_raw(
+      &pdf_of(&self.0, "imagesPerPageAsync")?.doc,
+    ))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -832,7 +857,7 @@ impl Task for SharedExtractImagesTask {
   }
 }
 
-pub struct SharedExtractAnnotationsTask(Arc<Document>);
+pub struct SharedExtractAnnotationsTask(Arc<ParsedDocument>);
 
 #[napi]
 impl Task for SharedExtractAnnotationsTask {
@@ -840,7 +865,9 @@ impl Task for SharedExtractAnnotationsTask {
   type JsValue = Vec<PageAnnotation>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    Ok(extract_annotations(&self.0))
+    Ok(extract_annotations(
+      &pdf_of(&self.0, "annotationsPerPageAsync")?.doc,
+    ))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -867,7 +894,7 @@ impl Task for SharedLayoutTask {
   }
 }
 
-pub struct SharedAttachmentsTask(Arc<Document>);
+pub struct SharedAttachmentsTask(Arc<ParsedDocument>);
 
 #[napi]
 impl Task for SharedAttachmentsTask {
@@ -875,7 +902,9 @@ impl Task for SharedAttachmentsTask {
   type JsValue = Vec<Attachment>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    Ok(extract_attachments(&self.0))
+    Ok(extract_attachments(
+      &pdf_of(&self.0, "attachmentsAsync")?.doc,
+    ))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -902,7 +931,7 @@ impl Task for SharedInvoiceTask {
   }
 }
 
-pub struct SharedPdfMetaTask(Arc<Document>);
+pub struct SharedPdfMetaTask(Arc<ParsedDocument>);
 
 #[napi]
 impl Task for SharedPdfMetaTask {
@@ -910,7 +939,7 @@ impl Task for SharedPdfMetaTask {
   type JsValue = PdfMeta;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    Ok(extract_metadata(&self.0))
+    Ok(extract_metadata(&pdf_of(&self.0, "metadataAsync")?.doc))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -918,7 +947,7 @@ impl Task for SharedPdfMetaTask {
   }
 }
 
-pub struct SharedPdfDocumentTask(Arc<Document>);
+pub struct SharedPdfDocumentTask(Arc<ParsedDocument>);
 
 #[napi]
 impl Task for SharedPdfDocumentTask {
@@ -926,7 +955,7 @@ impl Task for SharedPdfDocumentTask {
   type JsValue = PdfDocument;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    extract_all(&self.0)
+    extract_all(&pdf_of(&self.0, "documentAsync")?.doc)
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -934,7 +963,7 @@ impl Task for SharedPdfDocumentTask {
   }
 }
 
-pub struct SharedStructuredTextTask(Arc<Document>);
+pub struct SharedStructuredTextTask(Arc<ParsedDocument>);
 
 #[napi]
 impl Task for SharedStructuredTextTask {
@@ -942,7 +971,7 @@ impl Task for SharedStructuredTextTask {
   type JsValue = Vec<StructuredPageText>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    extract_structured_text(&self.0)
+    extract_structured_text(&pdf_of(&self.0, "structuredTextAsync")?.doc)
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -950,7 +979,7 @@ impl Task for SharedStructuredTextTask {
   }
 }
 
-pub struct SharedFormFieldsTask(Arc<Document>);
+pub struct SharedFormFieldsTask(Arc<ParsedDocument>);
 
 #[napi]
 impl Task for SharedFormFieldsTask {
@@ -958,7 +987,7 @@ impl Task for SharedFormFieldsTask {
   type JsValue = Vec<PageFormField>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    Ok(extract_forms(&self.0).fields)
+    Ok(extract_forms(&pdf_of(&self.0, "formFieldsPerPageAsync")?.doc).fields)
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -968,8 +997,7 @@ impl Task for SharedFormFieldsTask {
 
 #[cfg(feature = "ocr")]
 pub struct SharedExtractTextOcrTask {
-  doc: Arc<Document>,
-  raw: Arc<Vec<u8>>,
+  inner: Arc<ParsedDocument>,
   lang: String,
   min_len: u32,
   max_threads: u32,
@@ -984,9 +1012,10 @@ impl Task for SharedExtractTextOcrTask {
   type JsValue = Vec<OcrPageText>;
 
   fn compute(&mut self) -> Result<Self::Output> {
+    let state = pdf_of(&self.inner, "textWithOcrPerPageAsync")?;
     extract_text_with_ocr(
-      &self.doc,
-      &self.raw,
+      &state.doc,
+      &state.raw,
       &self.lang,
       self.min_len,
       self.max_threads,
@@ -1002,8 +1031,7 @@ impl Task for SharedExtractTextOcrTask {
 
 #[cfg(feature = "ocr")]
 pub struct SharedLayoutOcrTask {
-  doc: Arc<Document>,
-  raw: Arc<Vec<u8>>,
+  inner: Arc<ParsedDocument>,
   params: OcrParams,
 }
 
@@ -1015,9 +1043,10 @@ impl Task for SharedLayoutOcrTask {
 
   fn compute(&mut self) -> Result<Self::Output> {
     let p = &self.params;
+    let state = pdf_of(&self.inner, "layoutWithOcrAsync")?;
     extract_layout_with_ocr(
-      &self.doc,
-      &self.raw,
+      &state.doc,
+      &state.raw,
       &p.lang,
       p.min_len,
       p.max_threads,
@@ -1033,8 +1062,7 @@ impl Task for SharedLayoutOcrTask {
 
 #[cfg(feature = "ocr")]
 pub struct SharedPdfDocumentOcrTask {
-  doc: Arc<Document>,
-  raw: Arc<Vec<u8>>,
+  inner: Arc<ParsedDocument>,
   lang: String,
   min_len: u32,
   max_threads: u32,
@@ -1049,9 +1077,10 @@ impl Task for SharedPdfDocumentOcrTask {
   type JsValue = PdfDocumentOcr;
 
   fn compute(&mut self) -> Result<Self::Output> {
+    let state = pdf_of(&self.inner, "documentOcrAsync")?;
     extract_all_with_ocr(
-      &self.doc,
-      &self.raw,
+      &state.doc,
+      &state.raw,
       &self.lang,
       self.min_len,
       self.max_threads,
@@ -1067,7 +1096,7 @@ impl Task for SharedPdfDocumentOcrTask {
 
 #[cfg(feature = "render")]
 pub struct SharedRenderPagesTask {
-  raw: Arc<Vec<u8>>,
+  inner: Arc<ParsedDocument>,
   dpi: u32,
   mode: u8,
 }
@@ -1083,7 +1112,7 @@ impl Task for SharedRenderPagesTask {
 
     let dpi = self.dpi;
     let mode = self.mode;
-    let pdf_bytes = &self.raw;
+    let pdf_bytes = &pdf_of(&self.inner, "renderPagesAsync")?.raw;
 
     if mode == RENDER_MODE_NEVER {
       return Ok(Vec::new());
@@ -1166,6 +1195,26 @@ fn unsupported_operation(operation: &str, document: &str) -> Error {
   ))
 }
 
+/// The PDF behind a document, or the unsupported-operation error naming `operation`. Async
+/// methods call this from the task's `compute`, so the error rejects the promise instead of being
+/// thrown before it exists.
+fn pdf_of<'a>(inner: &'a ParsedDocument, operation: &str) -> Result<&'a PdfState> {
+  match inner {
+    ParsedDocument::Pdf(state) => Ok(state),
+    ParsedDocument::Workbook(_) => Err(unsupported_operation(operation, "a workbook")),
+  }
+}
+
+/// The workbook behind a document, or the unsupported-operation error naming `operation`.
+fn workbook_of<'a>(inner: &'a ParsedDocument, operation: &str) -> Result<&'a Workbook> {
+  match inner {
+    ParsedDocument::Workbook(state) => Ok(&state.workbook),
+    ParsedDocument::Pdf(_) => Err(Error::from_reason(format!(
+      "unsupported operation: {operation} reads a workbook; this document is a PDF"
+    ))),
+  }
+}
+
 /// Detect the format, then parse. A PDF header goes to lopdf; a zip is opened once as a package,
 /// so a limit hit while sizing it is reported as `limit exceeded`, a non-workbook package as
 /// `unsupported format`, and a workbook is parsed from that same package. A buffer detection
@@ -1230,12 +1279,10 @@ impl Task for SharedCellsTask {
   type JsValue = Vec<SheetCells>;
 
   fn compute(&mut self) -> Result<Self::Output> {
-    match &*self.inner {
-      ParsedDocument::Workbook(state) => Ok(cells_of(&state.workbook, &self.opts)),
-      ParsedDocument::Pdf(_) => Err(Error::from_reason(
-        "unsupported operation: spreadsheetCellsAsync reads a workbook; this document is a PDF",
-      )),
-    }
+    Ok(cells_of(
+      workbook_of(&self.inner, "spreadsheetCellsAsync")?,
+      &self.opts,
+    ))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -1394,20 +1441,12 @@ impl PdfDown {
 
   /// The PDF behind this document, or the unsupported-operation error naming `operation`.
   fn pdf(&self, operation: &str) -> Result<&PdfState> {
-    match &*self.inner {
-      ParsedDocument::Pdf(state) => Ok(state),
-      ParsedDocument::Workbook(_) => Err(unsupported_operation(operation, "a workbook")),
-    }
+    pdf_of(&self.inner, operation)
   }
 
   /// The workbook behind this document, or the unsupported-operation error naming `operation`.
   fn workbook(&self, operation: &str) -> Result<&Workbook> {
-    match &*self.inner {
-      ParsedDocument::Workbook(state) => Ok(&state.workbook),
-      ParsedDocument::Pdf(_) => Err(Error::from_reason(format!(
-        "unsupported operation: {operation} reads a workbook; this document is a PDF"
-      ))),
-    }
+    workbook_of(&self.inner, operation)
   }
 
   /// The cells of a workbook's selected sheets, typed, with their display text and formulas.
@@ -1424,7 +1463,6 @@ impl PdfDown {
     &self,
     opts: Option<SpreadsheetOptions>,
   ) -> Result<AsyncTask<SharedCellsTask>> {
-    self.workbook("spreadsheetCellsAsync")?;
     Ok(AsyncTask::new(SharedCellsTask {
       inner: Arc::clone(&self.inner),
       opts: opts.unwrap_or_default(),
@@ -1488,7 +1526,7 @@ impl PdfDown {
   #[napi]
   pub fn attachments_async(&self) -> Result<AsyncTask<SharedAttachmentsTask>> {
     Ok(AsyncTask::new(SharedAttachmentsTask(Arc::clone(
-      &self.pdf("attachmentsAsync")?.doc,
+      &self.inner,
     ))))
   }
 
@@ -1514,29 +1552,27 @@ impl PdfDown {
   #[napi]
   pub fn text_per_page_async(&self) -> Result<AsyncTask<SharedExtractTextTask>> {
     Ok(AsyncTask::new(SharedExtractTextTask(Arc::clone(
-      &self.pdf("textPerPageAsync")?.doc,
+      &self.inner,
     ))))
   }
 
   #[napi]
   pub fn images_per_page_async(&self) -> Result<AsyncTask<SharedExtractImagesTask>> {
     Ok(AsyncTask::new(SharedExtractImagesTask(Arc::clone(
-      &self.pdf("imagesPerPageAsync")?.doc,
+      &self.inner,
     ))))
   }
 
   #[napi]
   pub fn annotations_per_page_async(&self) -> Result<AsyncTask<SharedExtractAnnotationsTask>> {
     Ok(AsyncTask::new(SharedExtractAnnotationsTask(Arc::clone(
-      &self.pdf("annotationsPerPageAsync")?.doc,
+      &self.inner,
     ))))
   }
 
   #[napi]
   pub fn metadata_async(&self) -> Result<AsyncTask<SharedPdfMetaTask>> {
-    Ok(AsyncTask::new(SharedPdfMetaTask(Arc::clone(
-      &self.pdf("metadataAsync")?.doc,
-    ))))
+    Ok(AsyncTask::new(SharedPdfMetaTask(Arc::clone(&self.inner))))
   }
 
   #[napi]
@@ -1547,7 +1583,7 @@ impl PdfDown {
   #[napi]
   pub fn document_async(&self) -> Result<AsyncTask<SharedPdfDocumentTask>> {
     Ok(AsyncTask::new(SharedPdfDocumentTask(Arc::clone(
-      &self.pdf("documentAsync")?.doc,
+      &self.inner,
     ))))
   }
 
@@ -1559,7 +1595,7 @@ impl PdfDown {
   #[napi]
   pub fn structured_text_async(&self) -> Result<AsyncTask<SharedStructuredTextTask>> {
     Ok(AsyncTask::new(SharedStructuredTextTask(Arc::clone(
-      &self.pdf("structuredTextAsync")?.doc,
+      &self.inner,
     ))))
   }
 
@@ -1571,7 +1607,7 @@ impl PdfDown {
   #[napi]
   pub fn form_fields_per_page_async(&self) -> Result<AsyncTask<SharedFormFieldsTask>> {
     Ok(AsyncTask::new(SharedFormFieldsTask(Arc::clone(
-      &self.pdf("formFieldsPerPageAsync")?.doc,
+      &self.inner,
     ))))
   }
 }
@@ -1607,7 +1643,6 @@ impl PdfDown {
     &self,
     opts: Option<OcrOptions>,
   ) -> Result<AsyncTask<SharedExtractTextOcrTask>> {
-    let state = self.pdf("textWithOcrPerPageAsync")?;
     maybe_init_pdfium(&opts);
     let lang = opts
       .as_ref()
@@ -1618,8 +1653,7 @@ impl PdfDown {
     let render_dpi = extract_render_dpi(&opts);
     let render_mode = extract_render_mode(&opts);
     Ok(AsyncTask::new(SharedExtractTextOcrTask {
-      doc: Arc::clone(&state.doc),
-      raw: Arc::clone(&state.raw),
+      inner: Arc::clone(&self.inner),
       lang,
       min_len,
       max_threads,
@@ -1649,10 +1683,8 @@ impl PdfDown {
     &self,
     opts: Option<OcrOptions>,
   ) -> Result<AsyncTask<SharedLayoutOcrTask>> {
-    let state = self.pdf("layoutWithOcrAsync")?;
     Ok(AsyncTask::new(SharedLayoutOcrTask {
-      doc: Arc::clone(&state.doc),
-      raw: Arc::clone(&state.raw),
+      inner: Arc::clone(&self.inner),
       params: ocr_params(&opts),
     }))
   }
@@ -1685,7 +1717,6 @@ impl PdfDown {
     &self,
     opts: Option<OcrOptions>,
   ) -> Result<AsyncTask<SharedPdfDocumentOcrTask>> {
-    let state = self.pdf("documentOcrAsync")?;
     maybe_init_pdfium(&opts);
     let lang = opts
       .as_ref()
@@ -1696,8 +1727,7 @@ impl PdfDown {
     let render_dpi = extract_render_dpi(&opts);
     let render_mode = extract_render_mode(&opts);
     Ok(AsyncTask::new(SharedPdfDocumentOcrTask {
-      doc: Arc::clone(&state.doc),
-      raw: Arc::clone(&state.raw),
+      inner: Arc::clone(&self.inner),
       lang,
       min_len,
       max_threads,
@@ -1715,7 +1745,6 @@ impl PdfDown {
     &self,
     opts: Option<RenderOptions>,
   ) -> Result<AsyncTask<SharedRenderPagesTask>> {
-    let state = self.pdf("renderPagesAsync")?;
     use crate::core::render::{RENDER_MODE_ALWAYS, RENDER_MODE_AUTO, RENDER_MODE_NEVER};
     let dpi = crate::core::render::normalize_dpi(opts.as_ref().and_then(|o| o.dpi));
     let mode = opts
@@ -1728,7 +1757,7 @@ impl PdfDown {
       })
       .unwrap_or(RENDER_MODE_ALWAYS);
     Ok(AsyncTask::new(SharedRenderPagesTask {
-      raw: Arc::clone(&state.raw),
+      inner: Arc::clone(&self.inner),
       dpi,
       mode,
     }))

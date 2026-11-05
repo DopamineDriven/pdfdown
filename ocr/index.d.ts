@@ -239,6 +239,9 @@ export type DateOrder = "Auto" | "MDY" | "DMY" | "YMD";
 /** `Pdf`, `Xlsx`, or `Unknown` with what the buffer was instead. */
 export declare function detectFormat(buffer: Buffer): FormatDetection;
 
+/** `detectFormat` off the JavaScript thread: a zip's package directory is read to name it. */
+export declare function detectFormatAsync(buffer: Buffer): Promise<FormatDetection>;
+
 /** What `detectFormat` and `PdfDown` recognise. */
 export type DocumentFormat = "Pdf" | "Xlsx" | "Unknown";
 

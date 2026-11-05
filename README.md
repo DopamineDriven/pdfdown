@@ -55,13 +55,14 @@ export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promi
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>;
 export declare function pdfDocumentAsync(buffer: Buffer): Promise<PdfDocument>;
 export declare function extractFormFieldsPerPageAsync(buffer: Buffer): Promise<Array<PageFormField>>;
+export declare function detectFormatAsync(buffer: Buffer): Promise<FormatDetection>;
 export declare function spreadsheetCellsAsync(buffer: Buffer, opts?: SpreadsheetOptions): Promise<Array<SheetCells>>;
 export declare function layoutFromXlsxAsync(buffer: Buffer, opts?: SpreadsheetOptions): Promise<Array<PageLayout>>;
 ```
 
 ### `PdfDown` class
 
-Parse once, call many. The constructor parses the document once, a PDF or an `.xlsx` workbook, and reuses it across all sync method calls; `openAsync` does the same parse off the JavaScript thread. Async methods share the parsed document across worker threads via `Arc` (atomic reference counting) with zero re-parsing overhead. `format` says which kind was opened; a method that reads the other kind throws an `unsupported operation` error (see [Workbooks](#workbooks)).
+Parse once, call many. The constructor parses the document once, a PDF or an `.xlsx` workbook, and reuses it across all sync method calls; `openAsync` does the same parse off the JavaScript thread. Async methods share the parsed document across worker threads via `Arc` (atomic reference counting) with zero re-parsing overhead. `format` says which kind was opened; a sync method that reads the other kind throws an `unsupported operation` error and an async one rejects with it, so nothing throws before the promise exists (see [Workbooks](#workbooks)).
 
 ```typescript
 export declare class PdfDown {
@@ -867,7 +868,7 @@ Runs in the same order of time as `extractTextPerPage` (single-digit millisecond
 
 ## Workbooks
 
-`PdfDown` opens `.xlsx` workbooks as well as PDFs, in both packages and in the WASI build, with no native dependency: a workbook is a zip of XML, read in pure Rust through the package relationships (never by conventional part names). Hand pdfdown any buffer: `detectFormat` says what it is, `format` says what a document was opened as, and a method that reads the other kind throws an `unsupported operation` error rather than returning a wrong answer. Nothing is evaluated: formulas keep their cached results, and no cell is ever written.
+`PdfDown` opens `.xlsx` workbooks as well as PDFs, in both packages and in the WASI build, with no native dependency: a workbook is a zip of XML, read in pure Rust through the package relationships (never by conventional part names). Hand pdfdown any buffer: `detectFormat` (or `detectFormatAsync`, since naming a zip reads its package directory) says what it is, `format` says what a document was opened as, and a method that reads the other kind fails with an `unsupported operation` error rather than returning a wrong answer: sync methods throw it, async methods reject with it. Nothing is evaluated: formulas keep their cached results, and no cell is ever written.
 
 ```typescript
 import { PdfDown, detectFormat } from "@d0paminedriven/pdfdown";

@@ -6,6 +6,7 @@ import test from "ava";
 import {
   PdfDown,
   detectFormat,
+  detectFormatAsync,
   layoutFromXlsx,
   layoutPerPage,
   spreadsheetCells,
@@ -46,6 +47,36 @@ test("a PDF-only method on a workbook is an unsupported operation, and opening a
   });
   t.throws(() => new PdfDown(read("ole.bin")), { message: /unsupported format: OLE container/ });
   t.is((await PdfDown.openAsync(xlsx)).format, "Xlsx");
+});
+
+test("detectFormatAsync agrees with detectFormat and runs off the main thread", async (t) => {
+  t.deepEqual(await detectFormatAsync(pdf), detectFormat(pdf));
+  t.deepEqual(await detectFormatAsync(xlsx), { format: "Xlsx" });
+  t.deepEqual(await detectFormatAsync(read("not-a-workbook.docx")), {
+    format: "Unknown",
+    detail: "Word document package"
+  });
+});
+
+test("async methods on the wrong document kind reject; nothing throws before the promise exists", async (t) => {
+  const wb = new PdfDown(form);
+  for (const [name, call] of [
+    ["textPerPageAsync", () => wb.textPerPageAsync()],
+    ["imagesPerPageAsync", () => wb.imagesPerPageAsync()],
+    ["annotationsPerPageAsync", () => wb.annotationsPerPageAsync()],
+    ["attachmentsAsync", () => wb.attachmentsAsync()],
+    ["metadataAsync", () => wb.metadataAsync()],
+    ["documentAsync", () => wb.documentAsync()],
+    ["structuredTextAsync", () => wb.structuredTextAsync()],
+    ["formFieldsPerPageAsync", () => wb.formFieldsPerPageAsync()]
+  ] as const) {
+    await t.throwsAsync(call, {
+      message: new RegExp(`^unsupported operation: ${name} reads a PDF; this document is a workbook$`)
+    });
+  }
+  await t.throwsAsync(() => new PdfDown(pdf).spreadsheetCellsAsync(), {
+    message: /^unsupported operation: spreadsheetCellsAsync reads a workbook; this document is a PDF$/
+  });
 });
 
 test("a zip past the input cap is a limit error, not an unsupported format", (t) => {

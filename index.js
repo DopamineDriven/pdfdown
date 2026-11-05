@@ -842,6 +842,7 @@ module.exports.BoxType = nativeBinding.BoxType
 module.exports.capabilities = nativeBinding.capabilities
 module.exports.DateOrder = nativeBinding.DateOrder
 module.exports.detectFormat = nativeBinding.detectFormat
+module.exports.detectFormatAsync = nativeBinding.detectFormatAsync
 module.exports.DocumentFormat = nativeBinding.DocumentFormat
 module.exports.EInvoiceStandard = nativeBinding.EInvoiceStandard
 module.exports.extractAnnotationsPerPage = nativeBinding.extractAnnotationsPerPage
