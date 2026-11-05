@@ -159,6 +159,34 @@ test("spreadsheetCells options: hidden sheets and hidden cells", (t) => {
   });
 });
 
+test("spreadsheetCells carries the sheet's geometry: defaults, the columns and rows that differ, and a box on every cell", (t) => {
+  const [s] = new PdfDown(form).spreadsheetCells();
+  // The sheet frame runs from A1 to the last non-empty cell or merged range (A1:F22 here), y up.
+  t.like(s, { width: 385.5, height: 345, defaultColumnWidth: 48, defaultRowHeight: 15 });
+  t.deepEqual(s.columns, [
+    { index: 0, width: 105, hidden: false },
+    { index: 1, width: 63, hidden: false },
+    { index: 2, width: 73.5, hidden: false }
+  ]);
+  t.deepEqual(s.rows, [
+    { index: 9, height: 15, hidden: true },
+    { index: 10, height: 30, hidden: false }
+  ]);
+  t.deepEqual(cell(s.cells, "C3")?.box, { x0: 168, y0: 300, x1: 241.5, y1: 315 });
+  t.deepEqual(cell(s.cells, "A1")?.box, { x0: 0, y0: 330, x1: 385.5, y1: 345 }, "a merged anchor spans its range");
+  t.deepEqual(cell(s.cells, "A11")?.box, { x0: 0, y0: 150, x1: 105, y1: 195 });
+  t.true(
+    s.cells.every((c) => c.box.x0 <= c.box.x1 && c.box.y0 < c.box.y1 && c.box.x1 <= s.width && c.box.y1 <= s.height)
+  );
+  const [visible] = new PdfDown(form).spreadsheetCells({ hiddenCells: false });
+  t.is(visible.height, 330, "a hidden row has no extent when hidden cells are excluded");
+  t.deepEqual(visible.rows, [
+    { index: 9, height: 0, hidden: true },
+    { index: 10, height: 30, hidden: false }
+  ]);
+  t.deepEqual(new PdfDown(xlsx).spreadsheetCells()[0].columns, [], "no column differs from the default");
+});
+
 test("spreadsheetCellsAsync and the standalone function agree", async (t) => {
   const doc = await PdfDown.openAsync(form);
   t.deepEqual(await doc.spreadsheetCellsAsync(), spreadsheetCells(form));

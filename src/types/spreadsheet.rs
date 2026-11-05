@@ -31,6 +31,37 @@ pub struct SpreadsheetOptions {
   pub hidden_cells: Option<bool>,
 }
 
+/// A rectangle in the sheet frame: points, y up, with A1's top-left corner at `(0, height)`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[napi(object)]
+pub struct CellBox {
+  pub x0: f64,
+  pub y0: f64,
+  pub x1: f64,
+  pub y1: f64,
+}
+
+/// A column whose width differs from the sheet default, or that is hidden. 0-based.
+#[derive(Debug, Clone, PartialEq)]
+#[napi(object)]
+pub struct SheetColumn {
+  pub index: u32,
+  /// Points; zero for a hidden column when hidden cells are excluded.
+  pub width: f64,
+  pub hidden: bool,
+}
+
+/// A row whose height differs from the sheet default (auto-fit growth included), or that is
+/// hidden. 0-based.
+#[derive(Debug, Clone, PartialEq)]
+#[napi(object)]
+pub struct SheetRow {
+  pub index: u32,
+  /// Points; zero for a hidden row when hidden cells are excluded.
+  pub height: f64,
+  pub hidden: bool,
+}
+
 /// The fields every cell carries, however it is typed.
 pub(crate) struct CellCommon {
   pub reference: String,
@@ -45,6 +76,7 @@ pub(crate) struct CellCommon {
   pub cached: bool,
   pub merge: Option<String>,
   pub hidden: bool,
+  pub r#box: CellBox,
 }
 
 macro_rules! sheet_cell {
@@ -55,7 +87,8 @@ macro_rules! sheet_cell {
     /// dates), `format` the code that produced `text`, `formula` the expression stored on this
     /// cell, `sharedFormula` the master cell when this cell follows a shared formula, `cached`
     /// whether a result was stored, `merge` the range this cell anchors, `hidden` whether its row
-    /// or column is hidden.
+    /// or column is hidden, `box` its rectangle in the sheet frame (a merged anchor spans its
+    /// range).
     #[derive(Debug, Clone)]
     #[napi(object_from_js = false)]
     pub enum SheetCell {
@@ -72,6 +105,7 @@ macro_rules! sheet_cell {
         cached: bool,
         merge: Option<String>,
         hidden: bool,
+        r#box: CellBox,
         $($field: $($ty)+,)*
       },)+
     }
@@ -91,6 +125,7 @@ macro_rules! sheet_cell {
           cached: c.cached,
           merge: c.merge,
           hidden: c.hidden,
+          r#box: c.r#box,
           $($field,)*
         }
       })+
@@ -121,6 +156,16 @@ pub struct SheetCells {
   pub print_area: Option<String>,
   /// Merged ranges in A1 form.
   pub merges: Vec<String>,
+  /// The sheet frame's size in points: A1 to the last non-empty cell or merged range, with hidden
+  /// rows and columns counted or not per `hiddenCells`.
+  pub width: f64,
+  pub height: f64,
+  /// Points; what a column or row absent from `columns` / `rows` measures.
+  pub default_column_width: f64,
+  pub default_row_height: f64,
+  /// Only the columns and rows that differ from the default or are hidden.
+  pub columns: Vec<SheetColumn>,
+  pub rows: Vec<SheetRow>,
   pub warnings: Vec<String>,
   pub cells: Vec<SheetCell>,
 }

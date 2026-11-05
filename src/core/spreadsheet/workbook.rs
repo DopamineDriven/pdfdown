@@ -12,7 +12,8 @@ use roxmltree::Node;
 
 use super::format::{NumberFormat, iso_date, render_general};
 use super::package::{Package, SpreadsheetError, parse_xml};
-use crate::types::{SheetCell, SheetCells, SpreadsheetOptions};
+use super::project::sheet_geometry;
+use crate::types::{CellBox, SheetCell, SheetCells, SpreadsheetOptions};
 
 /// A workbook with more cells or merges than this is refused rather than modelled.
 pub(crate) const MAX_CELLS: usize = 2_000_000;
@@ -947,6 +948,7 @@ pub(crate) fn cells_of(workbook: &Workbook, opts: &SpreadsheetOptions) -> Vec<Sh
   selected_sheets(workbook, opts)
     .into_iter()
     .map(|sheet| {
+      let geometry = sheet_geometry(sheet, &workbook.styles, hidden_cells);
       let cells = sheet
         .cells
         .iter()
@@ -955,7 +957,8 @@ pub(crate) fn cells_of(workbook: &Workbook, opts: &SpreadsheetOptions) -> Vec<Sh
           if hidden && !hidden_cells {
             return None;
           }
-          Some(public_cell(row, col, cell, hidden))
+          let r#box = geometry.boxes.get(&(row, col)).copied().unwrap_or_default();
+          Some(public_cell(row, col, cell, hidden, r#box))
         })
         .collect();
       SheetCells {
@@ -965,6 +968,12 @@ pub(crate) fn cells_of(workbook: &Workbook, opts: &SpreadsheetOptions) -> Vec<Sh
         dimension: sheet.dimension.map(|d| d.a1()),
         print_area: sheet.print_area.map(|p| p.a1()),
         merges: sheet.merges.iter().map(CellRange::a1).collect(),
+        width: geometry.width,
+        height: geometry.height,
+        default_column_width: geometry.default_column_width,
+        default_row_height: geometry.default_row_height,
+        columns: geometry.columns,
+        rows: geometry.rows,
         warnings: sheet.warnings.clone(),
         cells,
       }
@@ -972,7 +981,7 @@ pub(crate) fn cells_of(workbook: &Workbook, opts: &SpreadsheetOptions) -> Vec<Sh
     .collect()
 }
 
-fn public_cell(row: u32, col: u32, cell: &Cell, hidden: bool) -> SheetCell {
+fn public_cell(row: u32, col: u32, cell: &Cell, hidden: bool, r#box: CellBox) -> SheetCell {
   let common = crate::types::CellCommon {
     reference: cell_ref(row, col),
     row,
@@ -986,6 +995,7 @@ fn public_cell(row: u32, col: u32, cell: &Cell, hidden: bool) -> SheetCell {
     cached: cell.cached,
     merge: cell.merge.map(|m| m.a1()),
     hidden,
+    r#box,
   };
   match &cell.value {
     CellValue::Text(v) => SheetCell::text(common, v.clone()),

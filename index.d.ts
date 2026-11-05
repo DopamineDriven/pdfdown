@@ -214,6 +214,14 @@ export interface Capabilities {
   render: boolean;
 }
 
+/** A rectangle in the sheet frame: points, y up, with A1's top-left corner at `(0, height)`. */
+export interface CellBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 export interface ChoiceOption {
   exportValue: string;
   displayValue: string;
@@ -794,7 +802,8 @@ export declare function renderPagesAsync(
  * dates), `format` the code that produced `text`, `formula` the expression stored on this
  * cell, `sharedFormula` the master cell when this cell follows a shared formula, `cached`
  * whether a result was stored, `merge` the range this cell anchors, `hidden` whether its row
- * or column is hidden.
+ * or column is hidden, `box` its rectangle in the sheet frame (a merged anchor spans its
+ * range).
  */
 export type SheetCell =
   | {
@@ -811,6 +820,7 @@ export type SheetCell =
       cached: boolean;
       merge?: string;
       hidden: boolean;
+      box: CellBox;
       value: string;
     }
   | {
@@ -827,6 +837,7 @@ export type SheetCell =
       cached: boolean;
       merge?: string;
       hidden: boolean;
+      box: CellBox;
       value: number;
     }
   | {
@@ -843,6 +854,7 @@ export type SheetCell =
       cached: boolean;
       merge?: string;
       hidden: boolean;
+      box: CellBox;
       value: boolean;
     }
   | {
@@ -859,6 +871,7 @@ export type SheetCell =
       cached: boolean;
       merge?: string;
       hidden: boolean;
+      box: CellBox;
       value: string;
     }
   | {
@@ -875,6 +888,7 @@ export type SheetCell =
       cached: boolean;
       merge?: string;
       hidden: boolean;
+      box: CellBox;
       value: string;
     }
   | {
@@ -891,6 +905,7 @@ export type SheetCell =
       cached: boolean;
       merge?: string;
       hidden: boolean;
+      box: CellBox;
     };
 
 /** One selected worksheet's cells, with the sheet facts a reader needs beside them. */
@@ -904,8 +919,39 @@ export interface SheetCells {
   printArea?: string;
   /** Merged ranges in A1 form. */
   merges: Array<string>;
+  /**
+   * The sheet frame's size in points: A1 to the last non-empty cell or merged range, with hidden
+   * rows and columns counted or not per `hiddenCells`.
+   */
+  width: number;
+  height: number;
+  /** Points; what a column or row absent from `columns` / `rows` measures. */
+  defaultColumnWidth: number;
+  defaultRowHeight: number;
+  /** Only the columns and rows that differ from the default or are hidden. */
+  columns: Array<SheetColumn>;
+  rows: Array<SheetRow>;
   warnings: Array<string>;
   cells: Array<SheetCell>;
+}
+
+/** A column whose width differs from the sheet default, or that is hidden. 0-based. */
+export interface SheetColumn {
+  index: number;
+  /** Points; zero for a hidden column when hidden cells are excluded. */
+  width: number;
+  hidden: boolean;
+}
+
+/**
+ * A row whose height differs from the sheet default (auto-fit growth included), or that is
+ * hidden. 0-based.
+ */
+export interface SheetRow {
+  index: number;
+  /** Points; zero for a hidden row when hidden cells are excluded. */
+  height: number;
+  hidden: boolean;
 }
 
 /** The cells of a workbook buffer's selected sheets. */
