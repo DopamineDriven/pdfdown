@@ -1,20 +1,21 @@
-//! Invoice extraction orchestration. Track 1 (this version): embedded
-//! e-invoice XML. Later tracks add layout-based heuristics over native text
-//! and OCR; they will fill the same `InvoiceResult` shape.
+//! Invoice extraction orchestration: track 1 reads embedded e-invoice XML; track 2, the
+//! layout track in `layout.rs` and the modules beside it, reads the pages when there is none.
 
 pub(crate) mod einvoice;
+pub(crate) mod layout;
 
 use crate::core::attachments::extract_attachments;
-use crate::types::{
-  EmbeddedInvoiceXml, InvoiceDocumentType, InvoiceFields, InvoiceOptions, InvoiceResult,
-  InvoiceSource,
-};
+use crate::types::{EmbeddedInvoiceXml, InvoiceOptions, InvoiceResult, InvoiceSource, PageLayout};
 use lopdf::Document;
 
-pub(crate) const NO_SOURCE_WARNING: &str = "no embedded e-invoice XML (Factur-X / ZUGFeRD / XRechnung / UBL) was found; \
-   layout-based extraction is not available in this version";
+pub(crate) const NO_XML_WARNING: &str = "no embedded e-invoice XML (Factur-X / ZUGFeRD / XRechnung / UBL) was found; the pages were read instead";
 
-pub(crate) fn extract_invoice(doc: &Document, opts: Option<&InvoiceOptions>) -> InvoiceResult {
+/// Embedded XML first when preferred, else the layout track over `pages`.
+pub(crate) fn extract_invoice(
+  doc: &Document,
+  opts: Option<&InvoiceOptions>,
+  pages: &[PageLayout],
+) -> InvoiceResult {
   let mut warnings = Vec::new();
   let prefer_xml = opts.and_then(|o| o.prefer_embedded_xml).unwrap_or(true);
 
@@ -41,6 +42,8 @@ pub(crate) fn extract_invoice(doc: &Document, opts: Option<&InvoiceOptions>) -> 
               profile: found.profile,
               xml: found.xml,
             }),
+            currency_source: None,
+            credit_signals: Vec::new(),
           };
         }
         Err(e) => warnings.push(format!("embedded XML could not be re-parsed: {e}")),
@@ -50,13 +53,11 @@ pub(crate) fn extract_invoice(doc: &Document, opts: Option<&InvoiceOptions>) -> 
     warnings.push("preferEmbeddedXml is false; embedded XML was not consulted".to_string());
   }
 
-  warnings.push(NO_SOURCE_WARNING.to_string());
-  InvoiceResult {
-    source: InvoiceSource::None,
-    document_type: InvoiceDocumentType::Unknown,
-    confidence: 0.0,
-    fields: InvoiceFields::default(),
-    warnings,
-    embedded_xml: None,
+  if prefer_xml {
+    warnings.push(NO_XML_WARNING.to_string());
   }
+  let mut result = layout::extract_from_pages(pages, opts);
+  warnings.append(&mut result.warnings);
+  result.warnings = warnings;
+  result
 }

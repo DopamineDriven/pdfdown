@@ -1,6 +1,7 @@
 import type {
   AircraftReference,
   Attachment,
+  CurrencySource,
   EInvoiceStandard,
   InvoiceDocumentType,
   InvoiceOptions,
@@ -8,12 +9,21 @@ import type {
   InvoiceSource,
   IsExact,
   MoneyField,
+  PageLayout,
   StringField
 } from "../index";
-import type { extractInvoice } from "../index";
+import type { extractInvoice, invoiceFromLayout } from "../index";
 
 // shape
-true satisfies IsExact<InvoiceSource, "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "None">;
+true satisfies IsExact<InvoiceSource, "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "Spreadsheet" | "None">;
+true satisfies IsExact<CurrencySource, "Page" | "Content" | "Option" | "Unknown">;
+true satisfies IsExact<InvoiceResult["currencySource"], CurrencySource | undefined>;
+true satisfies IsExact<InvoiceResult["creditSignals"], string[]>;
+true satisfies IsExact<ReturnType<typeof invoiceFromLayout>, InvoiceResult>;
+true satisfies IsExact<
+  Parameters<typeof invoiceFromLayout>,
+  [pages: PageLayout[], opts?: InvoiceOptions | null | undefined]
+>;
 true satisfies IsExact<EInvoiceStandard, "FacturX" | "ZUGFeRD" | "XRechnung" | "UBL" | "Unknown">;
 true satisfies IsExact<InvoiceDocumentType, "Invoice" | "CreditNote" | "Unknown">;
 true satisfies IsExact<NonNullable<InvoiceOptions["decimalSeparator"]>, "Auto" | "." | ",">;

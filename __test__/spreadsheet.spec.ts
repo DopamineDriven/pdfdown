@@ -7,6 +7,7 @@ import {
   PdfDown,
   detectFormat,
   detectFormatAsync,
+  invoiceFromLayout,
   layoutFromXlsx,
   layoutPerPage,
   spreadsheetCells,
@@ -261,9 +262,9 @@ test("layout options on a workbook: hidden cells restore their extents; hidden s
   t.deepEqual(layoutPerPage(pdf), new PdfDown(pdf).layout(), "PDF layout ignores the options");
 });
 
-test("invoice on a workbook returns the no-source shape until the shared engine exists", async (t) => {
+test("invoice on a workbook runs the layout track over its logical pages", async (t) => {
   const result = await new PdfDown(form).invoiceAsync();
-  t.like(result, { source: "None", documentType: "Unknown", confidence: 0 });
+  t.is(result.source, "Spreadsheet");
   t.deepEqual(result.fields.items, []);
-  t.true(result.warnings.some((w) => /layout-based extraction is not available yet/.test(w)));
+  t.deepEqual(result, invoiceFromLayout(new PdfDown(form).layout()));
 });

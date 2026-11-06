@@ -227,6 +227,12 @@ export interface ChoiceOption {
   displayValue: string;
 }
 
+/**
+ * Which tier named the currency: evidence on the page (an ISO code or an unambiguous glyph),
+ * content priors such as the vendor's country, the caller's option, or nothing.
+ */
+export type CurrencySource = "Page" | "Content" | "Option" | "Unknown";
+
 /** `value` is an ISO 8601 calendar date, `YYYY-MM-DD`. */
 export interface DateField {
   value: string;
@@ -372,6 +378,20 @@ export interface InvoiceFields {
   items: Array<InvoiceItem>;
 }
 
+/**
+ * The layout track over pages from anywhere: a PDF's own layout, `layoutWithOcr`, a workbook's
+ * logical pages, or pages the caller built.
+ */
+export declare function invoiceFromLayout(
+  pages: Array<PageLayout>,
+  opts?: InvoiceOptions | undefined | null
+): InvoiceResult;
+
+export declare function invoiceFromLayoutAsync(
+  pages: Array<PageLayout>,
+  opts?: InvoiceOptions | undefined | null
+): Promise<InvoiceResult>;
+
 export interface InvoiceItem {
   description?: StringField;
   productCode?: StringField;
@@ -413,13 +433,17 @@ export interface InvoiceResult {
   fields: InvoiceFields;
   warnings: Array<string>;
   embeddedXml?: EmbeddedInvoiceXml;
+  /** Which tier named `fields.currencyCode`; absent when no layout pass ran. */
+  currencySource?: CurrencySource;
+  /** The evidence behind `documentType: CreditNote`; empty otherwise. */
+  creditSignals: Array<string>;
 }
 
 /**
  * Which extraction path produced the result. `None` means no path could
  * (no embedded XML, and layout-based extraction is not available yet).
  */
-export type InvoiceSource = "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "None";
+export type InvoiceSource = "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "Spreadsheet" | "None";
 
 /**
  * The logical pages of a workbook buffer's selected sheets, as `PageLayout` with

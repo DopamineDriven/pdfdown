@@ -120,7 +120,7 @@ test("parseExpected keeps the known keys with the right types and reports the re
   t.is(warnings.length, 4, warnings.join(" | "));
 });
 
-test("baseline: sample invoices without a heuristic track score 0% with source None, ids without an expected file are skipped and counted", (t) => {
+test("baseline: sample invoices read from their pages score 0% before the header track fills fields; ids without an expected file are skipped and counted", (t) => {
   const root = mkdtempSync(join(tmpdir(), "pdfdown-eval-"));
   try {
     copyFileSync(join(FIXTURES, "invoices", "wordpress-pdf-invoice-plugin-sample.pdf"), join(root, "100001.pdf"));
@@ -136,8 +136,8 @@ test("baseline: sample invoices without a heuristic track score 0% with source N
     t.deepEqual(
       report.scores.map((s) => [s.id, s.source]),
       [
-        ["100001", "None"],
-        ["100002", "None"]
+        ["100001", "Native"],
+        ["100002", "Native"]
       ]
     );
     t.is(report.table.all.fields.invoiceId.documentWeighted, 0);

@@ -220,7 +220,20 @@ pub enum InvoiceSource {
   Ocr,
   Rendered,
   Mixed,
+  /// The logical pages of a workbook.
+  Spreadsheet,
   None,
+}
+
+/// Which tier named the currency: evidence on the page (an ISO code or an unambiguous glyph),
+/// content priors such as the vendor's country, the caller's option, or nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[napi(string_enum)]
+pub enum CurrencySource {
+  Page,
+  Content,
+  Option,
+  Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,6 +275,10 @@ pub struct InvoiceResult {
   pub fields: InvoiceFields,
   pub warnings: Vec<String>,
   pub embedded_xml: Option<EmbeddedInvoiceXml>,
+  /// Which tier named `fields.currencyCode`; absent when no layout pass ran.
+  pub currency_source: Option<CurrencySource>,
+  /// The evidence behind `documentType: CreditNote`; empty otherwise.
+  pub credit_signals: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -47,6 +47,7 @@ use crate::core::document::{extract_all, extract_annotations};
 use crate::core::forms::extract_forms;
 use crate::core::images::extract_images_raw;
 use crate::core::invoice::extract_invoice as extract_invoice_impl;
+use crate::core::invoice::layout::extract_from_pages;
 use crate::core::layout::extract_layout;
 use crate::core::meta::extract_metadata;
 use crate::core::text::{extract_structured_text, extract_text};
@@ -208,7 +209,67 @@ pub fn attachments(buffer: Buffer) -> Result<Vec<Attachment>> {
 #[napi]
 pub fn extract_invoice(buffer: Buffer, opts: Option<InvoiceOptions>) -> Result<InvoiceResult> {
   let doc = load_doc(buffer.as_ref())?;
-  Ok(extract_invoice_impl(&doc, opts.as_ref()))
+  let pages = pdf_invoice_pages(&doc, buffer.as_ref());
+  Ok(extract_invoice_impl(&doc, opts.as_ref(), &pages))
+}
+
+/// The pages `invoice()` reads for a PDF: every page's native layout, and in the OCR build the
+/// cascade with default options on the first and the last page only, the two pages the header
+/// track reads, so a long scan does not cost a whole-document OCR here.
+#[cfg(feature = "ocr")]
+fn pdf_invoice_pages(doc: &Document, raw: &[u8]) -> Vec<PageLayout> {
+  let last = doc.get_pages().len() as u32;
+  let p = ocr_params(&None);
+  extract_layout_with_ocr(
+    doc,
+    raw,
+    &p.lang,
+    p.min_len,
+    p.max_threads,
+    p.render_dpi,
+    p.render_mode,
+    Some(&[1, last]),
+  )
+  .unwrap_or_else(|_| extract_layout(doc))
+}
+
+#[cfg(not(feature = "ocr"))]
+fn pdf_invoice_pages(doc: &Document, _raw: &[u8]) -> Vec<PageLayout> {
+  extract_layout(doc)
+}
+
+/// The layout track over pages from anywhere: a PDF's own layout, `layoutWithOcr`, a workbook's
+/// logical pages, or pages the caller built.
+#[napi]
+pub fn invoice_from_layout(pages: Vec<PageLayout>, opts: Option<InvoiceOptions>) -> InvoiceResult {
+  extract_from_pages(&pages, opts.as_ref())
+}
+
+pub struct InvoiceFromLayoutTask {
+  pages: Vec<PageLayout>,
+  opts: Option<InvoiceOptions>,
+}
+
+#[napi]
+impl Task for InvoiceFromLayoutTask {
+  type Output = InvoiceResult;
+  type JsValue = InvoiceResult;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    Ok(extract_from_pages(&self.pages, self.opts.as_ref()))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output)
+  }
+}
+
+#[napi]
+pub fn invoice_from_layout_async(
+  pages: Vec<PageLayout>,
+  opts: Option<InvoiceOptions>,
+) -> AsyncTask<InvoiceFromLayoutTask> {
+  AsyncTask::new(InvoiceFromLayoutTask { pages, opts })
 }
 
 #[napi]
@@ -286,6 +347,7 @@ pub fn extract_layout_with_ocr_per_page(
     p.max_threads,
     p.render_dpi,
     p.render_mode,
+    None,
   )
 }
 
@@ -565,7 +627,8 @@ impl Task for ExtractInvoiceTask {
 
   fn compute(&mut self) -> Result<Self::Output> {
     let doc = load_doc(&self.data)?;
-    Ok(extract_invoice_impl(&doc, self.opts.as_ref()))
+    let pages = pdf_invoice_pages(&doc, &self.data);
+    Ok(extract_invoice_impl(&doc, self.opts.as_ref(), &pages))
   }
 
   fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
@@ -739,6 +802,7 @@ impl Task for ExtractLayoutOcrTask {
       p.max_threads,
       p.render_dpi,
       p.render_mode,
+      None,
     )
   }
 
@@ -1052,6 +1116,7 @@ impl Task for SharedLayoutOcrTask {
       p.max_threads,
       p.render_dpi,
       p.render_mode,
+      None,
     )
   }
 
@@ -1393,20 +1458,16 @@ fn layout_of(inner: &ParsedDocument, opts: Option<&SpreadsheetOptions>) -> Vec<P
   }
 }
 
-/// What `invoice` returns for a workbook until the layout-based engine reads spreadsheet pages.
-const WORKBOOK_INVOICE_WARNING: &str = "layout-based extraction is not available yet; the workbook's cells are available from spreadsheetCells";
-
 fn invoice_of(inner: &ParsedDocument, opts: Option<&InvoiceOptions>) -> InvoiceResult {
   match inner {
-    ParsedDocument::Pdf(state) => extract_invoice_impl(&state.doc, opts),
-    ParsedDocument::Workbook(_) => InvoiceResult {
-      source: InvoiceSource::None,
-      document_type: InvoiceDocumentType::Unknown,
-      confidence: 0.0,
-      fields: InvoiceFields::default(),
-      warnings: vec![WORKBOOK_INVOICE_WARNING.to_string()],
-      embedded_xml: None,
-    },
+    ParsedDocument::Pdf(state) => {
+      let pages = pdf_invoice_pages(&state.doc, &state.raw);
+      extract_invoice_impl(&state.doc, opts, &pages)
+    }
+    ParsedDocument::Workbook(state) => extract_from_pages(
+      &project(&state.workbook, &SpreadsheetOptions::default()),
+      opts,
+    ),
   }
 }
 
@@ -1675,6 +1736,7 @@ impl PdfDown {
       p.max_threads,
       p.render_dpi,
       p.render_mode,
+      None,
     )
   }
 

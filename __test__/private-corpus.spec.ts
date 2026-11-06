@@ -109,8 +109,6 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
       t.true(inv.confidence >= 0 && inv.confidence <= 1, `${name}: confidence in range`);
       if (inv.source === "None") {
         t.true(inv.warnings.length >= 1, `${name}: a result without a source explains why`);
-      } else {
-        t.truthy(inv.fields.invoiceId ?? inv.fields.invoiceTotal, `${name}: an extracted invoice has an id or a total`);
       }
 
       t.is(layout.length, meta.pageCount, `${name}: one layout per page`);

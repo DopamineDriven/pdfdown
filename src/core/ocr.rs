@@ -999,6 +999,9 @@ fn non_ws_chars(layout: &PageLayout) -> usize {
 /// Positioned text with the same three-tier cascade as [`extract_text_with_ocr`]:
 /// native glyph placement, then OCR of embedded images mapped through their
 /// placements, then (with `render`) OCR of the rasterised page.
+/// `only_pages` lists the 1-based pages the cascade may OCR; pages off the list come back as
+/// their native layout untouched, and `None` means every page.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn extract_layout_with_ocr(
   doc: &Document,
   pdf_bytes: &[u8],
@@ -1007,6 +1010,7 @@ pub(crate) fn extract_layout_with_ocr(
   max_threads: u32,
   render_dpi: u32,
   render_mode: u8,
+  only_pages: Option<&[u32]>,
 ) -> Result<Vec<PageLayout>> {
   let pages = doc.get_pages();
   let page_entries: Vec<(u32, ObjectId)> = pages.iter().map(|(&k, &v)| (k, v)).collect();
@@ -1025,6 +1029,11 @@ pub(crate) fn extract_layout_with_ocr(
     page_entries
       .par_iter()
       .map(|&(page_num, page_id)| {
+        if let Some(list) = only_pages
+          && !list.contains(&page_num)
+        {
+          return native_layout(doc, page_num, page_id).layout;
+        }
         // Tier 1: native glyph placement (also yields image placements for tier 2).
         let NativeLayout {
           layout: native,
@@ -1414,6 +1423,40 @@ mod resolution_tests {
     // Tiny or giant placements clamp to the range Tesseract handles.
     assert_eq!(source_ppi(10_000, 10.0), MAX_SOURCE_PPI);
     assert_eq!(source_ppi(100, 10_000.0), MIN_SOURCE_PPI);
+  }
+}
+
+#[cfg(test)]
+mod page_filter_tests {
+  use super::*;
+
+  /// `invoice()` reads two pages, so its OCR must not cost a whole document; `layoutWithOcr`
+  /// keeps reading every page.
+  #[test]
+  fn page_filter_ocrs_only_the_listed_pages() {
+    let bytes = std::fs::read(concat!(
+      env!("CARGO_MANIFEST_DIR"),
+      "/ocr/__test__/fixtures/multipage-ocr.pdf"
+    ))
+    .unwrap();
+    let doc = Document::load_mem(&bytes).unwrap();
+    let all = extract_layout_with_ocr(&doc, &bytes, "eng", 1, 2, 150, 0, None).unwrap();
+    assert!(all.len() >= 2);
+    assert!(
+      all.iter().all(|p| p.source == TextSource::Ocr),
+      "{:?}",
+      all.iter().map(|p| p.source).collect::<Vec<_>>()
+    );
+    let first = extract_layout_with_ocr(&doc, &bytes, "eng", 1, 2, 150, 0, Some(&[1])).unwrap();
+    assert_eq!(first.len(), all.len());
+    assert_eq!(first[0].source, TextSource::Ocr);
+    assert!(!first[0].words.is_empty());
+    assert!(
+      first[1..]
+        .iter()
+        .all(|p| p.source == TextSource::Native && p.words.is_empty()),
+      "pages off the list stay native"
+    );
   }
 }
 

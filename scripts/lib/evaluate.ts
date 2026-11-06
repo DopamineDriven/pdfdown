@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "fs";
+import { createRequire } from "module";
 import { relative } from "path";
 
-import { extractInvoice } from "../../index";
 import type { CorpusFile } from "./corpus";
 import { expectedPathFor, parseExpected, toExpected } from "./expected";
 import type { TextClass } from "./fingerprint";
@@ -51,6 +51,12 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 const isTextClass = (v: unknown): v is TextClass => v === "native" || v === "scanned" || v === "mixed";
 
 /** Cluster and text class per id from a parsed `profile.json`; entries it cannot read are skipped. */
+/** Which build scores the corpus: the base package, or the OCR package with `PDFDOWN_EVAL_BUILD=ocr`. */
+export const EVAL_BUILD: "base" | "ocr" = process.env.PDFDOWN_EVAL_BUILD === "ocr" ? "ocr" : "base";
+const { extractInvoice }: Pick<typeof import("../../index"), "extractInvoice"> = createRequire(import.meta.url)(
+  EVAL_BUILD === "ocr" ? "../../ocr/index.js" : "../../index.js"
+);
+
 export function profileLookup(profileJson: unknown): Map<string, ProfileLookup> {
   const lookup = new Map<string, ProfileLookup>();
   if (!isRecord(profileJson) || !Array.isArray(profileJson.entries)) return lookup;
