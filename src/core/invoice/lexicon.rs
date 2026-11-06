@@ -3,10 +3,6 @@
 //! Matching is on a normalised form that folds case, punctuation and OCR confusables, and is
 //! scored exact > prefix > fuzzy. The table carries spellings, never where they were seen.
 
-// Consumed by the anchors, priors and parties modules of the next task; until then only the
-// tests call in here.
-#![allow(dead_code)]
-
 /// What a label names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Field {
@@ -336,42 +332,67 @@ pub(crate) struct Hit {
 /// Characters a value may be glued to a label with (`Invoice #13594027`, `No.2015-0831`).
 const GLUE: &[char] = &['#', ':', '.', '-', '/'];
 
-/// One attempt to match a label at word `start`: the normalised label must begin the normalised
-/// text of the words from `start`; a match may end inside a word only at a glue character or a
-/// digit. Returns the exclusive word index after the label and the remainder text.
-fn match_at(words: &[&str], start: usize, label_norm: &str) -> Option<(usize, String)> {
-  // Walk words, building the normalised prefix and tracking where in the raw text we are.
+/// The labels with their normalised forms, computed once.
+struct NormLabel {
+  label: &'static Label,
+  norm: String,
+}
+
+fn norm_labels() -> &'static [NormLabel] {
+  static CACHE: std::sync::OnceLock<Vec<NormLabel>> = std::sync::OnceLock::new();
+  CACHE.get_or_init(|| {
+    LABELS
+      .iter()
+      .map(|label| NormLabel {
+        label,
+        norm: normalize(label.text),
+      })
+      .collect()
+  })
+}
+
+/// One attempt to match a normalised label at word `start`, given the words' normalised forms:
+/// the label must begin the normalised text of the words from `start`; a match may end inside a
+/// word only at a glue character or a digit. Returns the exclusive word index after the label
+/// and the remainder text.
+fn match_at(
+  words: &[&str],
+  norms: &[String],
+  start: usize,
+  label_norm: &str,
+) -> Option<(usize, String)> {
+  let mut built_len = 0usize;
   let mut built = String::new();
-  for (i, word) in words.iter().enumerate().skip(start) {
-    let before = built.len();
-    let norm_word = normalize(word);
-    built.push_str(&norm_word);
-    if built.len() < label_norm.len() {
+  for i in start..words.len() {
+    let before = built_len;
+    let norm_word = &norms[i];
+    built_len += norm_word.len();
+    if built_len < label_norm.len() {
+      built.push_str(norm_word);
       if !label_norm.starts_with(built.as_str()) {
         return None;
       }
       continue;
     }
+    built.push_str(norm_word);
     if !built.starts_with(label_norm) {
       return None;
     }
-    // The label ends within this word (or exactly at its end).
     let consumed_in_word = label_norm.len() - before;
     if consumed_in_word == norm_word.len() {
       let rest = words[i + 1..].join(" ");
       return Some((i + 1, trim_glue(&rest)));
     }
-    // Ends inside the word: find the raw split after `consumed_in_word` normalised chars.
+    // Ends inside the word: find the raw split after `consumed_in_word` normalised bytes.
+    let word = words[i];
     let mut seen = 0usize;
     let mut split: Option<usize> = None;
     for (idx, c) in word.char_indices() {
-      if seen == consumed_in_word {
+      if seen >= consumed_in_word {
         split = Some(idx);
         break;
       }
-      if !normalize(&c.to_string()).is_empty() {
-        seen += 1;
-      }
+      seen += normalize(&c.to_string()).len();
     }
     let split = split?;
     let after = &word[split..];
@@ -427,52 +448,59 @@ fn edit_distance(a: &str, b: &str, max: usize) -> Option<usize> {
 /// prefix of a longer match there scores 0.8; a fuzzy match (one edit per five characters, whole
 /// words only) scores 0.6. Stop words (`Terms`) never hit as a date.
 pub(crate) fn find_labels(words: &[&str], field: Option<Field>) -> Vec<Hit> {
+  let norms: Vec<String> = words.iter().map(|w| normalize(w)).collect();
+  let labels = norm_labels();
   let mut hits: Vec<Hit> = Vec::new();
   for start in 0..words.len() {
+    if norms[start].is_empty() {
+      continue;
+    }
+    let first = norms[start].chars().next();
     // The longest label of any field matching here decides who is a prefix.
     let mut longest = 0usize;
-    let mut exact: Vec<(&'static Label, usize, String)> = Vec::new();
-    for label in LABELS {
-      let norm = normalize(label.text);
-      if let Some((end, remainder)) = match_at(words, start, &norm) {
-        longest = longest.max(norm.len());
-        exact.push((label, end, remainder));
-      }
-    }
-    for (label, end, remainder) in exact {
-      if field.is_some_and(|f| f != label.field) {
+    let mut exact: Vec<(&NormLabel, usize, String)> = Vec::new();
+    for nl in labels {
+      if nl.norm.chars().next() != first {
         continue;
       }
-      let norm_len = normalize(label.text).len();
-      let score = if norm_len == longest { 1.0 } else { 0.8 };
+      if let Some((end, remainder)) = match_at(words, &norms, start, &nl.norm) {
+        longest = longest.max(nl.norm.len());
+        exact.push((nl, end, remainder));
+      }
+    }
+    let any_exact = !exact.is_empty();
+    for (nl, end, remainder) in exact {
+      if field.is_some_and(|f| f != nl.label.field) {
+        continue;
+      }
+      let score = if nl.norm.len() == longest { 1.0 } else { 0.8 };
       hits.push(Hit {
-        label,
+        label: nl.label,
         score,
         start,
         end,
         remainder,
       });
     }
-    // Fuzzy: whole-word prefixes only, and only when nothing exact matched here.
-    if hits.iter().all(|h| h.start != start) {
-      for label in LABELS {
-        if field.is_some_and(|f| f != label.field) {
+    // Fuzzy: whole-word prefixes only, and only where nothing exact matched.
+    if !any_exact && norms[start].len() >= 4 {
+      for nl in labels {
+        if field.is_some_and(|f| f != nl.label.field) {
           continue;
         }
-        let norm = normalize(label.text);
-        let max = norm.chars().count() / 5;
+        let max = nl.norm.len() / 5;
         if max == 0 {
           continue;
         }
         let mut built = String::new();
-        for (i, word) in words.iter().enumerate().skip(start) {
-          built.push_str(&normalize(word));
-          if built.len() > norm.len() + max {
+        for i in start..words.len() {
+          built.push_str(&norms[i]);
+          if built.len() > nl.norm.len() + max {
             break;
           }
-          if edit_distance(&built, &norm, max).is_some() {
+          if edit_distance(&built, &nl.norm, max).is_some() {
             hits.push(Hit {
-              label,
+              label: nl.label,
               score: 0.6,
               start,
               end: i + 1,
@@ -485,11 +513,8 @@ pub(crate) fn find_labels(words: &[&str], field: Option<Field>) -> Vec<Hit> {
     }
   }
   // A date label never reads a terms line.
-  if field == Some(InvoiceDate) || field == Some(DueDate) {
-    let terms = find_labels(words, Some(Terms));
-    if terms.iter().any(|t| t.start == 0) {
-      hits.clear();
-    }
+  if matches!(field, Some(InvoiceDate) | Some(DueDate)) && starts_with_terms(&hits, &norms) {
+    hits.clear();
   }
   hits.sort_by(|a, b| {
     b.score
@@ -499,6 +524,31 @@ pub(crate) fn find_labels(words: &[&str], field: Option<Field>) -> Vec<Hit> {
       .then(b.end.cmp(&a.end))
   });
   hits
+}
+
+/// Whether the segment opens with a terms stop word (checked against the full table, since the
+/// hits at hand may already be filtered to one field).
+fn starts_with_terms(_hits: &[Hit], norms: &[String]) -> bool {
+  norm_labels()
+    .iter()
+    .filter(|nl| nl.label.field == Terms)
+    .any(|nl| {
+      let mut built = String::new();
+      for n in norms {
+        built.push_str(n);
+        if built.len() >= nl.norm.len() {
+          return built.starts_with(&nl.norm) && built.len() == nl.norm.len() || built == nl.norm;
+        }
+      }
+      false
+    })
+}
+
+/// Whether a segment opens with a terms stop word, from its unfiltered hits.
+pub(crate) fn has_terms_at_start(hits: &[Hit]) -> bool {
+  hits
+    .iter()
+    .any(|h| h.start == 0 && h.label.field == Terms && h.score >= 0.8)
 }
 
 /// Whether a segment is the document's title rather than a name: every word is a title word, or

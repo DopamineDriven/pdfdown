@@ -2,10 +2,6 @@
 //! and serial numbers, with the label remnants a value drags along removed and nothing else
 //! changed, so the value compares with what the issuer's own records hold.
 
-// Consumed by the anchors, priors and parties modules of the next task; until then only the
-// tests call in here.
-#![allow(dead_code)]
-
 const LABEL_REMNANTS: &[&str] = &["no.", "no", "nr.", "nr", "n°", "#", ":", "number"];
 
 /// An alphanumeric identifier of 3–30 characters holding a digit; leading `#`, `No.` or `:` and

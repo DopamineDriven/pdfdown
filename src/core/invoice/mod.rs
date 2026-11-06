@@ -2,11 +2,17 @@
 //! layout track in `layout.rs` and the modules beside it, reads the pages when there is none.
 
 pub(crate) mod amounts;
+pub(crate) mod anchors;
 pub(crate) mod dates;
 pub(crate) mod einvoice;
 pub(crate) mod identifiers;
 pub(crate) mod layout;
 pub(crate) mod lexicon;
+pub(crate) mod parties;
+pub(crate) mod priors;
+pub(crate) mod segments;
+#[cfg(test)]
+pub(crate) mod testing;
 
 use crate::core::attachments::extract_attachments;
 use crate::types::{EmbeddedInvoiceXml, InvoiceOptions, InvoiceResult, InvoiceSource, PageLayout};

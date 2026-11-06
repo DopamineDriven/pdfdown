@@ -263,3 +263,33 @@ test("public sample: FNFE Facture_FR_BASICWL carries Factur-X Basic WL", async (
     `${r.fields.vendorName?.value} -> ${r.fields.customerName?.value}: ${r.fields.invoiceId?.value} ${r.fields.invoiceTotal?.text} ${r.fields.currencyCode}, ${r.fields.items.length} line item(s)`
   );
 });
+
+// ── The layout track on the public fixtures ──────────────────────────────────
+
+test("invoice from layout: the wordpress sample's header, parties and references", (t) => {
+  const r = extractInvoice(readFileSync(join(INVOICES, "wordpress-pdf-invoice-plugin-sample.pdf")));
+  t.is(r.source, "Native");
+  t.is(r.fields.invoiceId?.value, "INV-3337");
+  t.is(r.fields.invoiceDate?.value, "2016-01-25");
+  t.is(r.fields.dueDate?.value, "2016-01-31");
+  t.is(r.fields.purchaseOrder?.value, "12345");
+  t.is(r.fields.vendorName?.value, "DEMO - Sliced Invoices");
+  t.deepEqual(r.fields.vendorAddress?.lines, ["Suite 5A-1204", "123 Somewhere Street", "Your City AZ 12345"]);
+  t.is(r.fields.vendorEmail?.value, "admin@slicedinvoices.com");
+  t.is(r.fields.customerName?.value, "Test Business");
+  t.deepEqual(r.fields.customerAddress?.lines, ["123 Somewhere St", "Melbourne, VIC 3000"]);
+  t.is(r.fields.currencyCode, undefined, "$ is a glyph, not a code");
+  t.is(r.currencySource, "Unknown");
+  t.true((r.fields.invoiceId?.confidence ?? 0) >= 0.8);
+  t.is(r.fields.invoiceId?.span?.page, 1);
+});
+
+test("invoice from layout: the TCPDF sample reads a glued invoice number, a bare Date and a USD code", (t) => {
+  const r = extractInvoice(readFileSync(join(INVOICES, "Downloadable-PDF-Invoices-Add-On-Samples.pdf")));
+  t.is(r.fields.invoiceId?.value, "13594027");
+  t.is(r.fields.invoiceDate?.value, "2018-06-23");
+  t.is(r.fields.vendorName?.value, "Your Business Name");
+  t.is(r.fields.customerName?.value, "John Smith");
+  t.is(r.fields.currencyCode, "USD");
+  t.is(r.currencySource, "Page");
+});

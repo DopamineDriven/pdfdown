@@ -120,7 +120,7 @@ test("parseExpected keeps the known keys with the right types and reports the re
   t.is(warnings.length, 4, warnings.join(" | "));
 });
 
-test("baseline: sample invoices read from their pages score 0% before the header track fills fields; ids without an expected file are skipped and counted", (t) => {
+test("baseline: the header track reads one sample's invoice id and no totals yet; ids without an expected file are skipped and counted", (t) => {
   const root = mkdtempSync(join(tmpdir(), "pdfdown-eval-"));
   try {
     copyFileSync(join(FIXTURES, "invoices", "wordpress-pdf-invoice-plugin-sample.pdf"), join(root, "100001.pdf"));
@@ -140,7 +140,11 @@ test("baseline: sample invoices read from their pages score 0% before the header
         ["100002", "Native"]
       ]
     );
-    t.is(report.table.all.fields.invoiceId.documentWeighted, 0);
+    t.is(
+      report.table.all.fields.invoiceId.documentWeighted,
+      0.5,
+      "INV-3337 matches; the other expected id is wrong on purpose"
+    );
     t.is(report.table.all.fields.invoiceTotal.amountWeighted, 0);
     t.is(report.table.all.missingAmounts, 1);
     t.is(report.table.slice, null, "no --ids slice requested");

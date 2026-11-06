@@ -1,10 +1,6 @@
 //! Money as the corpus prints it: a value, its sign, and the code or glyph beside it. The
 //! decimal separator is inferred per document from the tokens that show it unambiguously.
 
-// Consumed by the anchors, priors and parties modules of the next task; until then only the
-// tests call in here.
-#![allow(dead_code)]
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Separator {
   Point,

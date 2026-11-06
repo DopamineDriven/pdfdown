@@ -1,10 +1,6 @@
 //! Dates as the corpus prints them, to ISO `YYYY-MM-DD`, and the day/month order inferred from
 //! the dates that cannot be read two ways.
 
-// Consumed by the anchors, priors and parties modules of the next task; until then only the
-// tests call in here.
-#![allow(dead_code)]
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Order {
   Mdy,
