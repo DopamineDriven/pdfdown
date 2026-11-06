@@ -1,8 +1,12 @@
 //! Invoice extraction orchestration: track 1 reads embedded e-invoice XML; track 2, the
 //! layout track in `layout.rs` and the modules beside it, reads the pages when there is none.
 
+pub(crate) mod amounts;
+pub(crate) mod dates;
 pub(crate) mod einvoice;
+pub(crate) mod identifiers;
 pub(crate) mod layout;
+pub(crate) mod lexicon;
 
 use crate::core::attachments::extract_attachments;
 use crate::types::{EmbeddedInvoiceXml, InvoiceOptions, InvoiceResult, InvoiceSource, PageLayout};
