@@ -1,6 +1,4 @@
-use crate::core::images::{
-  collect_page_decoded_images, collect_page_decoded_images_named, page_path_op_count,
-};
+use crate::core::images::{collect_page_decoded_images_named, page_path_op_count};
 use crate::core::layout::interpreter::FontMeta;
 use crate::core::layout::words::{Word, words_to_lines};
 use crate::core::layout::{NativeLayout, PageGeometry, native_layout, page_geometry, page_layout};
@@ -140,8 +138,10 @@ fn osd_rotation(img: &DynamicImage, datapath: &str, ppi: Option<i32>) -> Option<
   tess
     .set_image(rgb.as_raw(), w as i32, h as i32, 3, (w * 3) as i32)
     .ok()?;
-  // Scans without a stated resolution otherwise make Tesseract assume 70 dpi and warn.
-  let _ = tess.set_source_resolution(ppi.unwrap_or(300));
+  // The detector's non-text filter reads the resolution off the Leptonica image itself, which a
+  // raw-pixel image lacks, so Tesseract still prints its "Invalid resolution 0 dpi" line here;
+  // the settings below reach everything else the detector does.
+  set_resolution(&tess, ppi.unwrap_or(DEFAULT_SOURCE_PPI));
   let (orient_deg, orient_conf, _script, _script_conf) = tess.detect_os().ok()?;
   Some((osd_correction(orient_deg), orient_conf))
 }
@@ -170,7 +170,31 @@ fn rotate_image(img: &DynamicImage, degrees: u32) -> DynamicImage {
 }
 
 /// Plain-text OCR of one image plus Tesseract's mean confidence (0..100).
-fn ocr_image_text(img: &DynamicImage, lang: &str) -> (String, f32) {
+/// Resolution assumed for a raster whose painted size is unknown: a scan, not Tesseract's 70.
+const DEFAULT_SOURCE_PPI: i32 = 300;
+const MIN_SOURCE_PPI: i32 = 70;
+const MAX_SOURCE_PPI: i32 = 1200;
+
+/// Pixels per inch of a raster painted `points` wide. Tesseract sizes its text estimates from
+/// the source resolution and guesses 70 dpi when told nothing, which is wrong for every scan.
+fn source_ppi(pixels: u32, points: f64) -> i32 {
+  if pixels == 0 || !points.is_finite() || points <= 0.0 {
+    return DEFAULT_SOURCE_PPI;
+  }
+  (f64::from(pixels) / (points / 72.0))
+    .round()
+    .clamp(f64::from(MIN_SOURCE_PPI), f64::from(MAX_SOURCE_PPI)) as i32
+}
+
+/// Tell a Tesseract instance the raster's resolution. `user_defined_dpi` is read before the
+/// image's own resolution on every path, the orientation detector included, and the source
+/// resolution after `set_image` covers the recogniser's size estimates.
+fn set_resolution(tess: &tesseract_rs::TesseractAPI, ppi: i32) {
+  let _ = tess.set_variable("user_defined_dpi", &ppi.to_string());
+  let _ = tess.set_source_resolution(ppi);
+}
+
+fn ocr_image_text(img: &DynamicImage, lang: &str, ppi: i32) -> (String, f32) {
   let datapath = get_tessdata_prefix().unwrap_or("");
   let rgb = img.to_rgb8();
   let (w, h) = rgb.dimensions();
@@ -184,6 +208,7 @@ fn ocr_image_text(img: &DynamicImage, lang: &str) -> (String, f32) {
   {
     return (String::new(), 0.0);
   }
+  set_resolution(&tess, ppi);
   let text = tess
     .get_utf8_text()
     .map(|t| t.trim().to_string())
@@ -194,16 +219,16 @@ fn ocr_image_text(img: &DynamicImage, lang: &str) -> (String, f32) {
 
 /// OCR a single DynamicImage and return extracted text. The OSD detector names the turn first when
 /// confident; otherwise the upright pass and the retry over the other turns decide.
-fn ocr_dynamic_image(img: &DynamicImage, lang: &str) -> String {
+fn ocr_dynamic_image(img: &DynamicImage, lang: &str, ppi: i32) -> String {
   let datapath = get_tessdata_prefix().unwrap_or("");
   let mut tried: Vec<u32> = Vec::new();
   let mut best: Option<(String, f32)> = None;
   let mut consider = |degrees: u32, tried: &mut Vec<u32>| -> (bool, bool) {
     tried.push(degrees);
     let candidate = if degrees == 0 {
-      ocr_image_text(img, lang)
+      ocr_image_text(img, lang, ppi)
     } else {
-      ocr_image_text(&rotate_image(img, degrees), lang)
+      ocr_image_text(&rotate_image(img, degrees), lang, ppi)
     };
     if best.as_ref().is_none_or(|b| candidate.1 > b.1) {
       best = Some(candidate);
@@ -218,7 +243,7 @@ fn ocr_dynamic_image(img: &DynamicImage, lang: &str) -> String {
   if convincing {
     return best.expect("a pass was recorded").0;
   }
-  if let Some(degrees) = pick_first_rotation(osd_rotation(img, datapath, None))
+  if let Some(degrees) = pick_first_rotation(osd_rotation(img, datapath, Some(ppi)))
     && degrees != 0
     && consider(degrees, &mut tried).0
   {
@@ -235,17 +260,25 @@ fn ocr_dynamic_image(img: &DynamicImage, lang: &str) -> String {
   best.map(|b| b.0).unwrap_or_default()
 }
 
-fn ocr_page_images(doc: &Document, page_id: ObjectId, lang: &str) -> String {
-  let images: Vec<DynamicImage> = collect_page_decoded_images(doc, page_id);
+/// OCR the page's rasters at the resolution their painted size implies.
+fn ocr_page_images(
+  doc: &Document,
+  page_id: ObjectId,
+  lang: &str,
+  placements: &[PlacedImage],
+) -> String {
   let mut texts = Vec::new();
-
-  for dyn_img in &images {
-    let text = ocr_dynamic_image(dyn_img, lang);
+  for (name, img) in collect_page_decoded_images_named(doc, page_id) {
+    let ppi = placements
+      .iter()
+      .find(|p| p.xobject_name == name)
+      .map(|p| source_ppi(img.width(), p.x1 - p.x0))
+      .unwrap_or(DEFAULT_SOURCE_PPI);
+    let text = ocr_dynamic_image(&img, lang, ppi);
     if !text.is_empty() {
       texts.push(text);
     }
   }
-
   texts.join("\n")
 }
 
@@ -339,7 +372,7 @@ pub(crate) fn extract_text_with_ocr(
         // Tier 2: OCR extracted raster images
         #[cfg_attr(not(feature = "render"), allow(unused_mut))]
         let mut text = if decision == OcrDecision::Ocr {
-          ocr_page_images(doc, page_id, lang)
+          ocr_page_images(doc, page_id, lang, &layout.images)
         } else {
           String::new()
         };
@@ -395,7 +428,7 @@ fn try_render_ocr_page(pdf_bytes: &[u8], page_num: u32, dpi: u32, lang: &str) ->
   // page_num is 1-based, PDFium page index is 0-based
   let page_index = (page_num - 1) as u16;
   let img = render::render_page_to_image_from_bytes(pdf_bytes, page_index, dpi)?;
-  let text = ocr_dynamic_image(&img, lang);
+  let text = ocr_dynamic_image(&img, lang, dpi as i32);
   Some(text)
 }
 
@@ -536,9 +569,7 @@ fn ocr_dynamic_image_words(img: &DynamicImage, lang: &str, ppi: Option<i32>) -> 
   {
     return Vec::new();
   }
-  if let Some(ppi) = ppi {
-    let _ = tess.set_source_resolution(ppi);
-  }
+  set_resolution(&tess, ppi.unwrap_or(DEFAULT_SOURCE_PPI));
   if tess.recognize().is_err() {
     return Vec::new();
   }
@@ -725,7 +756,8 @@ fn ocr_page_image_words(
         placed.len()
       ));
     }
-    let (words, degrees, (rw, rh), decided) = ocr_words_best_orientation(&img, lang, None);
+    let ppi = source_ppi(img.width(), first.x1 - first.x0);
+    let (words, degrees, (rw, rh), decided) = ocr_words_best_orientation(&img, lang, Some(ppi));
     let painted = words_in_painted_raster(words, degrees, rw, rh);
     let mapped = map_ocr_words(
       painted,
@@ -1362,6 +1394,26 @@ mod cascade_tests {
       Some(0.8),
       "the disjoint OCR word survives"
     );
+  }
+}
+
+#[cfg(test)]
+mod resolution_tests {
+  use super::*;
+
+  #[test]
+  fn source_ppi_comes_from_the_painted_size_and_falls_back_to_a_scan_default() {
+    // A 1728 px wide fax raster painted 8.64 in wide (622.08 pt) is a 200 dpi scan.
+    assert_eq!(source_ppi(1728, 622.08), 200);
+    // 2480 px over an A4 width of 595.28 pt is 300 dpi.
+    assert_eq!(source_ppi(2480, 595.28), 300);
+    // No usable placement: Tesseract's own guess of 70 dpi is wrong for scans; assume 300.
+    assert_eq!(source_ppi(1728, 0.0), DEFAULT_SOURCE_PPI);
+    assert_eq!(source_ppi(1728, f64::NAN), DEFAULT_SOURCE_PPI);
+    assert_eq!(source_ppi(0, 622.08), DEFAULT_SOURCE_PPI);
+    // Tiny or giant placements clamp to the range Tesseract handles.
+    assert_eq!(source_ppi(10_000, 10.0), MAX_SOURCE_PPI);
+    assert_eq!(source_ppi(100, 10_000.0), MIN_SOURCE_PPI);
   }
 }
 
