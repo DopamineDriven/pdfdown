@@ -52,11 +52,12 @@
   },
   "devDependencies": {
     "@ava/typescript": "^7.0.0",
+    "@azure-rest/ai-document-intelligence": "^1.1.0",
     "@d0paminedriven/fs": "^11.0.0",
     "@emnapi/core": "2.0.0-alpha.5",
     "@emnapi/runtime": "2.0.0-alpha.5",
-    "@napi-rs/cli": "^3.10.9",
-    "@napi-rs/wasm-runtime": "^1.2.6",
+    "@napi-rs/cli": "^3.10.12",
+    "@napi-rs/wasm-runtime": "^1.2.7",
     "@oxc-node/core": "^1.0.1",
     "@oxc-node/core-wasm32-wasi": "^1.0.1",
     "@taplo/cli": "^0.7.0",
@@ -65,19 +66,20 @@
     "@typescript/native-preview": "^7.0.0-dev.20260707.2",
     "ava": "^8.3.0",
     "chalk": "^6.0.1",
+    "dotenv": "^18.0.9",
     "emnapi": "2.0.0-alpha.5",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
     "npm-run-all2": "^9.0.4",
-    "oxfmt": "^0.75.0",
-    "oxlint": "^1.90.0",
-    "tinybench": "^6.2.2",
+    "oxfmt": "^0.76.0",
+    "oxlint": "^1.91.0",
+    "tinybench": "^6.2.3",
     "tslib": "^2.9.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
   "resolutions": {
-    "@napi-rs/wasm-runtime": "1.2.5"
+    "@napi-rs/wasm-runtime": "1.2.7"
   },
   "lint-staged": {
     "*.@(js|ts|tsx)": [

@@ -6,16 +6,17 @@
 
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join, relative } from "path";
+import {Fs} from "@d0paminedriven/fs";
 
 import test from "ava";
 
-import { discoverCorpus } from "../../scripts/lib/corpus";
-import { detectFormat, extractLayoutWithOcrPerPage, layoutPerPage } from "../index";
-import type { PageLayout, TextSource, TextWord } from "../index";
-
-type Box = [number, number, number, number];
+import { detectFormat, extractLayoutWithOcrPerPage, layoutPerPage } from "@/ocr/index";
+import type { PageLayout, TextSource, TextWord } from "@/ocr/index";
+import { discoverCorpus } from "@/scripts/lib/corpus";
+import type { FlexiRepeater } from "@/type-utils";
+type Box = FlexiRepeater<number, false, 4, 4>;
 const within = (w: TextWord, b: Box) => w.x0 >= b[0] - 1 && w.x1 <= b[2] + 1 && w.y0 >= b[1] - 1 && w.y1 <= b[3] + 1;
-
+const fs = new Fs(process.cwd());
 /**
  * The engine's placement contract: an OCR word lies on the page, or inside the placement of the
  * image it was read from. Words and placements share one frame, the page's turned by
@@ -39,8 +40,8 @@ interface PrivateOcrPage {
   lines: number;
   images: number;
   meanConfidence: number;
-  warnings: Array<string>;
-  lineText: Array<string>;
+  warnings: string[];
+  lineText: string[];
 }
 
 interface PrivateOcrEntry {
@@ -48,29 +49,34 @@ interface PrivateOcrEntry {
   file: string;
   pages: number;
   seconds: number;
-  layout: Array<PrivateOcrPage>;
+  layout: PrivateOcrPage[];
 }
 
 const PRIVATE = join(import.meta.dirname, "fixtures", "private");
 
-const nativeChars = (pages: Array<PageLayout>) =>
+const nativeChars = (pages: PageLayout[]) =>
   pages.reduce((n, p) => n + p.words.reduce((m, w) => m + w.text.replace(/\s+/g, "").length, 0), 0);
-
+const dirPath = `ocr/__test__/fixtures/private`;
 // One level of subdirectories is allowed (the corpus may be grouped by id prefix).
 // The document store names everything .pdf; only real PDFs are read.
-const scanned = existsSync(PRIVATE)
-  ? discoverCorpus(PRIVATE)
-      .filter((f) => f.kind === "pdf")
-      .filter((f) => {
-        const buf = readFileSync(f.path);
-        return detectFormat(buf).format === "Pdf" && nativeChars(layoutPerPage(buf)) <= SCANNED_MAX_NATIVE_CHARS;
-      })
+const scanned = fs.exists(dirPath)
+  ? discoverCorpus(dirPath)
+    .filter((f) => f.kind === "pdf")
+    .filter((f) => {
+      const buf = readFileSync(f.path);
+      return detectFormat(buf).format === "Pdf" && nativeChars(layoutPerPage(buf)) <= SCANNED_MAX_NATIVE_CHARS;
+    })
   : [];
+
+const xlsxFiles=Array.of<string>();
+const pdfFiles=Array.of<string>();
+
+
 
 (scanned.length > 0 ? test : test.skip)("private corpus: scanned invoices OCR into positioned pages", (t) => {
   // Local-only and heavy: every scanned page in the corpus goes through Tesseract (~1.3 s/page here).
   t.timeout(20 * 60 * 1000, "OCR over every scanned document in the private corpus");
-  const entries: Array<PrivateOcrEntry> = [];
+  const entries = Array.of<PrivateOcrEntry>();
   t.log(`${scanned.length} scanned invoice(s)`);
   for (const file of scanned) {
     const name = relative(PRIVATE, file.path);
@@ -80,7 +86,7 @@ const scanned = existsSync(PRIVATE)
     const native = layoutPerPage(buf);
     const seconds = (performance.now() - t0) / 1000;
     t.true(pages.length >= 1, `${name}: pages`);
-    const layout: Array<PrivateOcrPage> = [];
+    const layout = Array.of<PrivateOcrPage>();
     for (const p of pages) {
       t.true(p.source === "Ocr" || p.source === "Rendered", `${name} p${p.page}: OCR source, got ${p.source}`);
       t.true([0, 90, 180, 270].includes(p.contentRotation), `${name} p${p.page}: contentRotation`);
@@ -126,13 +132,13 @@ const scanned = existsSync(PRIVATE)
         lineText: p.lines.map((l) => l.text)
       });
       t.log(
-        `${name} p${String(p.page).padStart(2)}  ${p.source.padEnd(8)}  rot ${String(p.contentRotation).padStart(3)}  words ${String(p.words.length).padStart(4)}  conf ${meanConfidence.toFixed(2)}`
+        `${name} p${p.page.toString(10).padStart(2)}  ${p.source.padEnd(8)}  rot ${p.contentRotation.toString(10).padStart(3)}  words ${p.words.length.toString(10).padStart(4)}  conf ${meanConfidence.toFixed(2)}`
       );
     }
     entries.push({ id: file.id, file: name, pages: pages.length, seconds, layout });
     t.log(`${name}: ${pages.length} pages in ${seconds.toFixed(1)}s`);
   }
-  const report = { generatedAt: new Date().toISOString(), files: entries.length, entries };
+  const report = { generatedAt: new Date(Date.now()).toISOString(), files: entries.length, entries };
   writeFileSync(join(PRIVATE, "report-ocr.json"), `${JSON.stringify(report, null, 2)}\n`);
   t.log(`wrote ${join(PRIVATE, "report-ocr.json")}`);
 });
