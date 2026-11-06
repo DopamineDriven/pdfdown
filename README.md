@@ -28,6 +28,7 @@ export declare function extractImagesPerPage(buffer: Buffer): Array<PageImage>;
 export declare function extractAnnotationsPerPage(buffer: Buffer): Array<PageAnnotation>;
 export declare function attachments(buffer: Buffer): Array<Attachment>;
 export declare function extractInvoice(buffer: Buffer, opts?: InvoiceOptions): InvoiceResult;
+export declare function invoiceFromLayout(pages: Array<PageLayout>, opts?: InvoiceOptions): InvoiceResult; // the engine on pages from anywhere
 export declare function layoutPerPage(buffer: Buffer): Array<PageLayout>;
 export declare function extractStructuredTextPerPage(buffer: Buffer): Array<StructuredPageText>;
 export declare function pdfMetadata(buffer: Buffer): PdfMeta;
@@ -50,6 +51,7 @@ export declare function extractImagesPerPageAsync(buffer: Buffer): Promise<Array
 export declare function extractAnnotationsPerPageAsync(buffer: Buffer): Promise<Array<PageAnnotation>>;
 export declare function attachmentsAsync(buffer: Buffer): Promise<Array<Attachment>>;
 export declare function extractInvoiceAsync(buffer: Buffer, opts?: InvoiceOptions): Promise<InvoiceResult>;
+export declare function invoiceFromLayoutAsync(pages: Array<PageLayout>, opts?: InvoiceOptions): Promise<InvoiceResult>;
 export declare function layoutPerPageAsync(buffer: Buffer): Promise<Array<PageLayout>>;
 export declare function extractStructuredTextPerPageAsync(buffer: Buffer): Promise<Array<StructuredPageText>>;
 export declare function pdfMetadataAsync(buffer: Buffer): Promise<PdfMeta>;
@@ -462,7 +464,8 @@ export interface InvoiceFields {
   items: Array<InvoiceItem>;
 }
 
-export type InvoiceSource = "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "None";
+export type InvoiceSource = "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "Spreadsheet" | "None"; // where the fields came from: embedded XML, or the tier of the pages read
+export type CurrencySource = "Page" | "Content" | "Option" | "Unknown"; // which tier named the currency
 export type EInvoiceStandard = "FacturX" | "ZUGFeRD" | "XRechnung" | "UBL" | "Unknown";
 export type InvoiceDocumentType = "Invoice" | "CreditNote" | "Unknown";
 
@@ -474,19 +477,21 @@ export interface EmbeddedInvoiceXml {
 }
 
 export interface InvoiceResult {
-  source: InvoiceSource; // "None" when no extraction path applied
+  source: InvoiceSource; // "None" when no page had a word and no XML was embedded
   documentType: InvoiceDocumentType;
   confidence: number; // document-level, 0..1
   fields: InvoiceFields;
   warnings: Array<string>;
   embeddedXml?: EmbeddedInvoiceXml;
+  currencySource?: CurrencySource; // present after a layout pass: "Page" (an ISO code or an unambiguous glyph on the page), "Option", or "Unknown"; "Content" (address priors) is a later release
+  creditSignals: Array<string>; // why documentType is "CreditNote": "credit title: …", "negative total: …"; empty otherwise
 }
 
 export interface InvoiceOptions {
-  languages?: Array<string>; // default ["en"]; reserved for the layout extractor
-  currency?: string; // ISO 4217 hint; reserved
-  dateOrder?: "Auto" | "MDY" | "DMY" | "YMD"; // reserved
-  decimalSeparator?: "Auto" | "." | ","; // reserved
+  languages?: Array<string>; // default ["en"]; every lexicon row matches regardless, the option orders ties toward these languages
+  currency?: string; // ISO 4217 fallback when the page shows only an ambiguous glyph such as "$"
+  dateOrder?: "Auto" | "MDY" | "DMY" | "YMD"; // fallback for numeric dates both of whose parts are 12 or less; a day over 12 on the page decides on its own
+  decimalSeparator?: "Auto" | "." | ","; // fallback when no amount on the page shows two decimals
   preferEmbeddedXml?: boolean; // default true
   includeLayout?: boolean; // reserved
   includeCandidates?: boolean; // reserved
@@ -629,7 +634,15 @@ console.log(`Found ${links.length} external links across ${new Set(links.map((a)
 
 #### Attachments and embedded e-invoices
 
-`attachments()` lists every embedded file: the `/Names /EmbeddedFiles` tree, PDF/A-3 `/AF` associated files, and `/FileAttachment` annotations, each decoded once. `extractInvoice()` turns an invoice PDF into typed fields with confidence and provenance. In this version the data comes from embedded Factur-X, ZUGFeRD, XRechnung (CII or UBL) or plain UBL XML, which is exact, so every field reports confidence 1 and no page span. PDFs without such XML return `source: "None"` and a warning; layout-based extraction for those arrives in a later release behind the same result shape.
+`attachments()` lists every embedded file: the `/Names /EmbeddedFiles` tree, PDF/A-3 `/AF` associated files, and `/FileAttachment` annotations, each decoded once. `extractInvoice()` turns an invoice into typed fields with confidence and provenance. Embedded Factur-X, ZUGFeRD, XRechnung (CII or UBL) or plain UBL XML is read first and is exact, so every field reports confidence 1 and no page span. Without such XML the pages are read (next section), and `source` names the tier they came from.
+
+#### Invoices from pages
+
+`invoice()` on a PDF or a workbook, `extractInvoice(buffer)`, and `invoiceFromLayout(pages)` on `PageLayout` pages from anywhere (your own `layoutWithOcr()` call included) run one engine over the first page and, for the totals, the last page. It knows no vendor and no template: a reviewed lexicon of label spellings in English, German, French and Spanish (`Invoice No`, `Rechnung Nr.`, `No de facture`, `Total Due`, `Rechnungsbetrag`, `Montant total`, tail and serial numbers, work orders) is matched on a normalised form that folds case, punctuation and OCR confusables, and a label's value is read from the rest of its line, the aligned line below, or the next column on the same baseline, through validators for dates, amounts and identifiers. Every field carries `text` (what was printed), `value` (normalised: dates as `YYYY-MM-DD`, amounts as numbers, identifiers verbatim minus the label and trailing punctuation), a `span` on its page and a `confidence` that combines the label match, the validator, the geometry and, for OCR words, their Tesseract confidence. A field under 0.3 is withheld and counted in a warning; `includeCandidates: true` lists every candidate per field in the warnings.
+
+What this release reads: `invoiceId`, `invoiceDate`, `dueDate`, `purchaseOrder`, `workOrder`, one `aircraft` entry with the registration, serial and engine serial found, `vendorName` with its address, email and phone (the `From` block, else the largest non-title line in the top quarter of the page), `customerName` and `customerAddress` (`Bill To`, `Invoiced To`, `Sold To` …), `shippingAddress`, `remittanceAddress`, `currencyCode`, `subTotal`, `totalTax`, `invoiceTotal` and `amountDue`. Totals reconcile: the combination where subtotal plus tax (one line or several summed) equals the total within a cent or 1% wins and lifts each participant's confidence; an amount-due line stands in for a missing total; without a reconciliation the lowest `Total` on the page is the invoice total. A `Credit Memo` or `Credit Note` title in the top band, or a negative total, makes `documentType` `"CreditNote"` with the evidence in `creditSignals`; credit amounts are reported absolute. Currency, date order and decimal separator are read off the page first (an ISO code or an unambiguous glyph such as `€`; a day over 12; a token like `1.234,56`), then taken from the options, then defaulted; `$` alone is a glyph, never a code, and `currencySource` says which tier decided. Line items, multi-page continuation, page roles and bundle segmentation are later slices; `fields.items` is empty on the layout track.
+
+In the OCR package, `invoice()` runs the OCR cascade on the first and last page only, so a long scan does not cost a whole-document OCR; `layoutWithOcr()` keeps reading every page.
 
 ```typescript
 import { readFile } from "fs/promises";
@@ -955,7 +968,7 @@ PDFDOWN_INVOICE_CORPUS=/path/to/pdfs yarn invoice:eval --ids critical.txt   # wr
 
 `corpus:profile` runs `pdfMetadata`, `layoutPerPage`, `attachments` and `extractInvoice` once per PDF and prints the headline (parse failures, native layout cost, native / scanned / mixed, pages per document, page sizes, `/Rotate`, AcroForms, attachments and embedded XML), the producer families, the template clusters (a fonts fingerprint and a header fingerprint with digits masked, and how many header clusters cover 50/80/90/95% of the documents) and the page kinds (image-only, a native stamp over a scan, no glyphs and no images, sparse native). Each workbook is opened through `spreadsheetCells` and `layoutFromXlsx` and the Workbooks table follows: how many opened, sheets, cells and merged ranges, cell types, formulas, how many distinct number-format codes appear and how many cells this release does not render, logical pages and their cost. A workbook the reader refuses is a failure row carrying its id, like a PDF.
 
-`invoice:eval` scores `extractInvoice` against an `<id>.expected.json` beside each `<id>.pdf`, skipping and counting the PDFs without one. Header fields are exact matches after trimming, case-folding and whitespace collapsing (dates as `YYYY-MM-DD`, amounts to the cent); items are matched for precision and recall on `(productCode, amount)` when both sides carry a code, else on `(description, amount)`; aircraft on their serial numbers; totals reconcile when the extraction's items add up to its own net total within 1%. Every row is reported twice: document-weighted (each document counts one) and amount-weighted (each counts the magnitude of its expected `invoiceTotal`, so a credit note weighs what it credits; a document without one counts 0 and is reported under `missingAmounts`). A row's amount total is printed only when it sums three or more documents, so no single invoice's total reaches the terminal by default. Rows: all documents, the scanned and mixed subsets, each template cluster from `profile.json` when it exists, and the `--ids` slice (one id per line; the harness does not know why those ids matter).
+`invoice:eval` scores `extractInvoice` against an `<id>.expected.json` beside each `<id>.pdf`, skipping and counting the PDFs without one; it uses the base package by default and the OCR package with `PDFDOWN_EVAL_BUILD=ocr`, which is how the scanned stratum is measured with the tier that reads it. Header fields are exact matches after trimming, case-folding and whitespace collapsing (dates as `YYYY-MM-DD`, amounts to the cent); items are matched for precision and recall on `(productCode, amount)` when both sides carry a code, else on `(description, amount)`; aircraft on their serial numbers; totals reconcile when the extraction's items add up to its own net total within 1%. Every row is reported twice: document-weighted (each document counts one) and amount-weighted (each counts the magnitude of its expected `invoiceTotal`, so a credit note weighs what it credits; a document without one counts 0 and is reported under `missingAmounts`). A row's amount total is printed only when it sums three or more documents, so no single invoice's total reaches the terminal by default. Rows: all documents, the scanned and mixed subsets, each template cluster from `profile.json` when it exists, and the `--ids` slice (one id per line; the harness does not know why those ids matter).
 
 Expected files use pdfdown's own `InvoiceFields` names, values only. A key you leave out is not scored; a key or value of the wrong type is reported and dropped, never thrown on:
 

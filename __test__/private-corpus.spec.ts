@@ -75,6 +75,8 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
     t.timeout(10 * 60 * 1000, "every invoice in the private corpus through every extractor");
     const widths = { name: Math.max(...files.map((n) => n.length), 4) };
     const entries: Array<PrivateCorpusEntry> = [];
+    const header = { invoiceId: 0, invoiceDate: 0, invoiceTotal: 0, vendorName: 0, reconciled: 0, confidenceSum: 0 };
+    const types = new Map<string, number>();
     t.log(`${files.length} private invoice(s)`);
     if (notPdf.length > 0) {
       const kinds = new Map<string, number>();
@@ -110,6 +112,13 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
       if (inv.source === "None") {
         t.true(inv.warnings.length >= 1, `${name}: a result without a source explains why`);
       }
+      if (inv.fields.invoiceId) header.invoiceId += 1;
+      if (inv.fields.invoiceDate) header.invoiceDate += 1;
+      if (inv.fields.invoiceTotal) header.invoiceTotal += 1;
+      if (inv.fields.vendorName) header.vendorName += 1;
+      if (inv.fields.invoiceTotal && inv.fields.subTotal && inv.confidence >= 0.7) header.reconciled += 1;
+      header.confidenceSum += inv.confidence;
+      types.set(inv.documentType, (types.get(inv.documentType) ?? 0) + 1);
 
       t.is(layout.length, meta.pageCount, `${name}: one layout per page`);
       for (const p of layout) {
@@ -166,6 +175,10 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
       );
     }
 
+    const n = Math.max(entries.length, 1);
+    t.log(
+      `header track: id ${header.invoiceId}/${n}, date ${header.invoiceDate}/${n}, total ${header.invoiceTotal}/${n}, vendor ${header.vendorName}/${n}, reconciled ${header.reconciled}/${n}, mean confidence ${(header.confidenceSum / n).toFixed(2)}, types ${[...types].map(([k, v]) => `${k} ${v}`).join(" · ")}`
+    );
     const report: PrivateCorpusReport = {
       generatedAt: new Date().toISOString(),
       files: entries.length,

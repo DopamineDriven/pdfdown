@@ -178,5 +178,6 @@ export function renderEval(report: EvalReport, maxClusters = 10): Array<string> 
 }
 
 export function printEval(report: EvalReport, maxClusters = 10): void {
+  console.log(`build: ${EVAL_BUILD}`);
   console.log(renderEval(report, maxClusters).join("\n"));
 }

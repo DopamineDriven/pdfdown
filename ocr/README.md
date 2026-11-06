@@ -280,6 +280,10 @@ for (const page of extractLayoutWithOcrPerPage(readFileSync("scan.pdf"), { rende
 }
 ```
 
+## Invoices from scans
+
+`invoice()` and `invoiceAsync()` read the header fields of a PDF from its pages (see the base README's "Invoices" section). In this package they run the OCR cascade with default options on the **first and the last page only**, the two pages the header track reads, so a long scan does not cost a whole-document OCR; `source` then reports `Ocr`, `Rendered` or `Mixed` and every OCR'd field's confidence is scaled by its words' Tesseract confidence. For other OCR options, call `layoutWithOcr(opts)` yourself and hand the pages to `invoiceFromLayout(pages)`.
+
 ## Workbooks
 
 This package inherits the base package's workbook support: `detectFormat`, `PdfDown.openAsync`, `format`, `spreadsheetCells`, `layout` on a workbook and the standalone `layoutFromXlsx`, with the same options, number-format subset, logical-page contract and limits (see the base README's "Workbooks" section). A workbook's text is already text, so it never needs OCR: the OCR methods read PDFs, and on a workbook `textWithOcrPerPage`, `documentOcr` and `layoutWithOcr` fail with `unsupported operation: <method> reads a PDF; this document is a workbook` (the sync methods throw it, the async ones reject with it).
