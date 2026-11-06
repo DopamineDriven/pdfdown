@@ -2,7 +2,7 @@
 //! rest of the label's own segment, the nearest aligned segment below, and the next segment to
 //! the right on the same baseline; each carries the scores the field logic combines.
 
-use super::lexicon::{Field, Hit, Label, has_terms_at_start};
+use super::lexicon::{Field, Hit, Label, has_terms_at_start, is_title_row};
 use super::segments::Segment;
 
 /// Lines below a label that a value may sit on, as multiples of the label's line height.
@@ -11,12 +11,16 @@ const LINE_EM: f64 = 1.2;
 /// A value below is aligned with its label within this many ems of the label's left edge.
 const ALIGN_EM: f64 = 1.5;
 
+/// A value never runs longer than this many tokens; a longer remainder is prose.
+pub(crate) const MAX_VALUE_TOKENS: usize = 12;
+
 #[derive(Debug, Clone)]
 pub(crate) struct Candidate {
   pub text: String,
   /// Indexes into the page's words.
   pub words: Vec<usize>,
-  pub page: u32,
+  /// The page's position in the array it came from.
+  pub page_index: usize,
   pub label: &'static Label,
   pub label_score: f64,
   pub geometry_score: f64,
@@ -47,7 +51,7 @@ fn same_line(segments: &[Segment], hit: &Hit, s: &Segment) -> Option<Candidate> 
   Some(Candidate {
     text: hit.remainder.clone(),
     words,
-    page: s.page,
+    page_index: s.page_index,
     label: hit.label,
     label_score: hit.score,
     geometry_score: 1.0,
@@ -67,7 +71,7 @@ fn below(segments: &[Segment], hits: &[Vec<Hit>], s: &Segment) -> Option<usize> 
   (0..segments.len())
     .filter(|&i| {
       let t = &segments[i];
-      t.page == s.page
+      t.page_index == s.page_index
         && t.y1 <= s.y0 + 1e-6
         && s.y0 - t.y1 <= reach
         && (t.x0 - s.x0).abs() <= ALIGN_EM * s.font_size
@@ -80,7 +84,7 @@ fn right(segments: &[Segment], hits: &[Vec<Hit>], s: &Segment) -> Option<usize> 
   (0..segments.len())
     .filter(|&i| {
       let t = &segments[i];
-      t.page == s.page && t.line == s.line && t.x0 > s.x1 && !is_labelled(&hits[i])
+      t.page_index == s.page_index && t.line == s.line && t.x0 > s.x1 && !is_labelled(&hits[i])
     })
     .min_by(|&a, &b| segments[a].x0.total_cmp(&segments[b].x0))
 }
@@ -89,7 +93,7 @@ fn neighbour(t: &Segment, hit: &Hit, geometry: f64) -> Candidate {
   Candidate {
     text: t.text.clone(),
     words: t.words.clone(),
-    page: t.page,
+    page_index: t.page_index,
     label: hit.label,
     label_score: hit.score,
     geometry_score: geometry,
@@ -113,7 +117,10 @@ pub(crate) fn candidates(segments: &[Segment], hits: &[Vec<Hit>], field: Field) 
       if let Some(c) = same_line(segments, hit, s) {
         out.push(c);
       }
-      if let Some(i) = below(segments, hits, s) {
+      // A title row (`INVOICE`) heads the page: what sits below it is the body, not its value.
+      if !is_title_row(hit.label)
+        && let Some(i) = below(segments, hits, s)
+      {
         out.push(neighbour(&segments[i], hit, 0.8));
       }
       if let Some(i) = right(segments, hits, s) {
@@ -127,13 +134,13 @@ pub(crate) fn candidates(segments: &[Segment], hits: &[Vec<Hit>], field: Field) 
 #[cfg(test)]
 mod tests {
   use super::super::lexicon::Field;
-  use super::super::segments::{label_hits, segments};
-  use super::super::testing::page;
+  use super::super::segments::label_hits;
+  use super::super::testing::{page, segments_at};
   use super::*;
 
   #[test]
   fn same_line_right_then_below_then_next_column() {
-    let segs = segments(&page(&[(
+    let segs = segments_at(&page(&[(
       348.0,
       723.0,
       10.0,
@@ -144,10 +151,10 @@ mod tests {
     assert_eq!(c[0].text, "INV-3337");
     assert_eq!(c[0].geometry_score, 1.0);
     assert_eq!(c[0].label_score, 1.0);
-    assert_eq!(c[0].page, 1);
+    assert_eq!(c[0].page_index, 0);
     assert_eq!(c[0].words.len(), 1);
 
-    let segs = segments(&page(&[
+    let segs = segments_at(&page(&[
       (50.0, 690.0, 10.0, false, "Bill To:"),
       (50.0, 676.0, 10.0, false, "Skyline Charter LLC"),
     ]));
@@ -155,7 +162,7 @@ mod tests {
     assert_eq!(c[0].text, "Skyline Charter LLC");
     assert_eq!(c[0].geometry_score, 0.8);
 
-    let segs = segments(&page(&[(50.0, 690.0, 10.0, false, "Terms: Net 30")]));
+    let segs = segments_at(&page(&[(50.0, 690.0, 10.0, false, "Terms: Net 30")]));
     assert!(candidates(&segs, &label_hits(&segs), Field::InvoiceDate).is_empty());
 
     assert_eq!(score(1.0, 1.0, 1.0, None), 1.0);

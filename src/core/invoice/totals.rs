@@ -141,12 +141,22 @@ pub(crate) fn resolve(items: &[TotalCandidate], currency: Option<&str>) -> Total
     for (total, is_due) in total_candidates {
       for set in &tax_sets {
         let tax_sum: f64 = set.iter().map(|t| t.amount.value).sum();
-        if !close(sub.amount.value + tax_sum, total.amount.value) {
+        let sum = sub.amount.value + tax_sum;
+        if !close(sum, total.amount.value) {
           continue;
         }
-        let quality =
-          sub.base + total.base + set.iter().map(|t| t.base).sum::<f64>() + 0.1 * set.len() as f64
-            - if is_due { 0.05 } else { 0.0 };
+        // A match to the cent outranks one merely within a percent; then label quality.
+        let exact = if (sum - total.amount.value).abs() <= 0.01 {
+          10.0
+        } else {
+          0.0
+        };
+        let quality = exact
+          + sub.base
+          + total.base
+          + set.iter().map(|t| t.base).sum::<f64>()
+          + 0.1 * set.len() as f64
+          - if is_due { 0.05 } else { 0.0 };
         if best.as_ref().is_none_or(|b| quality > b.0) {
           best = Some((quality, sub, total, set.clone(), is_due));
         }
@@ -166,10 +176,8 @@ pub(crate) fn resolve(items: &[TotalCandidate], currency: Option<&str>) -> Total
         .map(|d| money(d, currency, BONUS))
         .or_else(|| best_by_base(&dues).map(|d| money(d, currency, 0.0)))
     };
-    let negative = total.amount.negative
-      || dues
-        .iter()
-        .any(|d| close(d.amount.value, total.amount.value) && d.amount.negative);
+    // Only the invoice total (or the due line standing in for it) decides a credit.
+    let negative = total.amount.negative;
     return Totals {
       sub_total: Some(money(sub, currency, BONUS)),
       total_tax: tax_field(&set, currency, BONUS),
@@ -180,13 +188,19 @@ pub(crate) fn resolve(items: &[TotalCandidate], currency: Option<&str>) -> Total
     };
   }
 
-  // No reconciliation: the lowest Total on the page, the largest amount among ties.
-  let invoice_total = totals.iter().copied().min_by(|a, b| {
-    a.span
-      .y0
-      .total_cmp(&b.span.y0)
-      .then(b.amount.value.total_cmp(&a.amount.value))
-  });
+  // No reconciliation: the lowest Total on the last page that has one, the largest amount among
+  // ties; an amount-due line alone is the total.
+  let invoice_total = totals
+    .iter()
+    .copied()
+    .min_by(|a, b| {
+      b.span
+        .page
+        .cmp(&a.span.page)
+        .then(a.span.y0.total_cmp(&b.span.y0))
+        .then(b.amount.value.total_cmp(&a.amount.value))
+    })
+    .or_else(|| best_by_base(&dues));
   let amount_due = best_by_base(&dues);
   Totals {
     sub_total: best_by_base(&subs).map(|c| money(c, currency, 0.0)),
@@ -194,8 +208,7 @@ pub(crate) fn resolve(items: &[TotalCandidate], currency: Option<&str>) -> Total
     invoice_total: invoice_total.map(|c| money(c, currency, 0.0)),
     amount_due: amount_due.map(|c| money(c, currency, 0.0)),
     reconciled: false,
-    negative: invoice_total.is_some_and(|c| c.amount.negative)
-      || amount_due.is_some_and(|c| c.amount.negative),
+    negative: invoice_total.is_some_and(|c| c.amount.negative),
   }
 }
 
@@ -291,6 +304,52 @@ mod tests {
       "the due amount's span"
     );
     assert_eq!(t.amount_due.as_ref().unwrap().value, 13321.5);
+  }
+
+  #[test]
+  fn exact_reconciliation_beats_one_within_a_percent_and_a_due_line_alone_is_the_total() {
+    let t = resolve(
+      &[
+        cand(Field::SubTotal, 85.0, 400.0),
+        cand(Field::Tax, 8.0, 500.0),
+        cand(Field::Tax, 8.5, 388.0),
+        cand(Field::Total, 93.5, 376.0),
+      ],
+      None,
+    );
+    assert_eq!(
+      t.total_tax.as_ref().unwrap().value,
+      8.5,
+      "the exact tax, not the column item within 1%"
+    );
+
+    let mut page1 = cand(Field::Total, 10.0, 100.0);
+    page1.span.page = 1;
+    let mut page2 = cand(Field::Total, 250.0, 400.0);
+    page2.span.page = 2;
+    let t = resolve(&[page1, page2], None);
+    assert_eq!(
+      t.invoice_total.as_ref().unwrap().value,
+      250.0,
+      "the last page's total, not page 1's"
+    );
+
+    let t = resolve(
+      &[
+        cand(Field::Total, 93.5, 300.0),
+        cand(Field::AmountDue, -12.5, 280.0),
+      ],
+      None,
+    );
+    assert!(!t.negative, "an overpaid balance is not a credit note");
+
+    let t = resolve(&[cand(Field::AmountDue, 93.5, 300.0)], None);
+    assert_eq!(
+      t.invoice_total.as_ref().unwrap().value,
+      93.5,
+      "an amount due alone is the total"
+    );
+    assert_eq!(t.amount_due.as_ref().unwrap().value, 93.5);
   }
 
   #[test]

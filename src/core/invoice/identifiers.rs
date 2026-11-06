@@ -34,6 +34,10 @@ pub(crate) fn parse_identifier(text: &str) -> Option<String> {
   {
     return None;
   }
+  // A date is never an identifier, whatever the label beside it says.
+  if super::dates::parse_date(&collapsed, super::dates::Order::Mdy).is_some() {
+    return None;
+  }
   Some(collapsed)
 }
 
@@ -115,6 +119,18 @@ mod tests {
       parse_identifier("January 25, 2016"),
       None,
       "a date is not an identifier"
+    );
+  }
+
+  #[test]
+  fn a_date_shape_is_not_an_identifier() {
+    assert_eq!(parse_identifier("03/14/2024"), None);
+    assert_eq!(parse_identifier("31.08.2015"), None);
+    assert_eq!(parse_identifier("2022-09-15"), None);
+    assert_eq!(
+      parse_identifier("2015-0831").as_deref(),
+      Some("2015-0831"),
+      "two parts are an id"
     );
   }
 

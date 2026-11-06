@@ -25,6 +25,9 @@ pub(crate) enum Field {
   EngineSerial,
   CreditTitle,
   DocumentTitle,
+  /// A label of something this reader does not extract, listed so its words are not read as
+  /// another field's label (`Date` in `Ship Date`, `Balance` in `Previous Balance`).
+  Other,
 }
 
 #[derive(Debug)]
@@ -226,7 +229,13 @@ pub(crate) const LABELS: &[Label] = &[
   l(WorkOrder, "W/O No.", "en"),
   l(WorkOrder, "Workorder", "en"),
   l(WorkOrder, "Sales Order", "en"),
+  l(WorkOrder, "Sales Order No.", "en"),
+  l(WorkOrder, "Sales Order Number", "en"),
+  l(WorkOrder, "Sales Order #", "en"),
+  l(WorkOrder, "SO No.", "en"),
+  l(WorkOrder, "SO #", "en"),
   l(WorkOrder, "Shop Order", "en"),
+  l(WorkOrder, "Shop Order No.", "en"),
   l(WorkOrder, "Job Number", "en"),
   l(WorkOrder, "Job Card", "en"),
   l(WorkOrder, "Job No.", "en"),
@@ -278,6 +287,39 @@ pub(crate) const LABELS: &[Label] = &[
   l(CreditTitle, "Gutschrift", "de"),
   l(CreditTitle, "Nota de crédito", "es"),
   // document titles: what a vendor line is not
+  l(Other, "Ship Date", "en"),
+  l(Other, "Shipping Date", "en"),
+  l(Other, "Shipped Date", "en"),
+  l(Other, "Date Shipped", "en"),
+  l(Other, "Order Date", "en"),
+  l(Other, "Date Ordered", "en"),
+  l(Other, "Delivery Date", "en"),
+  l(Other, "Date of Delivery", "en"),
+  l(Other, "Service Date", "en"),
+  l(Other, "Date of Service", "en"),
+  l(Other, "Start Date", "en"),
+  l(Other, "End Date", "en"),
+  l(Other, "Expiry Date", "en"),
+  l(Other, "Expiration Date", "en"),
+  l(Other, "Date Received", "en"),
+  l(Other, "Received Date", "en"),
+  l(Other, "Billing Period", "en"),
+  l(Other, "Service Period", "en"),
+  l(Other, "Previous Balance", "en"),
+  l(Other, "Balance Forward", "en"),
+  l(Other, "Payments Received", "en"),
+  l(Other, "Payment Received", "en"),
+  l(Other, "Less Payments", "en"),
+  l(Other, "Lieferdatum", "de"),
+  l(Other, "Leistungsdatum", "de"),
+  l(Other, "Bestelldatum", "de"),
+  l(Other, "Liefertermin", "de"),
+  l(Other, "Date de livraison", "fr"),
+  l(Other, "Date de commande", "fr"),
+  l(Other, "Date d'expédition", "fr"),
+  l(Other, "Fecha de entrega", "es"),
+  l(Other, "Fecha de pedido", "es"),
+  l(Other, "Fecha de envío", "es"),
   l(DocumentTitle, "Invoice", "en"),
   l(DocumentTitle, "Tax Invoice", "en"),
   l(DocumentTitle, "Commercial Invoice", "en"),
@@ -336,6 +378,29 @@ const GLUE: &[char] = &['#', ':', '.', '-', '/'];
 struct NormLabel {
   label: &'static Label,
   norm: String,
+  chars: usize,
+  charset: u64,
+}
+
+/// The characters of a text as one bit per character class: every edit adds or removes at most
+/// two members, so a symmetric difference above `2 · max` rules a fuzzy match out before the
+/// edit distance is computed.
+fn charset(text: &str) -> u64 {
+  text
+    .chars()
+    .fold(0u64, |set, c| set | 1u64 << (c as u32 % 64))
+}
+
+/// The longest normalised label, in bytes.
+fn longest_label() -> usize {
+  static CACHE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+  *CACHE.get_or_init(|| {
+    norm_labels()
+      .iter()
+      .map(|nl| nl.norm.len())
+      .max()
+      .unwrap_or(0)
+  })
 }
 
 fn norm_labels() -> &'static [NormLabel] {
@@ -343,9 +408,14 @@ fn norm_labels() -> &'static [NormLabel] {
   CACHE.get_or_init(|| {
     LABELS
       .iter()
-      .map(|label| NormLabel {
-        label,
-        norm: normalize(label.text),
+      .map(|label| {
+        let norm = normalize(label.text);
+        NormLabel {
+          label,
+          chars: norm.chars().count(),
+          charset: charset(&norm),
+          norm,
+        }
       })
       .collect()
   })
@@ -420,11 +490,11 @@ fn trim_glue(text: &str) -> String {
 
 /// Bounded Levenshtein distance; `None` when it exceeds `max`.
 fn edit_distance(a: &str, b: &str, max: usize) -> Option<usize> {
-  let a: Vec<char> = a.chars().collect();
-  let b: Vec<char> = b.chars().collect();
-  if a.len().abs_diff(b.len()) > max {
+  if a.chars().count().abs_diff(b.chars().count()) > max {
     return None;
   }
+  let a: Vec<char> = a.chars().collect();
+  let b: Vec<char> = b.chars().collect();
   let mut prev: Vec<usize> = (0..=b.len()).collect();
   let mut cur = vec![0; b.len() + 1];
   for (i, ca) in a.iter().enumerate() {
@@ -446,7 +516,8 @@ fn edit_distance(a: &str, b: &str, max: usize) -> Option<usize> {
 /// Every label of `field` (any field when `None`) found in the segment's words, best first.
 /// A label matching the longest stretch at a position scores 1.0; a shorter label that is a
 /// prefix of a longer match there scores 0.8; a fuzzy match (one edit per five characters, whole
-/// words only) scores 0.6. Stop words (`Terms`) never hit as a date.
+/// words only) scores 0.6. A label starting inside a longer label of another field is not a hit;
+/// a label that does not open its segment scores 0.8 of its match; a terms line labels nothing.
 pub(crate) fn find_labels(words: &[&str], field: Option<Field>) -> Vec<Hit> {
   let norms: Vec<String> = words.iter().map(|w| normalize(w)).collect();
   let labels = norm_labels();
@@ -470,9 +541,6 @@ pub(crate) fn find_labels(words: &[&str], field: Option<Field>) -> Vec<Hit> {
     }
     let any_exact = !exact.is_empty();
     for (nl, end, remainder) in exact {
-      if field.is_some_and(|f| f != nl.label.field) {
-        continue;
-      }
       let score = if nl.norm.len() == longest { 1.0 } else { 0.8 };
       hits.push(Hit {
         label: nl.label,
@@ -482,29 +550,42 @@ pub(crate) fn find_labels(words: &[&str], field: Option<Field>) -> Vec<Hit> {
         remainder,
       });
     }
-    // Fuzzy: whole-word prefixes only, and only where nothing exact matched.
+    // Fuzzy: whole-word prefixes only, and only where nothing exact matched. The words from
+    // `start` are joined once, as far as the longest label could reach, and a label is compared
+    // only against the joins whose length and character set allow a match.
     if !any_exact && norms[start].len() >= 4 {
-      for nl in labels {
-        if field.is_some_and(|f| f != nl.label.field) {
-          continue;
+      let reach = longest_label() + longest_label() / 5;
+      let mut built = String::new();
+      let mut steps: Vec<(usize, String, usize, u64)> = Vec::new();
+      for (i, norm) in norms.iter().enumerate().skip(start) {
+        built.push_str(norm);
+        if built.len() > reach {
+          break;
         }
+        steps.push((i + 1, built.clone(), built.chars().count(), charset(&built)));
+      }
+      for nl in labels {
         let max = nl.norm.len() / 5;
         if max == 0 {
           continue;
         }
-        let mut built = String::new();
-        for i in start..words.len() {
-          built.push_str(&norms[i]);
-          if built.len() > nl.norm.len() + max {
+        for (end, text, chars, set) in &steps {
+          if *chars + max < nl.chars {
+            continue;
+          }
+          if *chars > nl.chars + max {
             break;
           }
-          if edit_distance(&built, &nl.norm, max).is_some() {
+          if (set ^ nl.charset).count_ones() as usize > 2 * max {
+            continue;
+          }
+          if edit_distance(text, &nl.norm, max).is_some() {
             hits.push(Hit {
               label: nl.label,
               score: 0.6,
               start,
-              end: i + 1,
-              remainder: trim_glue(&words[i + 1..].join(" ")),
+              end: *end,
+              remainder: trim_glue(&words[*end..].join(" ")),
             });
             break;
           }
@@ -512,9 +593,35 @@ pub(crate) fn find_labels(words: &[&str], field: Option<Field>) -> Vec<Hit> {
       }
     }
   }
-  // A date label never reads a terms line.
-  if matches!(field, Some(InvoiceDate) | Some(DueDate)) && starts_with_terms(&hits, &norms) {
-    hits.clear();
+  // A terms line (`Terms: Net 30`) labels nothing but itself.
+  if starts_with_terms(&norms) {
+    hits.retain(|h| h.label.field == Terms);
+  }
+  // A label that starts strictly inside another field's exact match (`Date` in `Due Date`,
+  // `Total` in `Sub Total`, `Order No.` in `Sales Order`) is not a hit, nor is one that merely
+  // opens a label of nothing this reader extracts (`Tax` in `Tax Invoice`, `Date` in `Date
+  // Shipped`); a label that does not open its segment scores 0.8 of its match.
+  let spans: Vec<(Field, usize, usize, f64)> = hits
+    .iter()
+    .map(|h| (h.label.field, h.start, h.end, h.score))
+    .collect();
+  hits.retain(|h| {
+    !spans.iter().any(|&(field, start, end, score)| {
+      field != h.label.field
+        && score >= 1.0
+        && h.start < end
+        && (start < h.start
+          || (start == h.start && end > h.end && matches!(field, DocumentTitle | Other)))
+    })
+  });
+  for h in hits.iter_mut() {
+    if h.start > 0 {
+      h.score *= 0.8;
+    }
+  }
+  hits.retain(|h| h.score >= 0.6);
+  if let Some(f) = field {
+    hits.retain(|h| h.label.field == f);
   }
   hits.sort_by(|a, b| {
     b.score
@@ -530,9 +637,8 @@ pub(crate) fn find_labels(words: &[&str], field: Option<Field>) -> Vec<Hit> {
   hits
 }
 
-/// Whether the segment opens with a terms stop word (checked against the full table, since the
-/// hits at hand may already be filtered to one field).
-fn starts_with_terms(_hits: &[Hit], norms: &[String]) -> bool {
+/// Whether the segment opens with a terms stop word, checked against the full table.
+fn starts_with_terms(norms: &[String]) -> bool {
   norm_labels()
     .iter()
     .filter(|nl| nl.label.field == Terms)
@@ -541,11 +647,25 @@ fn starts_with_terms(_hits: &[Hit], norms: &[String]) -> bool {
       for n in norms {
         built.push_str(n);
         if built.len() >= nl.norm.len() {
-          return built.starts_with(&nl.norm) && built.len() == nl.norm.len() || built == nl.norm;
+          return built == nl.norm;
         }
       }
       false
     })
+}
+
+/// Whether a label row is also a document title (`Invoice`, `Tax Invoice`, `Credit Memo`): such a
+/// row anchors a value only on its own line (`Invoice #13594027`), never below or beside it.
+pub(crate) fn is_title_row(label: &Label) -> bool {
+  static TITLES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+  let titles = TITLES.get_or_init(|| {
+    LABELS
+      .iter()
+      .filter(|l| l.field == DocumentTitle)
+      .map(|l| normalize(l.text))
+      .collect()
+  });
+  label.field != DocumentTitle && titles.contains(&normalize(label.text))
 }
 
 /// Whether a segment opens with a terms stop word, from its unfiltered hits.
@@ -617,6 +737,86 @@ mod tests {
     assert_eq!(
       find_labels(&["Invoice", "Number", "INV-3337"], Some(Field::InvoiceId))[0].remainder,
       "INV-3337"
+    );
+  }
+
+  #[test]
+  fn a_label_inside_a_longer_label_of_another_field_never_hits() {
+    assert!(
+      find_labels(&["Due", "Date:", "01/31/2016"], Some(Field::InvoiceDate)).is_empty(),
+      "`Date` inside `Due Date`"
+    );
+    assert!(find_labels(&["Ship", "Date:", "03/10/2024"], Some(Field::InvoiceDate)).is_empty());
+    assert!(
+      find_labels(
+        &["Sales", "Order", "No.", "55123"],
+        Some(Field::PurchaseOrder)
+      )
+      .is_empty(),
+      "`Order No.` inside `Sales Order`"
+    );
+    assert_eq!(
+      find_labels(&["Sales", "Order", "No.", "55123"], Some(Field::WorkOrder))[0].remainder,
+      "55123"
+    );
+    assert!(
+      find_labels(&["Terms:", "Net", "30"], Some(Field::SubTotal)).is_empty(),
+      "a terms line labels nothing"
+    );
+    assert!(
+      find_labels(&["Sub", "Total", "$85.00"], Some(Field::Total)).is_empty(),
+      "`Total` inside `Sub Total`"
+    );
+    assert!(
+      find_labels(&["TAX", "INVOICE"], Some(Field::Tax)).is_empty(),
+      "`Tax` inside the title"
+    );
+    assert!(
+      find_labels(&["Previous", "Balance", "$120.00"], Some(Field::AmountDue)).is_empty(),
+      "`Balance` inside a label of something this reader does not extract"
+    );
+    assert!(
+      find_labels(
+        &["Date", "Shipped:", "03/10/2024"],
+        Some(Field::InvoiceDate)
+      )
+      .is_empty(),
+      "`Date` opening such a label"
+    );
+    assert_eq!(
+      find_labels(
+        &["Statement", "Date:", "03/10/2024"],
+        Some(Field::InvoiceDate)
+      )[0]
+        .score,
+      0.8,
+      "an unknown qualifier only lowers the score"
+    );
+    assert_eq!(
+      find_labels(&["Balance", "Due", "$93.50"], Some(Field::AmountDue))[0].score,
+      1.0
+    );
+    let customer = find_labels(
+      &["Customer", "Invoice", "Number:", "INV-7"],
+      Some(Field::InvoiceId),
+    );
+    assert_eq!(
+      customer[0].score, 0.8,
+      "a label that does not open its segment scores lower"
+    );
+    assert_eq!(customer[0].remainder, "INV-7");
+    assert_eq!(
+      find_labels(&["Terms:", "Net", "30"], None)[0].label.field,
+      Field::Terms,
+      "a terms line stays labelled as terms"
+    );
+    let bilingual = find_labels(
+      &["No", "de", "facture", "/", "Invoice", "No.:", "F-2209"],
+      Some(Field::InvoiceId),
+    );
+    assert!(
+      bilingual.iter().any(|h| h.remainder == "F-2209"),
+      "a second label of the same field survives"
     );
   }
 

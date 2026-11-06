@@ -3,7 +3,7 @@
 //! This file is the engine's entry; the modules beside it do the reading.
 
 use super::amounts::{Separator, parse_amount};
-use super::anchors::{Candidate, candidates, score};
+use super::anchors::{Candidate, MAX_VALUE_TOKENS, candidates, score};
 use super::dates::parse_date;
 use super::identifiers::{parse_identifier, parse_registration, parse_serial};
 use super::lexicon::Field;
@@ -64,8 +64,8 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-  fn page(&self, number: u32) -> Option<&'a PageLayout> {
-    self.pages.iter().find(|p| p.page == number)
+  fn page(&self, index: usize) -> Option<&'a PageLayout> {
+    self.pages.get(index)
   }
 
   fn preferred_lang(&self, lang: &str) -> bool {
@@ -86,7 +86,8 @@ impl<'a> Reader<'a> {
     let mut picked: Option<(f64, &Candidate, Accepted)> = None;
     let mut seen: Vec<String> = Vec::new();
     for c in &cands {
-      let tokens: Vec<&str> = c.text.split_whitespace().collect();
+      // A value is a handful of tokens at most; try the leading runs from the longest down.
+      let tokens: Vec<&str> = c.text.split_whitespace().take(MAX_VALUE_TOKENS).collect();
       let mut accepted: Option<Accepted> = None;
       for k in (1..=tokens.len()).rev() {
         let text = tokens[..k].join(" ");
@@ -127,7 +128,7 @@ impl<'a> Reader<'a> {
       self.withheld += 1;
       return None;
     }
-    let page = self.page(c.page)?;
+    let page = self.page(c.page_index)?;
     let used = if a.tokens_used >= c.words.len() {
       c.words.clone()
     } else {
@@ -164,27 +165,30 @@ impl<'a> Reader<'a> {
     for (segs, hits) in [(&self.first, &self.hits), (&self.last, &self.last_hits)] {
       for c in candidates(segs, hits, field) {
         let tokens: Vec<&str> = c.text.split_whitespace().collect();
-        // The whole text, else its last token, else its first.
-        let attempts: Vec<(String, Vec<usize>)> = [
-          (c.text.clone(), c.words.clone()),
-          (
-            tokens.last().map(|t| (*t).to_string()).unwrap_or_default(),
-            c.words.last().copied().into_iter().collect(),
-          ),
-          (
+        // The whole text; else its last token, else its first. A long remainder is prose, and a
+        // number at its end is an amount only when it is written with decimals (`Total hours
+        // worked this period 12` is not).
+        let mut attempts: Vec<(String, Vec<usize>)> = vec![(c.text.clone(), c.words.clone())];
+        let last = (
+          tokens.last().map(|t| (*t).to_string()).unwrap_or_default(),
+          c.words.last().copied().into_iter().collect(),
+        );
+        if tokens.len() <= 3 {
+          attempts.push(last);
+          attempts.push((
             tokens.first().map(|t| (*t).to_string()).unwrap_or_default(),
             c.words.first().copied().into_iter().collect(),
-          ),
-        ]
-        .into_iter()
-        .collect();
+          ));
+        } else if has_decimals(&last.0) {
+          attempts.push(last);
+        }
         let Some((text, words, amount)) = attempts
           .into_iter()
           .find_map(|(text, words)| parse_amount(&text, separator).map(|a| (text, words, a)))
         else {
           continue;
         };
-        let Some(page) = self.page(c.page) else {
+        let Some(page) = self.page(c.page_index) else {
           continue;
         };
         out.push(TotalCandidate {
@@ -238,18 +242,31 @@ impl<'a> Reader<'a> {
   }
 }
 
-fn party_fields(
-  party: Option<Party>,
-) -> (
+type PartyFields = (
   Option<StringField>,
   Option<AddressField>,
   Option<StringField>,
   Option<StringField>,
-) {
+  Option<StringField>,
+);
+
+/// `(name, address, email, phone, id)`.
+fn party_fields(party: Option<Party>) -> PartyFields {
   match party {
-    Some(p) => (Some(p.name), p.address, p.email, p.phone),
-    None => (None, None, None, None),
+    Some(p) => (p.name, p.address, p.email, p.phone, p.id),
+    None => (None, None, None, None, None),
   }
+}
+
+/// Whether a token ends in a decimal separator and two digits (`1,234.56`, `93,50`, `(8.00)`).
+fn has_decimals(token: &str) -> bool {
+  let digits: Vec<char> = token
+    .trim_end_matches(|c: char| !c.is_ascii_digit())
+    .chars()
+    .collect();
+  digits.len() >= 3
+    && matches!(digits[digits.len() - 3], '.' | ',')
+    && digits[digits.len() - 2..].iter().all(char::is_ascii_digit)
 }
 
 /// Header fields from pages.
@@ -275,15 +292,27 @@ pub(crate) fn extract_from_pages(
   if pages.first().is_some_and(|p| p.words.is_empty()) {
     warnings.push(NO_WORDS_WARNING.to_string());
   }
-  let first = segments(first_page);
+  {
+    let mut numbers: Vec<u32> = pages.iter().map(|p| p.page).collect();
+    numbers.sort_unstable();
+    if numbers.windows(2).any(|w| w[0] == w[1]) {
+      warnings.push(
+        "page numbers repeat; spans carry the numbers as given and fields were read by position"
+          .to_string(),
+      );
+    }
+  }
+  let first_index = pages.iter().position(|p| !p.words.is_empty()).unwrap_or(0);
+  let first = segments(first_page, first_index);
   let hits = label_hits(&first);
   let priors = infer(&first, &hits, opts);
-  let last_page = pages
+  let last_index = pages
     .iter()
-    .rev()
-    .find(|p| !p.words.is_empty())
-    .filter(|p| p.page != first_page.page);
-  let last = last_page.map(segments).unwrap_or_default();
+    .rposition(|p| !p.words.is_empty())
+    .filter(|&i| i != first_index);
+  let last = last_index
+    .map(|i| segments(&pages[i], i))
+    .unwrap_or_default();
   let last_hits = label_hits(&last);
   let mut reader = Reader {
     pages,
@@ -322,12 +351,12 @@ pub(crate) fn extract_from_pages(
   }
   let vendor_party = party_block(&reader.first, &reader.hits, Field::Vendor)
     .or_else(|| vendor(&reader.first, &reader.hits, first_page.height));
-  let (vendor_name, vendor_address, vendor_email, vendor_phone) = party_fields(vendor_party);
-  let (customer_name, customer_address, _, _) =
+  let (vendor_name, vendor_address, vendor_email, vendor_phone, _) = party_fields(vendor_party);
+  let (customer_name, customer_address, _, _, customer_id) =
     party_fields(party_block(&reader.first, &reader.hits, Field::BillTo));
-  let (_, shipping_address, _, _) =
+  let (_, shipping_address, _, _, _) =
     party_fields(party_block(&reader.first, &reader.hits, Field::ShipTo));
-  let (_, remittance_address, _, _) =
+  let (_, remittance_address, _, _, _) =
     party_fields(party_block(&reader.first, &reader.hits, Field::RemitTo));
   let totals = reader.totals();
   let fields = InvoiceFields {
@@ -346,6 +375,7 @@ pub(crate) fn extract_from_pages(
     vendor_email,
     vendor_phone,
     customer_name,
+    customer_id,
     customer_address,
     shipping_address,
     remittance_address,
@@ -358,7 +388,6 @@ pub(crate) fn extract_from_pages(
     let text = fields
       .invoice_total
       .as_ref()
-      .or(fields.amount_due.as_ref())
       .map(|f| f.text.clone())
       .unwrap_or_default();
     credit_signals.push(format!("negative total: {text}"));
@@ -410,6 +439,107 @@ mod tests {
   use super::super::testing::acme_page;
   use super::*;
   use crate::types::CurrencySource;
+
+  #[test]
+  fn repeated_page_numbers_never_abort_the_host() {
+    let mut empty = acme_page();
+    empty.words.clear();
+    empty.lines.clear();
+    let r = extract_from_pages(&[empty, acme_page()], None);
+    assert_eq!(r.fields.invoice_id.unwrap().value, "A-10045");
+    assert!(
+      r.warnings.iter().any(|w| w.contains("page number")),
+      "{:?}",
+      r.warnings
+    );
+  }
+
+  #[test]
+  fn everyday_lines_do_not_fabricate_fields() {
+    use super::super::testing::page;
+    let r = extract_from_pages(
+      &[page(&[
+        (50.0, 760.0, 14.0, true, "ACME AVIATION SERVICES"),
+        (380.0, 744.0, 10.0, false, "Due Date: 01/31/2016"),
+        (380.0, 730.0, 10.0, false, "Invoice Date: 01/25/2016"),
+        (380.0, 716.0, 10.0, false, "Invoice No: A-1"),
+        (380.0, 702.0, 10.0, false, "Vendor #: 4471"),
+        (380.0, 688.0, 10.0, false, "Customer No: 10045"),
+        (50.0, 660.0, 10.0, false, "Terms: Net 30"),
+        (50.0, 640.0, 10.0, false, "Total hours worked on site 12"),
+        (400.0, 300.0, 10.0, false, "Total"),
+        (500.0, 300.0, 10.0, false, "$93.50"),
+        (400.0, 286.0, 10.0, false, "Amount Due"),
+        (500.0, 286.0, 10.0, false, "-$12.50"),
+      ])],
+      None,
+    );
+    assert_eq!(r.fields.invoice_date.unwrap().value, "2016-01-25");
+    assert_eq!(r.fields.due_date.unwrap().value, "2016-01-31");
+    assert_eq!(
+      r.fields.vendor_name.unwrap().value,
+      "ACME AVIATION SERVICES"
+    );
+    assert_eq!(r.fields.customer_id.unwrap().value, "10045");
+    assert!(r.fields.customer_name.is_none());
+    assert!(
+      r.fields.sub_total.is_none(),
+      "`Net 30` is terms, not a subtotal"
+    );
+    assert_eq!(
+      r.fields.invoice_total.unwrap().value,
+      93.5,
+      "prose with a trailing number is not a total"
+    );
+    assert_eq!(
+      r.document_type,
+      InvoiceDocumentType::Invoice,
+      "an overpaid balance is not a credit note"
+    );
+    assert!(r.credit_signals.is_empty());
+  }
+
+  #[test]
+  fn a_bare_title_anchors_nothing_below_or_beside_it() {
+    use super::super::testing::page;
+    let r = extract_from_pages(
+      &[page(&[
+        (50.0, 760.0, 12.0, true, "INVOICE"),
+        (50.0, 744.0, 10.0, false, "1200 Hangar Road"),
+        (300.0, 760.0, 10.0, false, "03/14/2024"),
+        (50.0, 700.0, 14.0, true, "ACME AVIATION SERVICES"),
+      ])],
+      None,
+    );
+    assert!(r.fields.invoice_id.is_none(), "{:?}", r.fields.invoice_id);
+    assert!(r.fields.total_tax.is_none());
+    let r = extract_from_pages(
+      &[page(&[
+        (50.0, 760.0, 12.0, true, "TAX INVOICE"),
+        (50.0, 744.0, 10.0, false, "123 Main Street"),
+      ])],
+      None,
+    );
+    assert!(r.fields.invoice_id.is_none());
+    assert!(r.fields.total_tax.is_none());
+  }
+
+  #[test]
+  fn a_two_thousand_word_line_is_read_in_well_under_a_second() {
+    use super::super::testing::page;
+    let text: String = (0..400)
+      .map(|i| format!("word{i} alpha beta Date gamma"))
+      .collect::<Vec<_>>()
+      .join(" ");
+    let p = page(&[(10.0, 700.0, 10.0, false, &text)]);
+    let started = std::time::Instant::now();
+    let _ = extract_from_pages(&[p], None);
+    assert!(
+      started.elapsed().as_millis() < 1000,
+      "{} ms",
+      started.elapsed().as_millis()
+    );
+  }
 
   #[test]
   fn the_header_fields_come_off_the_acme_page() {

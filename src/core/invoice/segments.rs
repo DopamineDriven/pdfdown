@@ -9,7 +9,10 @@ const GAP_EM: f64 = 2.5;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Segment {
+  /// The page's number as given, for spans.
   pub page: u32,
+  /// The page's position in the array it came from, for every lookup.
+  pub page_index: usize,
   pub line: u32,
   /// Indexes into the page's `words`, left to right.
   pub words: Vec<usize>,
@@ -40,7 +43,7 @@ fn word_size(page: &PageLayout, i: usize) -> f64 {
     .unwrap_or((w.y1 - w.y0).max(1.0))
 }
 
-fn make(page: &PageLayout, line: u32, words: Vec<usize>) -> Segment {
+fn make(page: &PageLayout, index: usize, line: u32, words: Vec<usize>) -> Segment {
   let mut sizes: Vec<f64> = words.iter().map(|&i| word_size(page, i)).collect();
   let bold = words
     .iter()
@@ -56,6 +59,7 @@ fn make(page: &PageLayout, line: u32, words: Vec<usize>) -> Segment {
   let span = span_of(page, &words);
   Segment {
     page: page.page,
+    page_index: index,
     line,
     text: tokens.join(" "),
     tokens,
@@ -72,7 +76,8 @@ fn make(page: &PageLayout, line: u32, words: Vec<usize>) -> Segment {
 }
 
 /// The page's lines, each split where a horizontal gap reaches `GAP_EM` of the line's font size.
-pub(crate) fn segments(page: &PageLayout) -> Vec<Segment> {
+/// `index` is the page's position in the array it came from.
+pub(crate) fn segments(page: &PageLayout, index: usize) -> Vec<Segment> {
   let mut out = Vec::new();
   for (li, line) in page.lines.iter().enumerate() {
     let first = line.first_word as usize;
@@ -86,12 +91,12 @@ pub(crate) fn segments(page: &PageLayout) -> Vec<Segment> {
     for i in first + 1..first + count {
       let prev = &page.words[i - 1];
       if page.words[i].x0 - prev.x1 >= gap {
-        out.push(make(page, li as u32, std::mem::take(&mut current)));
+        out.push(make(page, index, li as u32, std::mem::take(&mut current)));
       }
       current.push(i);
     }
     if !current.is_empty() {
-      out.push(make(page, li as u32, current));
+      out.push(make(page, index, li as u32, current));
     }
   }
   out
@@ -118,14 +123,15 @@ pub(crate) fn span_of(page: &PageLayout, words: &[usize]) -> FieldSpan {
     x1: f64::MIN,
     y1: f64::MIN,
   };
-  for &i in words {
+  // A word index past the page (a caller-built page) is skipped, never indexed.
+  for &i in words.iter().filter(|&&i| i < page.words.len()) {
     let w = &page.words[i];
     span.x0 = span.x0.min(w.x0);
     span.y0 = span.y0.min(w.y0);
     span.x1 = span.x1.max(w.x1);
     span.y1 = span.y1.max(w.y1);
   }
-  if words.is_empty() {
+  if span.x0 == f64::MAX {
     span.x0 = 0.0;
     span.y0 = 0.0;
     span.x1 = 0.0;
@@ -136,7 +142,7 @@ pub(crate) fn span_of(page: &PageLayout, words: &[usize]) -> FieldSpan {
 
 #[cfg(test)]
 mod tests {
-  use super::super::testing::page;
+  use super::super::testing::{page, segments_at};
   use super::*;
 
   #[test]
@@ -145,7 +151,7 @@ mod tests {
       (43.0, 700.0, 10.0, false, "From:"),
       (348.0, 700.0, 10.0, false, "Invoice Number INV-3337"),
     ]);
-    let segs = segments(&p);
+    let segs = segments_at(&p);
     assert_eq!(
       segs.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(),
       ["From:", "Invoice Number INV-3337"]

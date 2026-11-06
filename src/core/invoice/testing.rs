@@ -1,6 +1,7 @@
 //! Hand-built pages for the invoice engine's unit tests: words laid on baselines with the same
 //! half-em-per-character estimate the spreadsheet projection uses, through the real clusterer.
 
+use super::segments::{Segment, segments};
 use crate::core::layout::interpreter::FontMeta;
 use crate::core::layout::words::{Word, words_to_lines};
 use crate::types::{PageLayout, TextSource};
@@ -62,6 +63,11 @@ pub(crate) fn page(runs: &[Run<'_>]) -> PageLayout {
     images: Vec::new(),
     warnings: Vec::new(),
   }
+}
+
+/// The segments of a single test page (page index 0).
+pub(crate) fn segments_at(page: &PageLayout) -> Vec<Segment> {
+  segments(page, 0)
 }
 
 /// The header of the cluster-A look-alike (invented text), as the fixture generator lays it.

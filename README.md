@@ -493,8 +493,8 @@ export interface InvoiceOptions {
   dateOrder?: "Auto" | "MDY" | "DMY" | "YMD"; // fallback for numeric dates both of whose parts are 12 or less; a day over 12 on the page decides on its own
   decimalSeparator?: "Auto" | "." | ","; // fallback when no amount on the page shows two decimals
   preferEmbeddedXml?: boolean; // default true
-  includeLayout?: boolean; // reserved
-  includeCandidates?: boolean; // reserved
+  includeLayout?: boolean; // reserved, accepted and ignored
+  includeCandidates?: boolean; // default false; lists in `warnings` the candidates each field was chosen from
 }
 ```
 

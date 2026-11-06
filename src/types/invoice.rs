@@ -210,8 +210,9 @@ pub struct InvoiceFields {
   pub items: Vec<InvoiceItem>,
 }
 
-/// Which extraction path produced the result. `None` means no path could
-/// (no embedded XML, and layout-based extraction is not available yet).
+/// Which extraction path produced the result: embedded XML, the page text (native, OCR,
+/// rendered or mixed), a workbook's cells, or `None` when the document had no readable
+/// pages and no embedded XML.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[napi(string_enum)]
 pub enum InvoiceSource {
@@ -290,9 +291,11 @@ pub enum DateOrder {
   YMD,
 }
 
-/// Options accepted by every invoice entry point. In this version only
-/// `preferEmbeddedXml` changes behaviour; the rest are reserved for the
-/// layout-based extractor and are accepted so callers can set them now.
+/// Options accepted by every invoice entry point. `preferEmbeddedXml` picks the embedded
+/// XML over the pages when both exist; `languages`, `currency`, `dateOrder` and
+/// `decimalSeparator` steer the page reader where the page leaves a choice;
+/// `includeCandidates` lists, in `warnings`, the candidates each field was chosen from;
+/// `includeLayout` is reserved.
 #[derive(Debug, Clone, Default)]
 #[napi(object)]
 pub struct InvoiceOptions {
@@ -305,6 +308,9 @@ pub struct InvoiceOptions {
   pub decimal_separator: Option<String>,
   /// Default `true`. Embedded Factur-X / ZUGFeRD / XRechnung / UBL XML is used when present.
   pub prefer_embedded_xml: Option<bool>,
+  /// Reserved; accepted and ignored.
   pub include_layout: Option<bool>,
+  /// Default `false`. Lists, in `warnings`, the candidates each field was chosen from, with
+  /// their scores.
   pub include_candidates: Option<bool>,
 }

@@ -4,6 +4,7 @@
 
 use super::amounts::{Separator, parse_amount};
 use super::dates::{Order, parse_date};
+use super::identifiers::parse_identifier;
 use super::lexicon::{Field, Hit, is_document_title};
 use super::segments::Segment;
 use crate::types::{AddressField, FieldSpan, StringField};
@@ -14,12 +15,29 @@ const MAX_ADDRESS_LINES: usize = 5;
 /// The vendor sits in this top share of the first page.
 const TOP_BAND: f64 = 0.75;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct Party {
-  pub name: StringField,
+  pub name: Option<StringField>,
   pub address: Option<AddressField>,
   pub email: Option<StringField>,
   pub phone: Option<StringField>,
+  /// An identifier the label carried instead of a name (`Customer No: 10045`).
+  pub id: Option<StringField>,
+}
+
+/// A name is mostly letters, at least two of them, and neither a date nor an amount.
+fn name_shape(text: &str) -> bool {
+  let letters = text.chars().filter(|c| c.is_alphabetic()).count();
+  let digits_or_punct = text
+    .chars()
+    .filter(|c| c.is_ascii_digit() || c.is_ascii_punctuation())
+    .count();
+  letters >= 2
+    && letters >= digits_or_punct
+    && parse_date(text, Order::Mdy).is_none()
+    && parse_amount(text, Separator::Point).is_none()
+    && !is_email(text)
+    && !is_web(text)
 }
 
 fn span(s: &Segment) -> FieldSpan {
@@ -104,7 +122,7 @@ fn block_under<'a>(
   let mut below: Vec<(&Segment, &Vec<Hit>)> = segments
     .iter()
     .zip(hits)
-    .filter(|(t, _)| t.page == anchor.page && t.y1 <= anchor.y0 + 1e-6)
+    .filter(|(t, _)| t.page_index == anchor.page_index && t.y1 <= anchor.y0 + 1e-6)
     .filter(|(t, _)| (t.x0 - anchor.x0).abs() <= ALIGN_EM * anchor.font_size)
     .collect();
   below.sort_by(|a, b| b.0.y1.total_cmp(&a.0.y1));
@@ -124,8 +142,8 @@ fn block_under<'a>(
   lines
 }
 
-/// A party from a name line and the lines under it.
-fn party_from(name: &Segment, lines: &[&Segment], confidence: f64) -> Party {
+/// A party from a name line (or none) and the lines under it.
+fn party_from(name: Option<&Segment>, lines: &[&Segment], confidence: f64) -> Party {
   let mut address: Vec<&Segment> = Vec::new();
   let mut email = None;
   let mut phone = None;
@@ -159,10 +177,11 @@ fn party_from(name: &Segment, lines: &[&Segment], confidence: f64) -> Party {
     }
   });
   Party {
-    name: text_field(name, confidence),
+    name: name.map(|n| text_field(n, confidence)),
     address: address_field,
     email,
     phone,
+    id: None,
   }
 }
 
@@ -183,10 +202,10 @@ fn looks_like_a_name(s: &Segment, median: f64) -> bool {
 }
 
 pub(crate) fn vendor(segments: &[Segment], hits: &[Vec<Hit>], page_height: f64) -> Option<Party> {
-  let first_page = segments.iter().map(|s| s.page).min()?;
+  let first_page = segments.iter().map(|s| s.page_index).min()?;
   let mut sizes: Vec<f64> = segments
     .iter()
-    .filter(|s| s.page == first_page)
+    .filter(|s| s.page_index == first_page)
     .map(|s| s.font_size)
     .collect();
   sizes.sort_by(f64::total_cmp);
@@ -194,7 +213,7 @@ pub(crate) fn vendor(segments: &[Segment], hits: &[Vec<Hit>], page_height: f64) 
   let (name, _) = segments
     .iter()
     .zip(hits)
-    .filter(|(s, _)| s.page == first_page && s.y1 >= TOP_BAND * page_height)
+    .filter(|(s, _)| s.page_index == first_page && s.y1 >= TOP_BAND * page_height)
     .filter(|(s, h)| {
       !is_noise(s, h) && !is_email(&s.text) && !is_phone(&s.text) && !is_web(&s.text)
     })
@@ -206,7 +225,7 @@ pub(crate) fn vendor(segments: &[Segment], hits: &[Vec<Hit>], page_height: f64) 
         .then(a.y1.total_cmp(&b.y1))
     })?;
   let lines = block_under(segments, hits, name);
-  Some(party_from(name, &lines, 0.7))
+  Some(party_from(Some(name), &lines, 0.7))
 }
 
 /// The party under a `Bill To` / `Ship To` / `Remit To` / `From` label: the best-scoring label
@@ -230,28 +249,53 @@ pub(crate) fn party_block(segments: &[Segment], hits: &[Vec<Hit>], field: Field)
   for (_, i, hit) in found {
     let s = &segments[i];
     let lines = block_under(segments, hits, s);
+    let mut id = None;
     if !hit.remainder.is_empty() {
-      let name = Segment {
-        text: hit.remainder.clone(),
-        tokens: hit
-          .remainder
-          .split_whitespace()
-          .map(str::to_string)
-          .collect(),
-        words: s.words[hit.end.min(s.words.len())..].to_vec(),
-        ..s.clone()
-      };
-      return Some(party_from(&name, &lines, 0.9));
+      if name_shape(&hit.remainder) {
+        let name = Segment {
+          text: hit.remainder.clone(),
+          tokens: hit
+            .remainder
+            .split_whitespace()
+            .map(str::to_string)
+            .collect(),
+          words: s.words[hit.end.min(s.words.len())..].to_vec(),
+          ..s.clone()
+        };
+        return Some(party_from(Some(&name), &lines, 0.9));
+      }
+      // `Customer No: 10045` names the customer by number, not by name.
+      match (field, parse_identifier(&hit.remainder)) {
+        (Field::BillTo, Some(value)) => {
+          id = Some(StringField {
+            value,
+            text: hit.remainder.clone(),
+            confidence: 0.9,
+            span: Some(span(s)),
+          });
+        }
+        _ => continue,
+      }
     }
-    let Some((name, rest)) = lines.split_first() else {
-      continue;
+    let name = match lines.split_first() {
+      Some((name, _)) => {
+        let name_index = segments.iter().position(|t| std::ptr::eq(t, *name));
+        let name_hits = name_index.map(|j| hits[j].as_slice()).unwrap_or(&[]);
+        (!is_noise(name, name_hits) && name_shape(&name.text)).then_some(*name)
+      }
+      None => None,
     };
-    let name_index = segments.iter().position(|t| std::ptr::eq(t, *name));
-    let name_hits = name_index.map(|j| hits[j].as_slice()).unwrap_or(&[]);
-    if is_noise(name, name_hits) {
+    if name.is_none() && id.is_none() {
       continue;
     }
-    return Some(party_from(name, rest, 0.9));
+    let rest: Vec<&Segment> = if name.is_some() {
+      lines[1..].to_vec()
+    } else {
+      Vec::new()
+    };
+    let mut party = party_from(name, &rest, 0.9);
+    party.id = id;
+    return Some(party);
   }
   None
 }
@@ -259,17 +303,18 @@ pub(crate) fn party_block(segments: &[Segment], hits: &[Vec<Hit>], field: Field)
 #[cfg(test)]
 mod tests {
   use super::super::lexicon::Field;
-  use super::super::segments::{label_hits, segments};
-  use super::super::testing::{acme_page, page};
+  use super::super::segments::label_hits;
+  use super::super::testing::{acme_page, page, segments_at};
   use super::*;
 
   #[test]
   fn the_vendor_is_the_largest_non_title_line_in_the_top_band_with_its_address() {
     let p = acme_page();
-    let segs = segments(&p);
+    let segs = segments_at(&p);
     let v = vendor(&segs, &label_hits(&segs), p.height).unwrap();
-    assert_eq!(v.name.value, "ACME AVIATION SERVICES");
-    assert_eq!(v.name.span.unwrap().page, 1);
+    let name = v.name.unwrap();
+    assert_eq!(name.value, "ACME AVIATION SERVICES");
+    assert_eq!(name.span.unwrap().page, 1);
     assert_eq!(
       v.address.unwrap().lines,
       ["1200 Hangar Road", "Wichita, KS 67209"]
@@ -279,16 +324,35 @@ mod tests {
       (450.0, 760.0, 16.0, true, "INVOICE"),
       (380.0, 730.0, 10.0, false, "Invoice No: 1"),
     ]);
-    let bare_segs = segments(&bare);
+    let bare_segs = segments_at(&bare);
     assert!(vendor(&bare_segs, &label_hits(&bare_segs), bare.height).is_none());
+  }
+
+  #[test]
+  fn a_label_remainder_that_is_no_name_is_not_a_name() {
+    let p = page(&[
+      (50.0, 760.0, 14.0, true, "ACME AVIATION SERVICES"),
+      (380.0, 730.0, 10.0, false, "Vendor #: 4471"),
+      (380.0, 716.0, 10.0, false, "Customer No: 10045"),
+      (50.0, 690.0, 10.0, false, "From 01/01/2024 to 01/31/2024"),
+    ]);
+    let segs = segments_at(&p);
+    let hits = label_hits(&segs);
+    assert!(
+      party_block(&segs, &hits, Field::Vendor).is_none(),
+      "`4471` and a service period are no vendor"
+    );
+    let customer = party_block(&segs, &hits, Field::BillTo).unwrap();
+    assert!(customer.name.is_none());
+    assert_eq!(customer.id.as_ref().unwrap().value, "10045");
   }
 
   #[test]
   fn a_party_block_is_the_aligned_lines_under_its_label() {
     let p = acme_page();
-    let segs = segments(&p);
+    let segs = segments_at(&p);
     let c = party_block(&segs, &label_hits(&segs), Field::BillTo).unwrap();
-    assert_eq!(c.name.value, "Skyline Charter LLC");
+    assert_eq!(c.name.unwrap().value, "Skyline Charter LLC");
     assert_eq!(
       c.address.unwrap().lines,
       ["88 Terminal Drive", "Denver, CO 80249"]

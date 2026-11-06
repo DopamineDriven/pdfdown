@@ -114,8 +114,8 @@ pub(crate) fn infer(
 mod tests {
   use super::super::amounts::Separator;
   use super::super::dates::Order;
-  use super::super::segments::{label_hits, segments};
-  use super::super::testing::page;
+  use super::super::segments::label_hits;
+  use super::super::testing::{page, segments_at};
   use super::*;
   use crate::types::{CurrencySource, InvoiceOptions};
 
@@ -125,7 +125,7 @@ mod tests {
 
   #[test]
   fn currency_comes_from_the_page_then_the_option_then_nothing() {
-    let usd = segments(&page(&[(
+    let usd = segments_at(&page(&[(
       400.0,
       700.0,
       10.0,
@@ -136,7 +136,7 @@ mod tests {
     assert_eq!(p.currency.as_deref(), Some("USD"));
     assert_eq!(p.currency_source, CurrencySource::Page);
 
-    let glyph = segments(&page(&[(400.0, 700.0, 10.0, false, "Total $93.50")]));
+    let glyph = segments_at(&page(&[(400.0, 700.0, 10.0, false, "Total $93.50")]));
     let p = infer_of(&glyph, None);
     assert_eq!(p.currency, None);
     assert_eq!(p.currency_source, CurrencySource::Unknown);
@@ -148,7 +148,7 @@ mod tests {
     assert_eq!(p.currency.as_deref(), Some("USD"));
     assert_eq!(p.currency_source, CurrencySource::Option);
 
-    let euro = segments(&page(&[(
+    let euro = segments_at(&page(&[(
       400.0,
       700.0,
       10.0,
@@ -162,7 +162,7 @@ mod tests {
 
   #[test]
   fn separator_and_order_come_from_unambiguous_tokens() {
-    let de = segments(&page(&[
+    let de = segments_at(&page(&[
       (400.0, 700.0, 10.0, false, "Zwischensumme 1.234,56"),
       (400.0, 686.0, 10.0, false, "MwSt. 234,57"),
       (400.0, 672.0, 10.0, false, "Datum: 31.08.2015"),
@@ -170,7 +170,7 @@ mod tests {
     let p = infer_of(&de, None);
     assert_eq!(p.separator, Separator::Comma);
     assert_eq!(p.order, Order::Dmy);
-    let us = segments(&page(&[(
+    let us = segments_at(&page(&[(
       400.0,
       700.0,
       10.0,

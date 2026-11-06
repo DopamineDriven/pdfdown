@@ -440,9 +440,11 @@ export interface InvoiceItem {
 }
 
 /**
- * Options accepted by every invoice entry point. In this version only
- * `preferEmbeddedXml` changes behaviour; the rest are reserved for the
- * layout-based extractor and are accepted so callers can set them now.
+ * Options accepted by every invoice entry point. `preferEmbeddedXml` picks the embedded
+ * XML over the pages when both exist; `languages`, `currency`, `dateOrder` and
+ * `decimalSeparator` steer the page reader where the page leaves a choice;
+ * `includeCandidates` lists, in `warnings`, the candidates each field was chosen from;
+ * `includeLayout` is reserved.
  */
 export interface InvoiceOptions {
   /** Label lexicons to enable; default `["en"]`. */
@@ -453,7 +455,12 @@ export interface InvoiceOptions {
   decimalSeparator?: "Auto" | "." | ",";
   /** Default `true`. Embedded Factur-X / ZUGFeRD / XRechnung / UBL XML is used when present. */
   preferEmbeddedXml?: boolean;
+  /** Reserved; accepted and ignored. */
   includeLayout?: boolean;
+  /**
+   * Default `false`. Lists, in `warnings`, the candidates each field was chosen from, with
+   * their scores.
+   */
   includeCandidates?: boolean;
 }
 
@@ -472,8 +479,9 @@ export interface InvoiceResult {
 }
 
 /**
- * Which extraction path produced the result. `None` means no path could
- * (no embedded XML, and layout-based extraction is not available yet).
+ * Which extraction path produced the result: embedded XML, the page text (native, OCR,
+ * rendered or mixed), a workbook's cells, or `None` when the document had no readable
+ * pages and no embedded XML.
  */
 export type InvoiceSource = "EmbeddedXml" | "Native" | "Ocr" | "Rendered" | "Mixed" | "Spreadsheet" | "None";
 
