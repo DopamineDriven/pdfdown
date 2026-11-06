@@ -168,8 +168,29 @@ fn party_from(name: &Segment, lines: &[&Segment], confidence: f64) -> Party {
 
 /// The vendor: the largest-font line in the top band of the first page that is not a label, a
 /// title, a date or an amount (bold breaks ties, then the topmost), with its address under it.
+/// A name stands out: a fifth larger than the page's median font, bold, or two words or more;
+/// and it is mostly letters, never a number with a unit.
+fn looks_like_a_name(s: &Segment, median: f64) -> bool {
+  let letters = s.text.chars().filter(|c| c.is_alphabetic()).count();
+  let digits_or_punct = s
+    .text
+    .chars()
+    .filter(|c| c.is_ascii_digit() || c.is_ascii_punctuation())
+    .count();
+  letters > 0
+    && letters >= digits_or_punct
+    && (s.font_size >= 1.2 * median || s.bold || s.tokens.len() >= 2)
+}
+
 pub(crate) fn vendor(segments: &[Segment], hits: &[Vec<Hit>], page_height: f64) -> Option<Party> {
   let first_page = segments.iter().map(|s| s.page).min()?;
+  let mut sizes: Vec<f64> = segments
+    .iter()
+    .filter(|s| s.page == first_page)
+    .map(|s| s.font_size)
+    .collect();
+  sizes.sort_by(f64::total_cmp);
+  let median = sizes.get(sizes.len() / 2).copied().unwrap_or(0.0);
   let (name, _) = segments
     .iter()
     .zip(hits)
@@ -177,11 +198,7 @@ pub(crate) fn vendor(segments: &[Segment], hits: &[Vec<Hit>], page_height: f64) 
     .filter(|(s, h)| {
       !is_noise(s, h) && !is_email(&s.text) && !is_phone(&s.text) && !is_web(&s.text)
     })
-    .filter(|(s, _)| {
-      s.tokens
-        .iter()
-        .any(|t| t.chars().any(|c| c.is_alphabetic()))
-    })
+    .filter(|(s, _)| looks_like_a_name(s, median))
     .max_by(|(a, _), (b, _)| {
       a.font_size
         .total_cmp(&b.font_size)

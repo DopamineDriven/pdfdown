@@ -55,24 +55,51 @@ fn same_line(segments: &[Segment], hit: &Hit, s: &Segment) -> Option<Candidate> 
   })
 }
 
-fn below<'a>(segments: &'a [Segment], s: &Segment) -> Option<&'a Segment> {
-  let reach = BELOW_LINES * LINE_EM * s.font_size;
-  segments
+/// A segment that opens with a label of any field is its own key-value pair, never our value.
+fn is_labelled(hits: &[Hit]) -> bool {
+  hits
     .iter()
-    .filter(|t| t.page == s.page && t.y1 <= s.y0 + 1e-6 && s.y0 - t.y1 <= reach)
-    .filter(|t| (t.x0 - s.x0).abs() <= ALIGN_EM * s.font_size)
-    .max_by(|a, b| a.y1.total_cmp(&b.y1))
+    .any(|h| h.start == 0 && h.score >= 0.8 && h.label.field != Field::DocumentTitle)
 }
 
-fn right<'a>(segments: &'a [Segment], s: &Segment) -> Option<&'a Segment> {
-  segments
-    .iter()
-    .filter(|t| t.page == s.page && t.line == s.line && t.x0 > s.x1)
-    .min_by(|a, b| a.x0.total_cmp(&b.x0))
+fn below(segments: &[Segment], hits: &[Vec<Hit>], s: &Segment) -> Option<usize> {
+  let reach = BELOW_LINES * LINE_EM * s.font_size;
+  (0..segments.len())
+    .filter(|&i| {
+      let t = &segments[i];
+      t.page == s.page
+        && t.y1 <= s.y0 + 1e-6
+        && s.y0 - t.y1 <= reach
+        && (t.x0 - s.x0).abs() <= ALIGN_EM * s.font_size
+        && !is_labelled(&hits[i])
+    })
+    .max_by(|&a, &b| segments[a].y1.total_cmp(&segments[b].y1))
+}
+
+fn right(segments: &[Segment], hits: &[Vec<Hit>], s: &Segment) -> Option<usize> {
+  (0..segments.len())
+    .filter(|&i| {
+      let t = &segments[i];
+      t.page == s.page && t.line == s.line && t.x0 > s.x1 && !is_labelled(&hits[i])
+    })
+    .min_by(|&a, &b| segments[a].x0.total_cmp(&segments[b].x0))
+}
+
+fn neighbour(t: &Segment, hit: &Hit, geometry: f64) -> Candidate {
+  Candidate {
+    text: t.text.clone(),
+    words: t.words.clone(),
+    page: t.page,
+    label: hit.label,
+    label_score: hit.score,
+    geometry_score: geometry,
+    ocr_confidence: t.ocr_confidence,
+  }
 }
 
 /// Every candidate value for `field` across the segments, from the shared per-segment hits,
-/// unscored by any validator yet.
+/// unscored by any validator yet: the rest of the label's segment, the aligned unlabelled line
+/// below, and the unlabelled segment to the right on the same baseline.
 pub(crate) fn candidates(segments: &[Segment], hits: &[Vec<Hit>], field: Field) -> Vec<Candidate> {
   let mut out = Vec::new();
   for (s, segment_hits) in segments.iter().zip(hits) {
@@ -86,29 +113,11 @@ pub(crate) fn candidates(segments: &[Segment], hits: &[Vec<Hit>], field: Field) 
       if let Some(c) = same_line(segments, hit, s) {
         out.push(c);
       }
-      if let Some(t) = below(segments, s) {
-        out.push(Candidate {
-          text: t.text.clone(),
-          words: t.words.clone(),
-          page: t.page,
-          label: hit.label,
-          label_score: hit.score,
-          geometry_score: 0.8,
-          ocr_confidence: t.ocr_confidence,
-        });
+      if let Some(i) = below(segments, hits, s) {
+        out.push(neighbour(&segments[i], hit, 0.8));
       }
-      if hit.remainder.is_empty()
-        && let Some(t) = right(segments, s)
-      {
-        out.push(Candidate {
-          text: t.text.clone(),
-          words: t.words.clone(),
-          page: t.page,
-          label: hit.label,
-          label_score: hit.score,
-          geometry_score: 0.7,
-          ocr_confidence: t.ocr_confidence,
-        });
+      if let Some(i) = right(segments, hits, s) {
+        out.push(neighbour(&segments[i], hit, 0.7));
       }
     }
   }

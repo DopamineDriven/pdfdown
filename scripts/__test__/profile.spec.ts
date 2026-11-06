@@ -93,6 +93,10 @@ test("profile of the public invoice fixtures: deterministic counts, every entry 
     profile.entries.map((e) => e.id),
     [
       "Downloadable-PDF-Invoices-Add-On-Samples",
+      "cluster-a",
+      "cluster-b",
+      "cluster-c",
+      "credit-memo",
       "wordpress-pdf-invoice-plugin-sample",
       "einvoice-broken",
       "facturx-minimal",
@@ -100,11 +104,11 @@ test("profile of the public invoice fixtures: deterministic counts, every entry 
     ]
   );
   const { headline, producers, clusters, pageKinds } = profile.tables;
-  t.is(headline.pdfs, 5);
+  t.is(headline.pdfs, 9);
   t.is(headline.parseFailures, 0);
-  t.deepEqual(headline.textClass, { native: 2, scanned: 3, mixed: 0 });
+  t.deepEqual(headline.textClass, { native: 6, scanned: 3, mixed: 0 });
   t.deepEqual(headline.pagesHistogram, {
-    "1": 3,
+    "1": 7,
     "2": 1,
     "3": 0,
     "4": 1,
@@ -114,7 +118,7 @@ test("profile of the public invoice fixtures: deterministic counts, every entry 
     "21-50": 0,
     "51+": 0
   });
-  t.deepEqual(headline.sizeClass, { Letter: 3, A4: 2, landscape: 0, other: 0 });
+  t.deepEqual(headline.sizeClass, { Letter: 7, A4: 2, landscape: 0, other: 0 });
   t.is(headline.rotatedPages, 0);
   t.is(headline.rotatedDocuments, 0);
   t.is(headline.acroFormDocuments, 1, "a report generator left an empty AcroForm on one sample");
@@ -123,17 +127,21 @@ test("profile of the public invoice fixtures: deterministic counts, every entry 
   t.is(headline.multiSizeDocuments, 0);
   t.true(headline.layoutMs.total > 0 && headline.layoutMs.max >= headline.layoutMs.mean);
   t.deepEqual(producers, [
-    { family: "unknown", documents: 4 },
+    { family: "unknown", documents: 8 },
     { family: "TCPDF", documents: 1 }
   ]);
-  t.deepEqual(clusters.fonts, { clusters: 3, singletons: 2, largest: [3, 1, 1] });
-  t.deepEqual(clusters.header, { clusters: 3, singletons: 2, largest: [3, 1, 1] });
-  t.deepEqual(clusters.coverage, { "50": 1, "80": 2, "90": 3, "95": 3 });
+  t.deepEqual(
+    clusters.fonts,
+    { clusters: 4, singletons: 2, largest: [4, 3, 1, 1] },
+    "the four look-alikes share Helvetica"
+  );
+  t.deepEqual(clusters.header, { clusters: 7, singletons: 6, largest: [3, 1, 1, 1, 1, 1] });
+  t.deepEqual(clusters.coverage, { "50": 3, "80": 6, "90": 7, "95": 7 });
   t.deepEqual(pageKinds, {
     imageOnly: { pages: 0, documents: 0 },
     stampOverScan: { pages: 0, documents: 0 },
     noGlyphsNoImages: { pages: 4, documents: 3 },
-    sparseNative: { pages: 0, documents: 0 }
+    sparseNative: { pages: 2, documents: 2 }
   });
   t.true(profile.entries.every((e) => e.fingerprintHeader.startsWith(`${e.fingerprintFonts}|`)));
   t.true(

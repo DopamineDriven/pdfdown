@@ -962,6 +962,143 @@ fn main() {
   let spreadsheet = fixtures_root.join("spreadsheet");
   std::fs::create_dir_all(&spreadsheet).expect("spreadsheet fixture dir");
   spreadsheet_fixtures(&spreadsheet);
+
+  // Invoice look-alikes for the layout track: invented text in the shape of the corpus's clusters.
+  let invoices = fixtures_root.join("invoices");
+  std::fs::create_dir_all(&invoices).expect("invoices fixture dir");
+  invoice_fixtures(&invoices);
+}
+
+// ── Invoice look-alikes ───────────────────────────────────────────────────────
+
+/// One text run: `(x, y, bold, size, text)` on a 612×792 page.
+type Run = (f64, f64, bool, u32, &'static str);
+
+fn pdf_text(run: &Run) -> String {
+  let (x, y, bold, size, text) = run;
+  let escaped = text
+    .replace('\\', "\\\\")
+    .replace('(', "\\(")
+    .replace(')', "\\)");
+  let font = if *bold { "F2" } else { "F1" };
+  format!("BT /{font} {size} Tf {x} {y} Td ({escaped}) Tj ET\n")
+}
+
+fn invoice_page(out: &Path, name: &str, runs: &[Run]) {
+  let mut p = Pdf::new(1);
+  let helv = p.doc.add_object(dictionary! {
+    "Type" => n("Font"), "Subtype" => n("Type1"), "BaseFont" => n("Helvetica"), "Encoding" => n("WinAnsiEncoding"),
+  });
+  let helv_bold = p.doc.add_object(dictionary! {
+    "Type" => n("Font"), "Subtype" => n("Type1"), "BaseFont" => n("Helvetica-Bold"), "Encoding" => n("WinAnsiEncoding"),
+  });
+  let content: String = runs.iter().map(pdf_text).collect();
+  let cid = p
+    .doc
+    .add_object(Stream::new(dictionary! {}, content.into_bytes()));
+  p.set_page(0, "Contents", Object::Reference(cid));
+  p.set_page(
+    0,
+    "Resources",
+    Object::Dictionary(dictionary! {
+      "Font" => Object::Dictionary(dictionary! {
+        "F1" => Object::Reference(helv), "F2" => Object::Reference(helv_bold),
+      }),
+    }),
+  );
+  p.finish(None, &out.join(name));
+}
+
+fn invoice_fixtures(out: &Path) {
+  // Cluster A: a US maintenance invoice with a labelled right column and a Bill To block.
+  invoice_page(
+    out,
+    "cluster-a.pdf",
+    &[
+      (50.0, 760.0, true, 14, "ACME AVIATION SERVICES"),
+      (50.0, 744.0, false, 10, "1200 Hangar Road"),
+      (50.0, 732.0, false, 10, "Wichita, KS 67209"),
+      (450.0, 760.0, true, 12, "INVOICE"),
+      (380.0, 730.0, false, 10, "Invoice No: A-10045"),
+      (380.0, 716.0, false, 10, "Invoice Date: 03/14/2024"),
+      (380.0, 702.0, false, 10, "Customer PO: PO-778812"),
+      (380.0, 688.0, false, 10, "Work Order: WO-5521"),
+      (50.0, 690.0, false, 10, "Bill To:"),
+      (50.0, 676.0, false, 10, "Skyline Charter LLC"),
+      (50.0, 664.0, false, 10, "88 Terminal Drive"),
+      (50.0, 652.0, false, 10, "Denver, CO 80249"),
+      (50.0, 620.0, false, 10, "Aircraft Registration: N417SK"),
+      (50.0, 606.0, false, 10, "Serial Number: 20311"),
+      (400.0, 300.0, false, 10, "Subtotal"),
+      (500.0, 300.0, false, 10, "$12,450.00"),
+      (400.0, 286.0, false, 10, "Sales Tax"),
+      (500.0, 286.0, false, 10, "$871.50"),
+      (400.0, 270.0, true, 10, "Total Amount Due"),
+      (500.0, 270.0, true, 10, "$13,321.50"),
+    ],
+  );
+  // Cluster B: a German invoice, comma decimals, codes beside the amounts.
+  invoice_page(
+    out,
+    "cluster-b.pdf",
+    &[
+      (50.0, 760.0, true, 14, "Mueller Flugtechnik GmbH"),
+      (50.0, 744.0, false, 10, "Flughafenstrasse 12"),
+      (50.0, 732.0, false, 10, "70629 Stuttgart"),
+      (450.0, 760.0, true, 12, "RECHNUNG"),
+      (380.0, 740.0, false, 10, "Rechnung Nr. 2015-0831"),
+      (380.0, 726.0, false, 10, "Datum: 31.08.2015"),
+      (380.0, 300.0, false, 10, "Zwischensumme"),
+      (480.0, 300.0, false, 10, "EUR 1.234,56"),
+      (380.0, 286.0, false, 10, "MwSt. 19%"),
+      (480.0, 286.0, false, 10, "EUR 234,57"),
+      (380.0, 270.0, true, 10, "Rechnungsbetrag"),
+      (480.0, 270.0, true, 10, "EUR 1.469,13"),
+    ],
+  );
+  // Cluster C: a bilingual Canadian invoice, space thousands, two tax lines, a code in brackets.
+  invoice_page(
+    out,
+    "cluster-c.pdf",
+    &[
+      (50.0, 760.0, true, 14, "Nordique Aero Inc."),
+      (50.0, 744.0, false, 10, "455 Rue de l'Aviation"),
+      (50.0, 732.0, false, 10, "Montreal, QC H4T 1A1"),
+      (400.0, 760.0, true, 12, "FACTURE / INVOICE"),
+      (
+        350.0,
+        740.0,
+        false,
+        10,
+        "No de facture / Invoice No.: F-2209",
+      ),
+      (350.0, 726.0, false, 10, "Date: 2022-09-15"),
+      (350.0, 300.0, false, 10, "Sous-total / Subtotal"),
+      (520.0, 300.0, false, 10, "4 500,00"),
+      (350.0, 286.0, false, 10, "TPS / GST 5%"),
+      (520.0, 286.0, false, 10, "225,00"),
+      (350.0, 272.0, false, 10, "TVQ / QST 9.975%"),
+      (520.0, 272.0, false, 10, "448,88"),
+      (350.0, 256.0, true, 10, "Total (CAD)"),
+      (520.0, 256.0, true, 10, "5 173,88"),
+    ],
+  );
+  // A credit memo: the title names it and the total is negative.
+  invoice_page(
+    out,
+    "credit-memo.pdf",
+    &[
+      (50.0, 760.0, true, 14, "ACME AVIATION SERVICES"),
+      (50.0, 744.0, false, 10, "1200 Hangar Road"),
+      (50.0, 732.0, false, 10, "Wichita, KS 67209"),
+      (430.0, 760.0, true, 12, "CREDIT MEMO"),
+      (380.0, 740.0, false, 10, "Credit Memo #: CM-2201"),
+      (380.0, 726.0, false, 10, "Date: 04/02/2024"),
+      (380.0, 712.0, false, 10, "Original Invoice: A-10045"),
+      (400.0, 300.0, true, 10, "Total Credit"),
+      (500.0, 300.0, true, 10, "-$1,200.00"),
+    ],
+  );
 }
 
 // ── Spreadsheet fixtures ──────────────────────────────────────────────────────

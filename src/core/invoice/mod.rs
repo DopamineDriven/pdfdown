@@ -13,6 +13,7 @@ pub(crate) mod priors;
 pub(crate) mod segments;
 #[cfg(test)]
 pub(crate) mod testing;
+pub(crate) mod totals;
 
 use crate::core::attachments::extract_attachments;
 use crate::types::{EmbeddedInvoiceXml, InvoiceOptions, InvoiceResult, InvoiceSource, PageLayout};

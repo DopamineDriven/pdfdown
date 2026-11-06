@@ -523,6 +523,10 @@ pub(crate) fn find_labels(words: &[&str], field: Option<Field>) -> Vec<Hit> {
       .then(a.start.cmp(&b.start))
       .then(b.end.cmp(&a.end))
   });
+  // Rows that normalise alike (`MwSt`, `MwSt.`) are one hit.
+  hits.dedup_by(|a, b| {
+    a.label.field == b.label.field && a.start == b.start && a.end == b.end && a.score == b.score
+  });
   hits
 }
 

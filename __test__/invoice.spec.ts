@@ -293,3 +293,81 @@ test("invoice from layout: the TCPDF sample reads a glued invoice number, a bare
   t.is(r.fields.currencyCode, "USD");
   t.is(r.currencySource, "Page");
 });
+
+const fx = (name: string) => extractInvoice(readFileSync(join(INVOICES, name)));
+
+test("invoice from layout: totals reconcile on the public samples", (t) => {
+  const w = fx("wordpress-pdf-invoice-plugin-sample.pdf");
+  t.is(w.fields.subTotal?.value, 85);
+  t.is(w.fields.totalTax?.value, 8.5);
+  t.is(w.fields.invoiceTotal?.value, 93.5);
+  t.is(w.fields.amountDue?.value, 93.5);
+  t.is(w.fields.invoiceTotal?.currencySymbol, "$");
+  t.is(w.documentType, "Invoice");
+  t.true(w.confidence >= 0.7, String(w.confidence));
+  const d = fx("Downloadable-PDF-Invoices-Add-On-Samples.pdf");
+  t.is(d.fields.subTotal?.value, 37.5);
+  t.is(d.fields.invoiceTotal?.value, 37.5);
+  t.is(d.fields.invoiceTotal?.currencyCode, "USD");
+  t.is(d.documentType, "Invoice", "a Credit row in the totals is not a credit memo");
+});
+
+test("invoice from layout: the three cluster look-alikes and a credit memo", (t) => {
+  const a = fx("cluster-a.pdf");
+  t.like(a.fields, {
+    invoiceId: { value: "A-10045" },
+    invoiceDate: { value: "2024-03-14" },
+    purchaseOrder: { value: "PO-778812" },
+    workOrder: { value: "WO-5521" },
+    vendorName: { value: "ACME AVIATION SERVICES" },
+    customerName: { value: "Skyline Charter LLC" },
+    subTotal: { value: 12450 },
+    totalTax: { value: 871.5 },
+    invoiceTotal: { value: 13321.5 },
+    amountDue: { value: 13321.5 }
+  });
+  t.deepEqual(
+    a.fields.aircraft.map((x) => [x.registration?.value, x.serialNumber?.value]),
+    [["N417SK", "20311"]]
+  );
+  const b = fx("cluster-b.pdf");
+  t.like(b.fields, {
+    invoiceId: { value: "2015-0831" },
+    invoiceDate: { value: "2015-08-31" },
+    vendorName: { value: "Mueller Flugtechnik GmbH" },
+    currencyCode: "EUR",
+    subTotal: { value: 1234.56 },
+    totalTax: { value: 234.57 },
+    invoiceTotal: { value: 1469.13 }
+  });
+  t.is(b.currencySource, "Page");
+  const c = fx("cluster-c.pdf");
+  t.like(c.fields, {
+    invoiceId: { value: "F-2209" },
+    invoiceDate: { value: "2022-09-15" },
+    vendorName: { value: "Nordique Aero Inc." },
+    currencyCode: "CAD",
+    subTotal: { value: 4500 },
+    totalTax: { value: 673.88 },
+    invoiceTotal: { value: 5173.88 }
+  });
+  const m = fx("credit-memo.pdf");
+  t.is(m.documentType, "CreditNote");
+  t.true(
+    m.creditSignals.some((s) => /credit title/.test(s)) && m.creditSignals.some((s) => /negative total/.test(s)),
+    m.creditSignals.join(" | ")
+  );
+  t.is(m.fields.invoiceId?.value, "CM-2201");
+  t.is(m.fields.invoiceTotal?.value, 1200, "credit amounts are reported absolute");
+  t.is(m.fields.invoiceDate?.value, "2024-04-02");
+});
+
+test("invoice on a workbook: the reimbursement form reads its total, id and date and invents no vendor", (t) => {
+  const r = new PdfDown(readFileSync(join(import.meta.dirname, "fixtures", "spreadsheet", "form.xlsx"))).invoice();
+  t.is(r.source, "Spreadsheet");
+  t.is(r.fields.invoiceTotal?.value, 427.5);
+  t.is(r.fields.invoiceId?.value, "000123");
+  t.is(r.fields.invoiceDate?.value, "2015-08-31");
+  t.is(r.fields.vendorName, undefined);
+  t.is(r.fields.invoiceTotal?.span?.page, 1);
+});

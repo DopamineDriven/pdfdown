@@ -2,6 +2,7 @@
 //! native PDF, the OCR cascade, a workbook's logical pages, or a consumer's own layout call).
 //! This file is the engine's entry; the modules beside it do the reading.
 
+use super::amounts::{Separator, parse_amount};
 use super::anchors::{Candidate, candidates, score};
 use super::dates::parse_date;
 use super::identifiers::{parse_identifier, parse_registration, parse_serial};
@@ -10,6 +11,7 @@ use super::lexicon::Hit;
 use super::parties::{Party, party_block, vendor};
 use super::priors::{Priors, infer};
 use super::segments::{Segment, label_hits, segments, span_of};
+use super::totals::{TotalCandidate, Totals, resolve};
 use crate::types::{
   AddressField, AircraftReference, DateField, FieldSpan, InvoiceDocumentType, InvoiceFields,
   InvoiceOptions, InvoiceResult, InvoiceSource, PageLayout, StringField, TextSource,
@@ -52,6 +54,9 @@ struct Reader<'a> {
   pages: &'a [PageLayout],
   first: Vec<Segment>,
   hits: Vec<Vec<Hit>>,
+  /// The last page with words when it is not the first: where multi-page invoices total up.
+  last: Vec<Segment>,
+  last_hits: Vec<Vec<Hit>>,
   priors: Priors,
   opts: Option<&'a InvoiceOptions>,
   warnings: Vec<String>,
@@ -152,6 +157,72 @@ impl<'a> Reader<'a> {
       })
   }
 
+  /// Every amount a totals label points at, on the first and the last page.
+  fn money_candidates(&self, field: Field) -> Vec<TotalCandidate> {
+    let separator: Separator = self.priors.separator;
+    let mut out = Vec::new();
+    for (segs, hits) in [(&self.first, &self.hits), (&self.last, &self.last_hits)] {
+      for c in candidates(segs, hits, field) {
+        let tokens: Vec<&str> = c.text.split_whitespace().collect();
+        // The whole text, else its last token, else its first.
+        let attempts: Vec<(String, Vec<usize>)> = [
+          (c.text.clone(), c.words.clone()),
+          (
+            tokens.last().map(|t| (*t).to_string()).unwrap_or_default(),
+            c.words.last().copied().into_iter().collect(),
+          ),
+          (
+            tokens.first().map(|t| (*t).to_string()).unwrap_or_default(),
+            c.words.first().copied().into_iter().collect(),
+          ),
+        ]
+        .into_iter()
+        .collect();
+        let Some((text, words, amount)) = attempts
+          .into_iter()
+          .find_map(|(text, words)| parse_amount(&text, separator).map(|a| (text, words, a)))
+        else {
+          continue;
+        };
+        let Some(page) = self.page(c.page) else {
+          continue;
+        };
+        out.push(TotalCandidate {
+          field,
+          amount,
+          text,
+          span: span_of(page, &words),
+          base: score(c.label_score, 1.0, c.geometry_score, c.ocr_confidence).min(0.99),
+        });
+      }
+    }
+    out
+  }
+
+  fn totals(&self) -> Totals {
+    let mut items = Vec::new();
+    for field in [Field::SubTotal, Field::Tax, Field::Total, Field::AmountDue] {
+      items.extend(self.money_candidates(field));
+    }
+    resolve(&items, self.priors.currency.as_deref())
+  }
+
+  /// Credit titles in the top band of the first page.
+  fn credit_titles(&self, page_height: f64) -> Vec<String> {
+    self
+      .first
+      .iter()
+      .zip(&self.hits)
+      .filter(|(s, _)| s.y1 >= 0.75 * page_height)
+      .filter(|(_, hits)| {
+        hits
+          .iter()
+          .any(|h| h.start == 0 && h.score >= 0.8 && h.label.field == Field::CreditTitle)
+      })
+      .map(|(s, _)| format!("credit title: {}", s.text))
+      .collect()
+  }
+
   fn date_field(&mut self, field: Field) -> Option<DateField> {
     let order = self.priors.order;
     self
@@ -207,10 +278,19 @@ pub(crate) fn extract_from_pages(
   let first = segments(first_page);
   let hits = label_hits(&first);
   let priors = infer(&first, &hits, opts);
+  let last_page = pages
+    .iter()
+    .rev()
+    .find(|p| !p.words.is_empty())
+    .filter(|p| p.page != first_page.page);
+  let last = last_page.map(segments).unwrap_or_default();
+  let last_hits = label_hits(&last);
   let mut reader = Reader {
     pages,
     first,
     hits,
+    last,
+    last_hits,
     priors,
     opts,
     warnings,
@@ -249,7 +329,12 @@ pub(crate) fn extract_from_pages(
     party_fields(party_block(&reader.first, &reader.hits, Field::ShipTo));
   let (_, remittance_address, _, _) =
     party_fields(party_block(&reader.first, &reader.hits, Field::RemitTo));
+  let totals = reader.totals();
   let fields = InvoiceFields {
+    sub_total: totals.sub_total,
+    total_tax: totals.total_tax,
+    invoice_total: totals.invoice_total,
+    amount_due: totals.amount_due,
     invoice_id,
     invoice_date,
     due_date,
@@ -268,10 +353,22 @@ pub(crate) fn extract_from_pages(
     ..InvoiceFields::default()
   };
 
+  let mut credit_signals = reader.credit_titles(first_page.height);
+  if totals.negative {
+    let text = fields
+      .invoice_total
+      .as_ref()
+      .or(fields.amount_due.as_ref())
+      .map(|f| f.text.clone())
+      .unwrap_or_default();
+    credit_signals.push(format!("negative total: {text}"));
+  }
   let key: Vec<f64> = [
     fields.invoice_id.as_ref().map(|f| f.confidence),
     fields.invoice_date.as_ref().map(|f| f.confidence),
     fields.vendor_name.as_ref().map(|f| f.confidence),
+    fields.invoice_total.as_ref().map(|f| f.confidence),
+    fields.amount_due.as_ref().map(|f| f.confidence),
   ]
   .into_iter()
   .flatten()
@@ -279,9 +376,12 @@ pub(crate) fn extract_from_pages(
   let confidence = if key.is_empty() {
     0.0
   } else {
-    key.iter().sum::<f64>() / key.len() as f64
+    (key.iter().sum::<f64>() / key.len() as f64 + if totals.reconciled { 0.1 } else { 0.0 })
+      .min(0.99)
   };
-  let document_type = if key.is_empty() {
+  let document_type = if !credit_signals.is_empty() {
+    InvoiceDocumentType::CreditNote
+  } else if key.is_empty() {
     InvoiceDocumentType::Unknown
   } else {
     InvoiceDocumentType::Invoice
@@ -301,7 +401,7 @@ pub(crate) fn extract_from_pages(
     warnings,
     embedded_xml: None,
     currency_source: Some(reader.priors.currency_source),
-    credit_signals: Vec::new(),
+    credit_signals,
   }
 }
 
