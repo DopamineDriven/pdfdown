@@ -59,6 +59,8 @@ struct Section {
   has_number: bool,
   is_date: bool,
   has_time: bool,
+  /// Year, month or day tokens: a calendar date, not only a clock.
+  has_date_part: bool,
   is_text: bool,
 }
 
@@ -96,6 +98,11 @@ const DAYS: [&str; 7] = [
   "Thursday",
   "Friday",
   "Saturday",
+];
+/// Glyphs a format code places next to a number to name its currency.
+const CURRENCY_GLYPHS: &[char] = &[
+  '$', '€', '£', '¥', '₹', '₽', '₩', '₪', '₺', '฿', '₫', '₦', '₴', '₱', '₡', '₲', '₵', '₸', '₼',
+  '¢', '֏', '៛',
 ];
 const COLOURS: [&str; 8] = [
   "black", "blue", "cyan", "green", "magenta", "red", "white", "yellow",
@@ -167,13 +174,13 @@ fn parse_section(text: &str) -> Option<Section> {
         let inner: String = chars[i + 1..end].iter().collect();
         let lower = inner.to_ascii_lowercase();
         if let Some(rest) = inner.strip_prefix('$') {
-          // `[$€]` is a currency literal; `[$€-407]` and `[$-409]` carry a locale: unsupported.
-          if rest.contains('-') {
+          // `[$€]` and `[$€-407]` are a currency literal, the latter with a locale id we ignore;
+          // `[$-409]` is a bare locale directive that changes month and day names: unsupported.
+          let symbol = rest.split('-').next().unwrap_or("");
+          if symbol.is_empty() {
             return None;
           }
-          if !rest.is_empty() {
-            tokens.push(Token::Literal(rest.to_string()));
-          }
+          tokens.push(Token::Literal(symbol.to_string()));
         } else if COLOURS.contains(&lower.as_str()) || lower.starts_with("color") {
           // colour tags carry no text
         } else {
@@ -332,6 +339,23 @@ fn parse_section(text: &str) -> Option<Section> {
   if has_number && tokens.iter().any(|t| matches!(t, Token::Slash)) {
     return None;
   }
+  let has_date_part = tokens.iter().any(|t| {
+    matches!(
+      t,
+      Token::Date(
+        DateToken::Year2
+          | DateToken::Year4
+          | DateToken::Month
+          | DateToken::Month2
+          | DateToken::MonthAbbr
+          | DateToken::MonthName
+          | DateToken::Day
+          | DateToken::Day2
+          | DateToken::DayAbbr
+          | DateToken::DayName
+      )
+    )
+  });
   let is_text = tokens.iter().any(|t| matches!(t, Token::Text)) && !has_number && !is_date;
 
   // Number shape: digits before and after the point, grouping commas, scaling commas. Every
@@ -386,6 +410,7 @@ fn parse_section(text: &str) -> Option<Section> {
     has_number,
     is_date,
     has_time,
+    has_date_part,
     is_text,
   })
 }
@@ -415,6 +440,30 @@ impl NumberFormat {
   /// Whether the date rendering carries a clock time.
   pub(crate) fn has_time(&self) -> bool {
     self.sections[0].has_time
+  }
+
+  /// Whether the code shows a calendar date (year, month or day tokens) rather than only a clock.
+  pub(crate) fn has_date_part(&self) -> bool {
+    self.sections[0].has_date_part
+  }
+
+  /// The currency the positive section names: a currency glyph, a bracketed `[$USD]` or
+  /// `[$€-407]` symbol, or a quoted three-letter code such as `"USD "`.
+  pub(crate) fn currency_symbol(&self) -> Option<String> {
+    self.sections[0].tokens.iter().find_map(|t| match t {
+      Token::Literal(text) => {
+        let trimmed = text.trim();
+        let mut chars = trimmed.chars();
+        match (chars.next(), chars.next()) {
+          (Some(c), None) if CURRENCY_GLYPHS.contains(&c) => Some(c.to_string()),
+          _ if trimmed.len() == 3 && trimmed.chars().all(|c| c.is_ascii_uppercase()) => {
+            Some(trimmed.to_string())
+          }
+          _ => None,
+        }
+      }
+      _ => None,
+    })
   }
 
   /// The display text for `value`; `None` when a date code meets a serial that is not a date.
@@ -516,12 +565,18 @@ fn group_thousands(digits: &str) -> String {
 }
 
 fn render_date(section: &Section, serial: f64, date1904: bool) -> Option<String> {
-  let (year, month, day, hour, minute, second) = serial_to_datetime(serial, date1904)?;
+  // A clock-only code needs no valid date: the fraction of the serial is the time of day.
+  let (year, month, day, hour, minute, second, weekday) = if section.has_date_part {
+    let (y, mo, d, h, mi, s) = serial_to_datetime(serial, date1904)?;
+    (y, mo, d, h, mi, s, weekday_of(serial, date1904)?)
+  } else {
+    let (h, mi, s) = clock_of(serial);
+    (0, 0, 0, h, mi, s, 0)
+  };
   let twelve_hour = section
     .tokens
     .iter()
     .any(|t| matches!(t, Token::Date(DateToken::AmPm)));
-  let weekday = weekday_of(serial, date1904)?;
   let mut out = String::new();
   for token in &section.tokens {
     match token {
@@ -661,6 +716,19 @@ pub(crate) fn serial_to_datetime(
     ((seconds % 3600) / 60) as u32,
     (seconds % 60) as u32,
   ))
+}
+
+/// The time of day a serial's fraction holds, rounded to the second (a fraction that rounds up
+/// to a whole day is midnight, as Excel shows it).
+fn clock_of(serial: f64) -> (u32, u32, u32) {
+  let seconds = ((serial.rem_euclid(1.0) * 86_400.0).round() as u32) % 86_400;
+  (seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+}
+
+/// `HH:MM:SS` of a serial's fraction, for a cell under a clock-only code.
+pub(crate) fn iso_time(serial: f64) -> String {
+  let (h, m, s) = clock_of(serial);
+  format!("{h:02}:{m:02}:{s:02}")
 }
 
 /// `YYYY-MM-DD`, or `YYYY-MM-DDTHH:MM:SS` with `with_time`.
@@ -808,6 +876,61 @@ mod tests {
         }
       }
     }
+  }
+
+  #[test]
+  fn currency_symbols_and_time_only_codes() {
+    let f = |code: &str| NumberFormat::parse(code).unwrap();
+    // A bracketed currency with a locale id is that currency; the id names a language we ignore.
+    assert_eq!(
+      f("[$€-407]#,##0.00").render(1234.5, false).as_deref(),
+      Some("€1,234.50")
+    );
+    assert_eq!(
+      f("[$€-407]#,##0.00").currency_symbol().as_deref(),
+      Some("€")
+    );
+    assert_eq!(f("[$USD] #,##0").currency_symbol().as_deref(), Some("USD"));
+    assert_eq!(
+      f("\"USD \"#,##0.00").currency_symbol().as_deref(),
+      Some("USD")
+    );
+    assert_eq!(
+      f("$#,##0.00;($#,##0.00)").currency_symbol().as_deref(),
+      Some("$")
+    );
+    assert_eq!(f("£#,##0").currency_symbol().as_deref(), Some("£"));
+    assert_eq!(f("#,##0.00\"/hr\"").currency_symbol(), None);
+    assert_eq!(f("0.00%").currency_symbol(), None);
+    assert_eq!(
+      f("_($* #,##0.00_);_($* (#,##0.00);_($* \"-\"??_);_(@_)")
+        .currency_symbol()
+        .as_deref(),
+      Some("$")
+    );
+    assert!(
+      NumberFormat::parse("[$-409]mmmm d, yyyy").is_none(),
+      "a bare locale id is still unsupported"
+    );
+    // Time-only codes carry a clock and no date.
+    assert!(f("h:mm").is_date());
+    assert!(!f("h:mm").has_date_part());
+    assert!(!f("h:mm AM/PM").has_date_part());
+    assert!(!f("mm:ss").has_date_part());
+    assert!(f("m/d/yyyy h:mm").has_date_part());
+    assert_eq!(f("h:mm").render(0.75, false).as_deref(), Some("18:00"));
+    assert_eq!(
+      f("h:mm AM/PM").render(60.5, false).as_deref(),
+      Some("12:00 PM"),
+      "the clock needs no valid date"
+    );
+    assert_eq!(iso_time(0.5), "12:00:00");
+    assert_eq!(iso_time(45161.75), "18:00:00");
+    assert_eq!(
+      iso_time(0.999_999),
+      "00:00:00",
+      "rounds up to the next day like Excel"
+    );
   }
 
   #[test]

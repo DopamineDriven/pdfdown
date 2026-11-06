@@ -457,7 +457,10 @@ fn place_cell(p: &Prepared<'_>, frame: &PageFrame, cell_index: usize, out: &mut 
     Vertical::Bottom => y0 + block,
   }
   .min(y1);
-  let general_right = matches!(p.cell.value, CellValue::Number(_) | CellValue::Date(_));
+  let general_right = matches!(
+    p.cell.value,
+    CellValue::Number(_) | CellValue::Date(_) | CellValue::Time(_)
+  );
   let general_center = matches!(p.cell.value, CellValue::Boolean(_) | CellValue::Error(_));
   for (i, fragment) in p.fragments.iter().enumerate() {
     let fy1 = top - fh * i as f64;

@@ -894,10 +894,11 @@ Every cell carries `box: { x0, y0, x1, y1 }`, its rectangle in the **sheet frame
 ```typescript
 export type SheetCell =
   | { type: "Text"; value: string; ...common }
-  | { type: "Number"; value: number; ...common } // the typed value; `text` is the display text under the cell's format
+  | { type: "Number"; value: number; subtype: "Integer" | "Float"; currencySymbol?: string; ...common } // the full double; subtype says whether it is a whole number; currencySymbol is what the format names ("$", "€", "USD")
   | { type: "Boolean"; value: boolean; ...common }
   | { type: "Error"; value: string; ...common } // "#DIV/0!", "#N/A", ...
   | { type: "Date"; value: string; ...common } // ISO date, with the time when the format shows one; the serial stays in `raw`
+  | { type: "Time"; value: string; ...common } // "HH:MM:SS" of a cell whose format shows only a clock; the serial stays in `raw`
   | { type: "Blank"; ...common }; // a formula cell with no cached result
 
 // ...common on every variant:
@@ -935,7 +936,7 @@ Each cell's display text is placed in its rectangle (a merged range is one recta
 
 ### Number formats
 
-Display text follows the cell's format code, parsed as sections and tokens, with en-US separators and symbol placement only where the code leaves a choice. Rendered in this release: General (integers without a point, otherwise up to 11 significant digits, and scientific notation such as `1E+15` or `1.5E-12` at the extremes); fixed decimals with and without grouping (`0`, `0.00`, `#,##0`, `#,##0.00`) and zero padding (`00000`); percent (`0%`, `0.00%`); quoted and escaped literals anywhere, such as a unit suffix (`#,##0.00"/hr"`); currency and accounting codes with their negative, zero and text sections, parentheses, `_x` padding (one space) and `*x` fill (dropped), colour tags dropped; date and time codes from the built-ins 14 to 22 and custom codes using `y`, `m`, `d`, `h`, `s`, `AM/PM`, where `m` means minutes next to `h` or `s`; the text section `@`. Not rendered (the cell keeps `text === raw`, `formatSupported: false`, and the sheet warns once with the count): elapsed durations (`[h]:mm:ss`), scientific notation, fractions, conditional sections, locale directives (`[$-409]`), era and calendar tokens, codes longer than 255 characters, and built-in format ids this release has no spelling for (a warning names the ids). A file's own `numFmt` for an id wins over the built-in table. Text taller than its row grows the row to fit (auto-fit), with a page warning.
+Display text follows the cell's format code, parsed as sections and tokens, with en-US separators and symbol placement only where the code leaves a choice. Rendered in this release: General (integers without a point, otherwise up to 11 significant digits, and scientific notation such as `1E+15` or `1.5E-12` at the extremes); fixed decimals with and without grouping (`0`, `0.00`, `#,##0`, `#,##0.00`) and zero padding (`00000`); percent (`0%`, `0.00%`); quoted and escaped literals anywhere, such as a unit suffix (`#,##0.00"/hr"`); currency and accounting codes with their negative, zero and text sections, parentheses, `_x` padding (one space) and `*x` fill (dropped), colour tags dropped, bracketed currency literals such as `[$€-407]` (the locale id is ignored); date and time codes from the built-ins 14 to 22 and custom codes using `y`, `m`, `d`, `h`, `s`, `AM/PM`, where `m` means minutes next to `h` or `s`; the text section `@`. Not rendered (the cell keeps `text === raw`, `formatSupported: false`, and the sheet warns once with the count): elapsed durations (`[h]:mm:ss`), scientific notation, fractions, conditional sections, locale directives (`[$-409]`), era and calendar tokens, codes longer than 255 characters, and built-in format ids this release has no spelling for (a warning names the ids). A file's own `numFmt` for an id wins over the built-in table. Text taller than its row grows the row to fit (auto-fit), with a page warning.
 
 ### Unsupported inputs and limits
 

@@ -174,7 +174,7 @@ test("profile of the public workbook fixtures: every .xlsx is a row led by its i
     formulas: 2,
     unsupportedFormats: 0,
     pages: 1,
-    cellTypes: { Text: 13, Number: 7, Boolean: 1, Error: 1, Date: 1, Blank: 1 }
+    cellTypes: { Text: 13, Number: 7, Boolean: 1, Error: 1, Date: 1, Time: 0, Blank: 1 }
   });
   t.is(Object.keys(form?.formats ?? {}).length, 6, "six distinct codes on the numeric cells");
   t.is(form?.formats["m/d/yyyy"], 2, "the date column and the serial-60 cell share built-in 14");

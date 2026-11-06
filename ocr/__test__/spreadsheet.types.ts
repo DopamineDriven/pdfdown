@@ -6,6 +6,7 @@ import type {
   DocumentFormat,
   FormatDetection,
   IsExact,
+  NumberSubtype,
   OnlyOptional,
   PdfDown,
   SheetCell,
@@ -27,12 +28,16 @@ true satisfies IsExact<PdfDown["format"], DocumentFormat>;
 true satisfies IsExact<Parameters<PdfDown["layout"]>, [opts?: SpreadsheetOptions | null | undefined]>;
 
 // Cells are a flat discriminated union on `type`; the typed value is `value`, and Blank has none.
-true satisfies IsExact<SheetCell["type"], "Text" | "Number" | "Boolean" | "Error" | "Date" | "Blank">;
+true satisfies IsExact<SheetCell["type"], "Text" | "Number" | "Boolean" | "Error" | "Date" | "Time" | "Blank">;
+true satisfies IsExact<Extract<SheetCell, { type: "Number" }>["subtype"], NumberSubtype>;
+true satisfies IsExact<NumberSubtype, "Integer" | "Float">;
+true satisfies IsExact<Extract<SheetCell, { type: "Time" }>["value"], string>;
+true satisfies IsExact<"subtype" extends keyof Extract<SheetCell, { type: "Text" }> ? true : false, false>;
 true satisfies IsExact<Extract<SheetCell, { type: "Number" }>["value"], number>;
 true satisfies IsExact<Extract<SheetCell, { type: "Date" }>["value"], string>;
 true satisfies IsExact<
   keyof OnlyOptional<Extract<SheetCell, { type: "Number" }>>,
-  "format" | "formula" | "sharedFormula" | "merge"
+  "format" | "formula" | "sharedFormula" | "merge" | "currencySymbol"
 >;
 true satisfies IsExact<"value" extends keyof Extract<SheetCell, { type: "Blank" }> ? true : false, false>;
 true satisfies IsExact<keyof OnlyOptional<SpreadsheetOptions>, "sheets" | "hiddenSheets" | "hiddenCells">;

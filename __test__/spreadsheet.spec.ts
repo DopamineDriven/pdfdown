@@ -159,6 +159,16 @@ test("spreadsheetCells options: hidden sheets and hidden cells", (t) => {
   });
 });
 
+test("Number cells carry a subtype and the currency symbol their format names", (t) => {
+  const [s] = new PdfDown(form).spreadsheetCells();
+  t.like(cell(s.cells, "C3"), { type: "Number", subtype: "Float", currencySymbol: undefined });
+  t.like(cell(s.cells, "C4"), { type: "Number", subtype: "Integer" });
+  t.like(cell(s.cells, "C8"), { type: "Number", subtype: "Integer", currencySymbol: "$" });
+  t.like(cell(s.cells, "C9"), { type: "Number", subtype: "Float" });
+  t.like(cell(s.cells, "B16"), { type: "Number", subtype: "Integer" });
+  t.is(cell(s.cells, "C6")?.type, "Date");
+});
+
 test("spreadsheetCells carries the sheet's geometry: defaults, the columns and rows that differ, and a box on every cell", (t) => {
   const [s] = new PdfDown(form).spreadsheetCells();
   // The sheet frame runs from A1 to the last non-empty cell or merged range (A1:F22 here), y up.

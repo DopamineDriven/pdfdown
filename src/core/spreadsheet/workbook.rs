@@ -10,10 +10,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use roxmltree::Node;
 
-use super::format::{NumberFormat, iso_date, render_general};
+use super::format::{NumberFormat, iso_date, iso_time, render_general};
 use super::package::{Package, SpreadsheetError, parse_xml};
 use super::project::sheet_geometry;
-use crate::types::{CellBox, SheetCell, SheetCells, SpreadsheetOptions};
+use crate::types::{CellBox, NumberSubtype, SheetCell, SheetCells, SpreadsheetOptions};
 
 /// A workbook with more cells or merges than this is refused rather than modelled.
 pub(crate) const MAX_CELLS: usize = 2_000_000;
@@ -36,6 +36,8 @@ pub(crate) enum CellValue {
   Error(String),
   /// The ISO rendering of a serial under a date code; the serial itself stays in `raw`.
   Date(String),
+  /// `HH:MM:SS` of a serial's fraction under a clock-only code; the serial stays in `raw`.
+  Time(String),
   Blank,
 }
 
@@ -400,6 +402,8 @@ pub(crate) struct Cell {
   pub text: String,
   pub format: Option<String>,
   pub format_supported: bool,
+  /// The currency a Number cell's format names, when it names one.
+  pub currency_symbol: Option<String>,
   pub formula: Option<String>,
   pub shared_master: Option<(u32, u32)>,
   pub cached: bool,
@@ -871,8 +875,13 @@ fn resolve_cell(
     None
   };
   let mut format_supported = true;
+  let mut currency_symbol = None;
   let (value, text) = match (value, &format) {
     (CellValue::Number(n), Some(code)) => match NumberFormat::parse(code) {
+      Some(parsed) if parsed.is_date() && !parsed.has_date_part() => (
+        CellValue::Time(iso_time(n)),
+        parsed.render(n, date1904).unwrap_or(text),
+      ),
       Some(parsed) if parsed.is_date() => {
         match (
           parsed.render(n, date1904),
@@ -893,10 +902,13 @@ fn resolve_cell(
           }
         }
       }
-      Some(parsed) => (
-        CellValue::Number(n),
-        parsed.render(n, date1904).unwrap_or(text),
-      ),
+      Some(parsed) => {
+        currency_symbol = parsed.currency_symbol();
+        (
+          CellValue::Number(n),
+          parsed.render(n, date1904).unwrap_or(text),
+        )
+      }
       None => {
         format_supported = false;
         (CellValue::Number(n), text)
@@ -913,6 +925,7 @@ fn resolve_cell(
   };
   Some(Cell {
     format_supported,
+    currency_symbol,
     value,
     raw: raw_text,
     text,
@@ -981,6 +994,15 @@ pub(crate) fn cells_of(workbook: &Workbook, opts: &SpreadsheetOptions) -> Vec<Sh
     .collect()
 }
 
+/// Whole numbers JavaScript holds exactly are integers; everything else is a float.
+fn number_subtype(n: f64) -> NumberSubtype {
+  if n.fract() == 0.0 && n.abs() <= 9_007_199_254_740_992.0 {
+    NumberSubtype::Integer
+  } else {
+    NumberSubtype::Float
+  }
+}
+
 fn public_cell(row: u32, col: u32, cell: &Cell, hidden: bool, r#box: CellBox) -> SheetCell {
   let common = crate::types::CellCommon {
     reference: cell_ref(row, col),
@@ -999,7 +1021,10 @@ fn public_cell(row: u32, col: u32, cell: &Cell, hidden: bool, r#box: CellBox) ->
   };
   match &cell.value {
     CellValue::Text(v) => SheetCell::text(common, v.clone()),
-    CellValue::Number(n) => SheetCell::number(common, *n),
+    CellValue::Number(n) => {
+      SheetCell::number(common, *n, number_subtype(*n), cell.currency_symbol.clone())
+    }
+    CellValue::Time(t) => SheetCell::time(common, t.clone()),
     CellValue::Boolean(b) => SheetCell::boolean(common, *b),
     CellValue::Error(e) => SheetCell::error(common, e.clone()),
     CellValue::Date(iso) => SheetCell::date(common, iso.clone()),
@@ -1171,6 +1196,47 @@ mod tests {
     );
     assert_eq!(sheet.rows[&0].height, Some(409.5));
     assert_eq!(sheet.rows.get(&1).and_then(|r| r.height), None);
+  }
+
+  #[test]
+  fn time_only_codes_type_the_cell_as_time_and_numbers_carry_subtype_and_currency() {
+    use crate::types::{NumberSubtype, SheetCell};
+    let styles_xml = br##"<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="[$&#8364;-407]#,##0.00"/></numFmts><cellXfs count="5"><xf numFmtId="0"/><xf numFmtId="20"/><xf numFmtId="22"/><xf numFmtId="164"/><xf numFmtId="4"/></cellXfs></styleSheet>"##;
+    let styles = parse_styles(styles_xml).unwrap();
+    let xml = br##"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" s="1"><v>0.75</v></c><c r="B1" s="2"><v>45161.5</v></c><c r="C1" s="3"><v>1234.5</v></c><c r="D1" s="4"><v>3</v></c><c r="E1"><v>2.5</v></c></row></sheetData></worksheet>"##;
+    let sheet = sheet_of(xml, &styles);
+    assert_eq!(
+      sheet.cells[&(0, 0)].value,
+      CellValue::Time("18:00:00".to_string())
+    );
+    assert_eq!(sheet.cells[&(0, 0)].text, "18:00");
+    assert_eq!(
+      sheet.cells[&(0, 1)].value,
+      CellValue::Date("2023-08-23T12:00:00".to_string())
+    );
+    let workbook = Workbook {
+      sheets: vec![sheet],
+      date1904: false,
+      styles,
+    };
+    let cells = &cells_of(&workbook, &SpreadsheetOptions::default())[0].cells;
+    let number = |r#ref: &str| match cells
+      .iter()
+      .find(|c| matches!(c, SheetCell::Number { r#ref: x, .. } if x == r#ref))
+    {
+      Some(SheetCell::Number {
+        subtype,
+        currency_symbol,
+        ..
+      }) => (*subtype, currency_symbol.clone()),
+      other => panic!("{ref}: not a Number: {other:?}"),
+    };
+    assert_eq!(number("C1"), (NumberSubtype::Float, Some("€".to_string())));
+    assert_eq!(number("D1"), (NumberSubtype::Integer, None));
+    assert_eq!(number("E1"), (NumberSubtype::Float, None));
+    assert!(
+      matches!(cells.iter().find(|c| matches!(c, SheetCell::Time { .. })), Some(SheetCell::Time { value, .. }) if value == "18:00:00")
+    );
   }
 
   #[test]

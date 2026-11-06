@@ -867,6 +867,7 @@ module.exports.layoutFromXlsx = nativeBinding.layoutFromXlsx
 module.exports.layoutFromXlsxAsync = nativeBinding.layoutFromXlsxAsync
 module.exports.layoutPerPage = nativeBinding.layoutPerPage
 module.exports.layoutPerPageAsync = nativeBinding.layoutPerPageAsync
+module.exports.NumberSubtype = nativeBinding.NumberSubtype
 module.exports.pdfDocument = nativeBinding.pdfDocument
 module.exports.pdfDocumentAsync = nativeBinding.pdfDocumentAsync
 module.exports.pdfDocumentOcr = nativeBinding.pdfDocumentOcr

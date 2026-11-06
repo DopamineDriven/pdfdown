@@ -449,6 +449,12 @@ export interface NumberField {
   span?: FieldSpan
 }
 
+/**
+ * Whether a Number cell's value is a whole number JavaScript can hold exactly, or a fraction.
+ * A percentage is a fraction (50% is 0.5); the subtype is about the value, not the format.
+ */
+export type NumberSubtype = 'Integer' | 'Float'
+
 export interface PageAnnotation {
   page: number
   subtype: string
@@ -623,8 +629,10 @@ export declare function renderPagesAsync(buffer: Buffer, opts?: RenderOptions | 
 
 /**
  * One cell of a worksheet: a discriminated union on `type` whose typed value is `value`
- * (none for `Blank`). `text` is the display text, `raw` the stored spelling (the serial for
- * dates), `format` the code that produced `text`, `formula` the expression stored on this
+ * (none for `Blank`): a Number carries the full double plus its `subtype` and the
+ * `currencySymbol` its format names; a Date carries an ISO date or date-time; a Time the
+ * clock of a time-only cell. `text` is the display text, `raw` the stored spelling (the
+ * serial for dates and times), `format` the code that produced `text`, `formula` the expression stored on this
  * cell, `sharedFormula` the master cell when this cell follows a shared formula, `cached`
  * whether a result was stored, `merge` the range this cell anchors, `hidden` whether its row
  * or column is hidden, `box` its rectangle in the sheet frame (a merged anchor spans its
@@ -632,10 +640,11 @@ export declare function renderPagesAsync(buffer: Buffer, opts?: RenderOptions | 
  */
 export type SheetCell =
   | { type: 'Text'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; box: CellBox; value: string }
-  | { type: 'Number'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; box: CellBox; value: number }
+  | { type: 'Number'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; box: CellBox; value: number; subtype: NumberSubtype; currencySymbol?: string }
   | { type: 'Boolean'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; box: CellBox; value: boolean }
   | { type: 'Error'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; box: CellBox; value: string }
   | { type: 'Date'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; box: CellBox; value: string }
+  | { type: 'Time'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; box: CellBox; value: string }
   | { type: 'Blank'; ref: string; row: number; col: number; text: string; raw: string; format?: string; formatSupported: boolean; formula?: string; sharedFormula?: string; cached: boolean; merge?: string; hidden: boolean; box: CellBox }
 
 /** One selected worksheet's cells, with the sheet facts a reader needs beside them. */

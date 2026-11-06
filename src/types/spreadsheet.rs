@@ -31,6 +31,15 @@ pub struct SpreadsheetOptions {
   pub hidden_cells: Option<bool>,
 }
 
+/// Whether a Number cell's value is a whole number JavaScript can hold exactly, or a fraction.
+/// A percentage is a fraction (50% is 0.5); the subtype is about the value, not the format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[napi(string_enum)]
+pub enum NumberSubtype {
+  Integer,
+  Float,
+}
+
 /// A rectangle in the sheet frame: points, y up, with A1's top-left corner at `(0, height)`.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[napi(object)]
@@ -83,8 +92,10 @@ macro_rules! sheet_cell {
   // Variant payloads are written in brackets and forwarded as raw token trees (see forms.rs).
   ($($variant:ident, $ctor:ident { $($field:ident : [$($ty:tt)+]),* $(,)? }),+ $(,)?) => {
     /// One cell of a worksheet: a discriminated union on `type` whose typed value is `value`
-    /// (none for `Blank`). `text` is the display text, `raw` the stored spelling (the serial for
-    /// dates), `format` the code that produced `text`, `formula` the expression stored on this
+    /// (none for `Blank`): a Number carries the full double plus its `subtype` and the
+    /// `currencySymbol` its format names; a Date carries an ISO date or date-time; a Time the
+    /// clock of a time-only cell. `text` is the display text, `raw` the stored spelling (the
+    /// serial for dates and times), `format` the code that produced `text`, `formula` the expression stored on this
     /// cell, `sharedFormula` the master cell when this cell follows a shared formula, `cached`
     /// whether a result was stored, `merge` the range this cell anchors, `hidden` whether its row
     /// or column is hidden, `box` its rectangle in the sheet frame (a merged anchor spans its
@@ -136,10 +147,11 @@ macro_rules! sheet_cell {
 
 sheet_cell! {
   Text, text { value: [String] },
-  Number, number { value: [f64] },
+  Number, number { value: [f64], subtype: [NumberSubtype], currency_symbol: [Option<String>] },
   Boolean, boolean { value: [bool] },
   Error, error { value: [String] },
   Date, date { value: [String] },
+  Time, time { value: [String] },
   Blank, blank {}
 }
 

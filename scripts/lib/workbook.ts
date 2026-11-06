@@ -10,7 +10,7 @@ import type { SheetCell } from "../../index";
 import type { CorpusFile } from "./corpus";
 
 export type CellType = SheetCell["type"];
-export const CELL_TYPES = ["Text", "Number", "Boolean", "Error", "Date", "Blank"] as const;
+export const CELL_TYPES = ["Text", "Number", "Boolean", "Error", "Date", "Time", "Blank"] as const;
 
 /** Per-workbook facts. `id` first: every row traces back to its file. */
 export interface WorkbookEntry {
@@ -54,6 +54,7 @@ const zeroCellTypes = (): Record<CellType, number> => ({
   Boolean: 0,
   Error: 0,
   Date: 0,
+  Time: 0,
   Blank: 0
 });
 

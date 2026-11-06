@@ -1468,6 +1468,7 @@ export const layoutFromXlsx = __napiModule.exports.layoutFromXlsx
 export const layoutFromXlsxAsync = __napiModule.exports.layoutFromXlsxAsync
 export const layoutPerPage = __napiModule.exports.layoutPerPage
 export const layoutPerPageAsync = __napiModule.exports.layoutPerPageAsync
+export const NumberSubtype = __napiModule.exports.NumberSubtype
 export const pdfDocument = __napiModule.exports.pdfDocument
 export const pdfDocumentAsync = __napiModule.exports.pdfDocumentAsync
 export const pdfMetadata = __napiModule.exports.pdfMetadata

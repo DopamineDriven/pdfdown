@@ -225,7 +225,7 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
 
 // ── Workbooks ────────────────────────────────────────────────────────────────
 
-const CELL_TYPES: ReadonlySet<string> = new Set(["Text", "Number", "Boolean", "Error", "Date", "Blank"]);
+const CELL_TYPES: ReadonlySet<string> = new Set(["Text", "Number", "Boolean", "Error", "Date", "Time", "Blank"]);
 const CELL_REF = /^[A-Z]+[1-9]\d*$/;
 const workbooks = existsSync(PRIVATE) ? discoverCorpus(PRIVATE).filter((f) => f.kind === "xlsx") : [];
 
