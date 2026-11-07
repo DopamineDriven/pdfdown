@@ -1,12 +1,14 @@
 // Local-only corpus run over real invoices in ocr/__test__/fixtures/private/.
 // The directory is gitignored: the files, and anything derived from them, never
 // reach the repository. The assertions here are structural; the per-file
-// summary goes to ava's log, and the detailed results are written next to the
-// PDFs as report.json and report.ts (both inside the ignored directory). The
+// summary goes to ava's log, each document's full results are written beside
+// its PDF as `results/<id>.json`, and report.json / report.ts (both inside the
+// ignored directory) hold one index row per document: its kind (native,
+// scanned, mixed, empty), its header fields and where its result file is. The
 // corpus's workbooks get the same treatment with aggregates only in the log.
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
-import { join, relative } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname, join, relative } from "path";
 
 import test from "ava";
 
@@ -15,19 +17,51 @@ import {
   attachments,
   detectFormat,
   extractFormFieldsPerPage,
+  extractImagesPerPage,
   extractInvoice,
   extractTextPerPage,
   layoutPerPage,
   pdfMetadata
 } from "../index";
-import type { Attachment, FormInfo, InvoiceResult, PageFormField, PageText, PdfMeta, TextSource } from "../index";
+import type {
+  Attachment,
+  FormInfo,
+  InvoiceDocumentType,
+  InvoiceResult,
+  InvoiceSource,
+  PageFormField,
+  PageLayout,
+  PageText,
+  PdfMeta,
+  TextSource
+} from "../index";
 import { discoverCorpus } from "../scripts/lib/corpus";
+
+/**
+ * What a document is made of: `native` when every page with content carries native text,
+ * `scanned` when every page with content is an image with no native text, `mixed` when both
+ * kinds of page occur, `empty` when no page has words or images.
+ */
+type DocumentKind = "native" | "scanned" | "mixed" | "empty";
+
+/** One raster on an image page: pixel size, the resolution it is painted at, and its codec. */
+interface PrivateCorpusRaster {
+  page: number;
+  widthPx: number;
+  heightPx: number;
+  /** Pixels per inch across the painted width; null when the raster is not painted on the page. */
+  ppi: number | null;
+  codec: string;
+}
 
 /** One private invoice's results. Attachment payloads are omitted; everything else is verbatim. */
 interface PrivateCorpusEntry {
   id: string;
   file: string;
   bytes: number;
+  kind: DocumentKind;
+  /** The rasters of image pages; empty for a native document. */
+  rasters: Array<PrivateCorpusRaster>;
   meta: Omit<PdfMeta, "form">;
   form: FormInfo | null;
   formFields: Array<PageFormField>;
@@ -36,6 +70,24 @@ interface PrivateCorpusEntry {
   nativeChars: number;
   invoice: InvoiceResult;
   layout: Array<PrivateCorpusPageLayout>;
+}
+
+/** One index row: enough to filter the corpus without opening the document's result file. */
+interface PrivateCorpusIndexRow {
+  id: string;
+  file: string;
+  /** The document's full results, relative to the private directory. */
+  results: string;
+  kind: DocumentKind;
+  pages: number;
+  nativeChars: number;
+  source: InvoiceSource;
+  documentType: InvoiceDocumentType;
+  confidence: number;
+  invoiceId: string | null;
+  invoiceDate: string | null;
+  invoiceTotal: number | null;
+  reconciled: boolean;
 }
 
 /** Positioned-text summary of one page: counts plus the line texts in reading order. */
@@ -56,7 +108,56 @@ interface PrivateCorpusPageLayout {
 interface PrivateCorpusReport {
   generatedAt: string;
   files: number;
-  entries: Array<PrivateCorpusEntry>;
+  kinds: Record<DocumentKind, number>;
+  header: {
+    invoiceId: number;
+    invoiceDate: number;
+    invoiceTotal: number;
+    vendorName: number;
+    reconciled: number;
+    meanConfidence: number;
+    types: Record<string, number>;
+  };
+  entries: Array<PrivateCorpusIndexRow>;
+}
+
+/** A page carries native text, is an image with none, or has neither. */
+function pageKind(p: PageLayout): "text" | "image" | "blank" {
+  if (p.words.length > 0 && p.source === "Native") return "text";
+  if (p.images.length > 0) return "image";
+  return "blank";
+}
+
+function documentKind(layout: Array<PageLayout>): DocumentKind {
+  const kinds = layout.map(pageKind);
+  const text = kinds.includes("text");
+  const image = kinds.includes("image");
+  if (text && image) return "mixed";
+  if (text) return "native";
+  if (image) return "scanned";
+  return "empty";
+}
+
+/** The rasters of every image page, with the resolution each is painted at. */
+function rastersOf(buf: Buffer, layout: Array<PageLayout>): Array<PrivateCorpusRaster> {
+  const imagePages = new Set(layout.filter((p) => pageKind(p) === "image").map((p) => p.page));
+  if (imagePages.size === 0) return [];
+  const out: Array<PrivateCorpusRaster> = [];
+  for (const img of extractImagesPerPage(buf)) {
+    if (!imagePages.has(img.page)) continue;
+    const placed = layout
+      .find((p) => p.page === img.page)
+      ?.images.find((b) => b.xobjectName === img.xobjectName);
+    const painted = placed ? placed.x1 - placed.x0 : 0;
+    out.push({
+      page: img.page,
+      widthPx: img.width,
+      heightPx: img.height,
+      ppi: painted > 0 && Number.isFinite(painted) ? Math.round((img.width / painted) * 72) : null,
+      codec: img.filter
+    });
+  }
+  return out;
 }
 
 const PRIVATE = join(import.meta.dirname, "..", "ocr", "__test__", "fixtures", "private");
@@ -74,7 +175,8 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
   (t) => {
     t.timeout(10 * 60 * 1000, "every invoice in the private corpus through every extractor");
     const widths = { name: Math.max(...files.map((n) => n.length), 4) };
-    const entries: Array<PrivateCorpusEntry> = [];
+    const rows: Array<PrivateCorpusIndexRow> = [];
+    const kinds: Record<DocumentKind, number> = { native: 0, scanned: 0, mixed: 0, empty: 0 };
     const header = { invoiceId: 0, invoiceDate: 0, invoiceTotal: 0, vendorName: 0, reconciled: 0, confidenceSum: 0 };
     const types = new Map<string, number>();
     t.log(`${files.length} private invoice(s)`);
@@ -84,7 +186,7 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
         kinds.set(s.detection.detail ?? "unknown", (kinds.get(s.detection.detail ?? "unknown") ?? 0) + 1);
       t.log(`${notPdf.length} file(s) named .pdf are not PDFs: ${[...kinds].map(([k, n]) => `${k} ${n}`).join(", ")}`);
     }
-    t.log(`${"file".padEnd(widths.name)}  pages  nativeChars  words  form  attach  invoice`);
+    t.log(`${"file".padEnd(widths.name)}  pages  nativeChars  words  form  attach  kind     invoice`);
     for (const file of corpus) {
       const name = relative(PRIVATE, file.path);
       const buf = readFileSync(file.path);
@@ -116,7 +218,8 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
       if (inv.fields.invoiceDate) header.invoiceDate += 1;
       if (inv.fields.invoiceTotal) header.invoiceTotal += 1;
       if (inv.fields.vendorName) header.vendorName += 1;
-      if (inv.fields.invoiceTotal && inv.fields.subTotal && inv.confidence >= 0.7) header.reconciled += 1;
+      const reconciled = Boolean(inv.fields.invoiceTotal && inv.fields.subTotal && inv.confidence >= 0.7);
+      if (reconciled) header.reconciled += 1;
       header.confidenceSum += inv.confidence;
       types.set(inv.documentType, (types.get(inv.documentType) ?? 0) + 1);
 
@@ -142,11 +245,15 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
       const layoutWords = layout.reduce((n, p) => n + p.words.length, 0);
 
       const nativeChars = text.reduce((n, p) => n + p.text.replace(/\s+/g, "").length, 0);
+      const kind = documentKind(layout);
+      kinds[kind] += 1;
       const { form, ...metaRest } = meta;
-      entries.push({
+      const entry: PrivateCorpusEntry = {
         id: file.id,
         file: name,
         bytes: buf.length,
+        kind,
+        rasters: rastersOf(buf, layout),
         meta: metaRest,
         form: form ?? null,
         formFields: fields,
@@ -167,22 +274,54 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
           warnings: p.warnings,
           lineText: p.lines.map((l) => l.text)
         }))
+      };
+      // The document's full results live beside its PDF, one file per document.
+      const resultsPath = join(dirname(file.path), "results", `${file.id}.json`);
+      mkdirSync(dirname(resultsPath), { recursive: true });
+      writeFileSync(resultsPath, `${JSON.stringify(entry, null, 2)}\n`);
+      rows.push({
+        id: file.id,
+        file: name,
+        results: relative(PRIVATE, resultsPath),
+        kind,
+        pages: meta.pageCount,
+        nativeChars,
+        source: inv.source,
+        documentType: inv.documentType,
+        confidence: inv.confidence,
+        invoiceId: inv.fields.invoiceId?.value ?? null,
+        invoiceDate: inv.fields.invoiceDate?.value ?? null,
+        invoiceTotal: inv.fields.invoiceTotal?.value ?? null,
+        reconciled
       });
       const formCol = meta.form ? `${meta.form.fieldCount}/${meta.form.widgetCount}` : "-";
       const invCol = inv.source === "EmbeddedXml" ? `${inv.source} ${inv.embeddedXml?.standard}` : inv.source;
       t.log(
-        `${name.padEnd(widths.name)}  ${String(meta.pageCount).padStart(5)}  ${String(nativeChars).padStart(11)}  ${String(layoutWords).padStart(5)}  ${formCol.padStart(4)}  ${String(att.length).padStart(6)}  ${invCol}`
+        `${name.padEnd(widths.name)}  ${String(meta.pageCount).padStart(5)}  ${String(nativeChars).padStart(11)}  ${String(layoutWords).padStart(5)}  ${formCol.padStart(4)}  ${String(att.length).padStart(6)}  ${kind.padEnd(7)}  ${invCol}`
       );
     }
 
-    const n = Math.max(entries.length, 1);
+    const n = Math.max(rows.length, 1);
+    t.log(
+      `kinds: native ${kinds.native}, scanned ${kinds.scanned}, mixed ${kinds.mixed}, empty ${kinds.empty}`
+    );
     t.log(
       `header track: id ${header.invoiceId}/${n}, date ${header.invoiceDate}/${n}, total ${header.invoiceTotal}/${n}, vendor ${header.vendorName}/${n}, reconciled ${header.reconciled}/${n}, mean confidence ${(header.confidenceSum / n).toFixed(2)}, types ${[...types].map(([k, v]) => `${k} ${v}`).join(" · ")}`
     );
     const report: PrivateCorpusReport = {
       generatedAt: new Date().toISOString(),
-      files: entries.length,
-      entries
+      files: rows.length,
+      kinds,
+      header: {
+        invoiceId: header.invoiceId,
+        invoiceDate: header.invoiceDate,
+        invoiceTotal: header.invoiceTotal,
+        vendorName: header.vendorName,
+        reconciled: header.reconciled,
+        meanConfidence: Number((header.confidenceSum / n).toFixed(4)),
+        types: Object.fromEntries(types)
+      },
+      entries: rows
     };
     const json = JSON.stringify(report, null, 2);
     writeFileSync(join(PRIVATE, "report.json"), `${json}\n`);
@@ -190,47 +329,48 @@ const files = corpus.map((f) => relative(PRIVATE, f.path));
       join(PRIVATE, "report.ts"),
       [
         "// Generated by __test__/private-corpus.spec.ts. Lives in a gitignored directory; do not commit.",
-        'import type { Attachment, FormInfo, InvoiceResult, PageFormField, PageText, PdfMeta, TextSource } from "../../../../index";',
+        "// Each row's `results` names the document's full result file (results/<id>.json beside its PDF).",
+        'import type { InvoiceDocumentType, InvoiceSource } from "../../../../index";',
         "",
-        "export interface PrivateCorpusEntry {",
+        'export type DocumentKind = "native" | "scanned" | "mixed" | "empty";',
+        "",
+        "export interface PrivateCorpusIndexRow {",
         "  id: string;",
         "  file: string;",
-        "  bytes: number;",
-        '  meta: Omit<PdfMeta, "form">;',
-        "  form: FormInfo | null;",
-        "  formFields: Array<PageFormField>;",
-        '  attachments: Array<Omit<Attachment, "data">>;',
-        "  text: Array<PageText>;",
+        "  results: string;",
+        "  kind: DocumentKind;",
+        "  pages: number;",
         "  nativeChars: number;",
-        "  invoice: InvoiceResult;",
-        "  layout: Array<PrivateCorpusPageLayout>;",
-        "}",
-        "",
-        "export interface PrivateCorpusPageLayout {",
-        "  page: number;",
-        "  source: TextSource;",
-        "  width: number;",
-        "  height: number;",
-        "  rotate: number;",
-        "  words: number;",
-        "  lines: number;",
-        "  images: number;",
-        "  fonts: Array<string>;",
-        "  warnings: Array<string>;",
-        "  lineText: Array<string>;",
+        "  source: InvoiceSource;",
+        "  documentType: InvoiceDocumentType;",
+        "  confidence: number;",
+        "  invoiceId: string | null;",
+        "  invoiceDate: string | null;",
+        "  invoiceTotal: number | null;",
+        "  reconciled: boolean;",
         "}",
         "",
         "export interface PrivateCorpusReport {",
         "  generatedAt: string;",
         "  files: number;",
-        "  entries: Array<PrivateCorpusEntry>;",
+        "  kinds: Record<DocumentKind, number>;",
+        "  header: {",
+        "    invoiceId: number;",
+        "    invoiceDate: number;",
+        "    invoiceTotal: number;",
+        "    vendorName: number;",
+        "    reconciled: number;",
+        "    meanConfidence: number;",
+        "    types: Record<string, number>;",
+        "  };",
+        "  entries: Array<PrivateCorpusIndexRow>;",
         "}",
         "",
         `export const privateCorpusReport = ${json} satisfies PrivateCorpusReport;`,
         ""
       ].join("\n")
     );
-    t.log(`wrote ${join(PRIVATE, "report.json")} and report.ts`);
+    t.log(`wrote ${join(PRIVATE, "report.json")} and report.ts; one results/<id>.json per document`);
   }
 );
 
