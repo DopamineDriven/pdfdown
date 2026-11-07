@@ -120,6 +120,14 @@ fn parse_number(digits: &str, sep: Separator) -> Option<f64> {
   {
     return None;
   }
+  // `.00` and `,50` print a zero integer part as nothing; read them as `0.00` and `0,50`.
+  let padded;
+  let digits = if digits.starts_with(['.', ',']) {
+    padded = format!("0{digits}");
+    padded.as_str()
+  } else {
+    digits
+  };
   if !digits.chars().next()?.is_ascii_digit() || !digits.chars().last()?.is_ascii_digit() {
     return None;
   }
@@ -266,6 +274,18 @@ mod tests {
 
   fn amt(text: &str, sep: Separator) -> Option<(f64, bool, Option<String>, Option<String>)> {
     parse_amount(text, sep).map(|a| (a.value, a.negative, a.code, a.symbol))
+  }
+
+  #[test]
+  fn a_leading_decimal_separator_has_a_zero_integer_part() {
+    assert_eq!(parse_amount("$.00", Separator::Point).unwrap().value, 0.0);
+    assert_eq!(parse_amount("$.50", Separator::Point).unwrap().value, 0.5);
+    assert_eq!(parse_amount(",75", Separator::Comma).unwrap().value, 0.75);
+    let credit = parse_amount("$.00-", Separator::Point).unwrap();
+    assert_eq!(credit.value, 0.0);
+    assert!(credit.negative);
+    assert!(parse_amount(".", Separator::Point).is_none());
+    assert!(parse_amount("$.", Separator::Point).is_none());
   }
 
   #[test]

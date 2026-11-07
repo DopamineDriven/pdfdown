@@ -188,15 +188,23 @@ pub(crate) fn resolve(items: &[TotalCandidate], currency: Option<&str>) -> Total
     };
   }
 
-  // No reconciliation: the lowest Total on the last page that has one, the largest amount among
-  // ties; an amount-due line alone is the total.
+  // No reconciliation: a Total on a page that also carries a totals block (a subtotal, tax or
+  // amount-due line) outranks one on a page without; then the last such page, the lowest line on
+  // it, the largest amount among ties. An amount-due line alone is the total.
+  let block_pages: Vec<u32> = subs
+    .iter()
+    .chain(&taxes)
+    .chain(&dues)
+    .map(|c| c.span.page)
+    .collect();
   let invoice_total = totals
     .iter()
     .copied()
     .min_by(|a, b| {
-      b.span
-        .page
-        .cmp(&a.span.page)
+      let in_block = |c: &TotalCandidate| block_pages.contains(&c.span.page);
+      in_block(b)
+        .cmp(&in_block(a))
+        .then(b.span.page.cmp(&a.span.page))
         .then(a.span.y0.total_cmp(&b.span.y0))
         .then(b.amount.value.total_cmp(&a.amount.value))
     })
@@ -350,6 +358,21 @@ mod tests {
       "an amount due alone is the total"
     );
     assert_eq!(t.amount_due.as_ref().unwrap().value, 93.5);
+  }
+
+  #[test]
+  fn a_total_beside_a_totals_block_outranks_a_lone_total_on_a_later_page() {
+    let sub = cand(Field::SubTotal, 900.0, 300.0);
+    let total = cand(Field::Total, 1000.0, 250.0);
+    let mut lone = cand(Field::Total, 412.8, 500.0);
+    lone.span.page = 2;
+    let t = resolve(&[sub, total, lone], None);
+    assert!(!t.reconciled, "900 is not 1000");
+    assert_eq!(
+      t.invoice_total.as_ref().unwrap().value,
+      1000.0,
+      "the page with the totals block, not the later page"
+    );
   }
 
   #[test]

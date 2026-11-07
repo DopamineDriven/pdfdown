@@ -310,6 +310,16 @@ pub(crate) const LABELS: &[Label] = &[
   l(Other, "Payments Received", "en"),
   l(Other, "Payment Received", "en"),
   l(Other, "Less Payments", "en"),
+  l(Other, "Customer Project Manager", "en"),
+  l(Other, "Customer Service", "en"),
+  l(Other, "Customer Service Rep", "en"),
+  l(Other, "Customer Service Representative", "en"),
+  l(Other, "Customer Contact", "en"),
+  l(Other, "Customer Representative", "en"),
+  l(Other, "Customer Rep", "en"),
+  l(Other, "Customer Care", "en"),
+  l(Other, "Customer Support", "en"),
+  l(Other, "Customer Signature", "en"),
   l(Other, "Lieferdatum", "de"),
   l(Other, "Leistungsdatum", "de"),
   l(Other, "Bestelldatum", "de"),
@@ -782,6 +792,14 @@ mod tests {
       )
       .is_empty(),
       "`Date` opening such a label"
+    );
+    assert!(
+      find_labels(
+        &["Customer", "Project", "Manager:", "Avery", "Stone"],
+        Some(Field::BillTo)
+      )
+      .is_empty(),
+      "`Customer` opening a contact label"
     );
     assert_eq!(
       find_labels(

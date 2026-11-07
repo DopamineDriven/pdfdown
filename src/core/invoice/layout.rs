@@ -352,12 +352,15 @@ pub(crate) fn extract_from_pages(
   let vendor_party = party_block(&reader.first, &reader.hits, Field::Vendor)
     .or_else(|| vendor(&reader.first, &reader.hits, first_page.height));
   let (vendor_name, vendor_address, vendor_email, vendor_phone, _) = party_fields(vendor_party);
-  let (customer_name, customer_address, _, _, customer_id) =
-    party_fields(party_block(&reader.first, &reader.hits, Field::BillTo));
-  let (_, shipping_address, _, _, _) =
-    party_fields(party_block(&reader.first, &reader.hits, Field::ShipTo));
-  let (_, remittance_address, _, _, _) =
-    party_fields(party_block(&reader.first, &reader.hits, Field::RemitTo));
+  // A labelled party block comes from the first page, else the last: a cover page often names
+  // the customer only in an unlabelled block while every itemisation page says `Bill To:`.
+  let party = |field: Field| {
+    party_block(&reader.first, &reader.hits, field)
+      .or_else(|| party_block(&reader.last, &reader.last_hits, field))
+  };
+  let (customer_name, customer_address, _, _, customer_id) = party_fields(party(Field::BillTo));
+  let (_, shipping_address, _, _, _) = party_fields(party(Field::ShipTo));
+  let (_, remittance_address, _, _, _) = party_fields(party(Field::RemitTo));
   let totals = reader.totals();
   let fields = InvoiceFields {
     sub_total: totals.sub_total,
@@ -538,6 +541,72 @@ mod tests {
       started.elapsed().as_millis() < 1000,
       "{} ms",
       started.elapsed().as_millis()
+    );
+  }
+
+  #[test]
+  fn a_cover_page_summary_outranks_the_itemisation_pages() {
+    use super::super::testing::page;
+    // A cover page: a three-column summary (Time & Materials, Flat Rate, Total) whose totals
+    // labels sit left of three amounts, then a "Total Amount" line; the last page is a job card
+    // with its own section total and the only "Bill To" line.
+    let cover = page(&[
+      (50.0, 760.0, 14.0, true, "INVOICE 2048811"),
+      (330.0, 700.0, 10.0, false, "Invoice Date: 11/06/2026"),
+      (180.0, 306.0, 10.0, false, "Time & Materials"),
+      (306.0, 306.0, 10.0, false, "Flat Rate"),
+      (418.0, 306.0, 10.0, false, "Total"),
+      (81.0, 297.0, 10.0, false, "Labor:"),
+      (197.0, 297.0, 10.0, false, "$1,200.00"),
+      (323.0, 297.0, 10.0, false, "$300.00"),
+      (413.0, 297.0, 10.0, false, "$1,500.00"),
+      (81.0, 249.0, 10.0, false, "Sub Total:"),
+      (191.0, 249.0, 10.0, false, "$1,200.00"),
+      (299.0, 249.0, 10.0, false, "$300.00"),
+      (407.0, 249.0, 10.0, false, "$1,500.00"),
+      (81.0, 210.0, 10.0, false, "Tax:"),
+      (191.0, 210.0, 10.0, false, "$0.00"),
+      (299.0, 210.0, 10.0, false, "$0.00"),
+      (407.0, 210.0, 10.0, false, "$0.00"),
+      (270.0, 172.0, 10.0, false, "Total Amount:"),
+      (411.0, 172.0, 10.0, false, "$1,500.00"),
+    ]);
+    let mut last = page(&[
+      (5.0, 661.0, 10.0, false, "Bill To: Skyline Charter LLC"),
+      (448.0, 661.0, 10.0, false, "Work Order: 771234"),
+      (49.0, 613.0, 10.0, false, "Labor"),
+      (400.0, 498.0, 10.0, false, "Total:"),
+      (533.0, 498.0, 10.0, false, "$412.80"),
+    ]);
+    last.page = 2;
+    let r = extract_from_pages(&[cover, last], None);
+    let f = &r.fields;
+    assert_eq!(f.invoice_id.as_ref().unwrap().value, "2048811");
+    assert_eq!(
+      f.sub_total.as_ref().unwrap().value,
+      1500.0,
+      "the last column of the summary, not the first"
+    );
+    let total = f.invoice_total.as_ref().unwrap();
+    assert_eq!(
+      total.value, 1500.0,
+      "the cover page's total, not the last job card's"
+    );
+    assert_eq!(total.span.as_ref().unwrap().page, 1);
+    assert_eq!(
+      f.customer_name.as_ref().unwrap().value,
+      "Skyline Charter LLC",
+      "Bill To from the last page when the cover has none"
+    );
+    assert_eq!(
+      f.customer_name
+        .as_ref()
+        .unwrap()
+        .span
+        .as_ref()
+        .unwrap()
+        .page,
+      2
     );
   }
 
