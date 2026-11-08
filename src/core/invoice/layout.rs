@@ -611,6 +611,51 @@ mod tests {
   }
 
   #[test]
+  fn a_spanish_quote_reads_through_the_spanish_rows() {
+    use super::super::testing::page;
+    // A Latin American estimate: the title row carries the number, the customer and the
+    // aircraft sit under one-word labels, and the amounts are written `US$ 400.00`.
+    let p = page(&[
+      (470.0, 760.0, 11.0, true, "PRESUPUESTO: F-10001"),
+      (640.0, 760.0, 9.0, false, "FECHA: 23/07/2014"),
+      (640.0, 720.0, 9.0, false, "SIGLAS: N123AB"),
+      (640.0, 706.0, 9.0, false, "CLIENTE: Skyline Charter"),
+      (60.0, 600.0, 9.0, false, "SERIAL MOTOR: P-100200"),
+      (60.0, 586.0, 9.0, false, "MOTOR TIPO: TPE-9000"),
+      (60.0, 572.0, 9.0, false, "HORAS: 4.00"),
+      (420.0, 300.0, 9.0, false, "Sub-Total ...."),
+      (560.0, 300.0, 9.0, false, "US$"),
+      (620.0, 300.0, 9.0, false, "400.00"),
+      (420.0, 260.0, 9.0, false, "TOTAL PRESUPUESTO:"),
+      (560.0, 260.0, 9.0, false, "US$"),
+      (620.0, 260.0, 9.0, false, "400.00"),
+    ]);
+    let r = extract_from_pages(&[p], None);
+    let f = &r.fields;
+    assert_eq!(
+      f.invoice_id.as_ref().unwrap().value,
+      "F-10001",
+      "{:?}",
+      f.invoice_id
+    );
+    assert_eq!(f.invoice_date.as_ref().unwrap().value, "2014-07-23");
+    assert_eq!(f.customer_name.as_ref().unwrap().value, "Skyline Charter");
+    assert_eq!(f.aircraft[0].registration.as_ref().unwrap().value, "N123AB");
+    assert_eq!(
+      f.aircraft[0].engine_serial_number.as_ref().unwrap().value,
+      "P-100200"
+    );
+    assert_eq!(f.sub_total.as_ref().unwrap().value, 400.0);
+    assert_eq!(f.invoice_total.as_ref().unwrap().value, 400.0);
+    assert_eq!(f.currency_code.as_deref(), Some("USD"));
+    assert!(
+      f.aircraft[0].serial_number.is_none(),
+      "`Serial` inside `Serial Motor` is not the aircraft serial: {:?}",
+      f.aircraft[0].serial_number
+    );
+  }
+
+  #[test]
   fn the_header_fields_come_off_the_acme_page() {
     let r = extract_from_pages(&[acme_page()], None);
     let id = r.fields.invoice_id.expect("invoice id");

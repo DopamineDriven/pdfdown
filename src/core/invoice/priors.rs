@@ -22,9 +22,21 @@ fn is_code(token: &str) -> Option<&'static str> {
 }
 
 /// A currency the page states: an ISO code beside an amount, in parentheses, on a totals label
-/// or in a `Currency` label, else an unambiguous glyph on or beside an amount.
+/// or in a `Currency` label, else an unambiguous glyph on or beside an amount, where "beside"
+/// includes a glyph standing in its own column left of an amount column (`US$ | 400.00`).
 fn page_currency(segments: &[Segment], hits: &[Vec<Hit>], separator: Separator) -> Option<String> {
   let mut glyph_code: Option<String> = None;
+  let line_has_amount = |s: &Segment| {
+    segments.iter().any(|t| {
+      t.page_index == s.page_index
+        && t.line == s.line
+        && !std::ptr::eq(t, s)
+        && t
+          .tokens
+          .iter()
+          .any(|tok| parse_amount(tok, separator).is_some())
+    })
+  };
   for (s, segment_hits) in segments.iter().zip(hits) {
     let n = s.tokens.len();
     let totals_label = segment_hits.iter().any(|h| {
@@ -57,7 +69,7 @@ fn page_currency(segments: &[Segment], hits: &[Vec<Hit>], separator: Separator) 
             glyph_code = Some(code.to_string());
           }
         } else if let Some(code) = symbol_code(token)
-          && neighbour_is_amount(i)
+          && (neighbour_is_amount(i) || (n == 1 && line_has_amount(s)))
         {
           glyph_code = Some(code.to_string());
         }

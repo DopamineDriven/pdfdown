@@ -69,7 +69,24 @@ pub(crate) const LABELS: &[Label] = &[
   l(InvoiceId, "No de facture", "fr"),
   l(InvoiceId, "Numéro de facture", "fr"),
   l(InvoiceId, "Factura No", "es"),
+  l(InvoiceId, "Factura No.", "es"),
+  l(InvoiceId, "Factura Nº", "es"),
+  l(InvoiceId, "Factura #", "es"),
+  l(InvoiceId, "Factura", "es"),
   l(InvoiceId, "Número de factura", "es"),
+  l(InvoiceId, "No. de factura", "es"),
+  l(InvoiceId, "Nº de factura", "es"),
+  l(InvoiceId, "Folio", "es"),
+  l(InvoiceId, "Presupuesto", "es"),
+  l(InvoiceId, "Presupuesto No.", "es"),
+  l(InvoiceId, "Cotización", "es"),
+  l(InvoiceId, "Cotización No.", "es"),
+  l(InvoiceId, "Facture", "fr"),
+  l(InvoiceId, "Devis", "fr"),
+  l(InvoiceId, "Devis No", "fr"),
+  l(InvoiceId, "Rechnung", "de"),
+  l(InvoiceId, "Angebot", "de"),
+  l(InvoiceId, "Angebotsnummer", "de"),
   // invoice date
   l(InvoiceDate, "Invoice Date", "en"),
   l(InvoiceDate, "Date", "en"),
@@ -85,6 +102,13 @@ pub(crate) const LABELS: &[Label] = &[
   l(InvoiceDate, "Date de facture", "fr"),
   l(InvoiceDate, "Fecha", "es"),
   l(InvoiceDate, "Fecha de factura", "es"),
+  l(InvoiceDate, "Fecha factura", "es"),
+  l(InvoiceDate, "Fecha de emisión", "es"),
+  l(InvoiceDate, "Fecha de expedición", "es"),
+  l(InvoiceDate, "Date", "fr"),
+  l(InvoiceDate, "Date d'émission", "fr"),
+  l(InvoiceDate, "Belegdatum", "de"),
+  l(InvoiceDate, "Ausstellungsdatum", "de"),
   // due date
   l(DueDate, "Due Date", "en"),
   l(DueDate, "Payment Due", "en"),
@@ -93,6 +117,12 @@ pub(crate) const LABELS: &[Label] = &[
   l(DueDate, "Fälligkeit", "de"),
   l(DueDate, "Fällig am", "de"),
   l(DueDate, "Échéance", "fr"),
+  l(DueDate, "Fecha de vencimiento", "es"),
+  l(DueDate, "Vencimiento", "es"),
+  l(DueDate, "Vence", "es"),
+  l(DueDate, "Fecha límite de pago", "es"),
+  l(DueDate, "Fälligkeitsdatum", "de"),
+  l(DueDate, "Zahlbar bis", "de"),
   l(DueDate, "Date d'échéance", "fr"),
   // purchase order
   l(PurchaseOrder, "Purchase Order", "en"),
@@ -119,6 +149,16 @@ pub(crate) const LABELS: &[Label] = &[
   l(PurchaseOrder, "Bestellnummer", "de"),
   l(PurchaseOrder, "Bestell-Nr.", "de"),
   l(PurchaseOrder, "Bon de commande", "fr"),
+  l(PurchaseOrder, "Orden de compra", "es"),
+  l(PurchaseOrder, "Orden de compra No.", "es"),
+  l(PurchaseOrder, "No. de orden", "es"),
+  l(PurchaseOrder, "Pedido", "es"),
+  l(PurchaseOrder, "Su pedido", "es"),
+  l(PurchaseOrder, "No. de pedido", "es"),
+  l(PurchaseOrder, "Su referencia", "es"),
+  l(PurchaseOrder, "Votre référence", "fr"),
+  l(PurchaseOrder, "Ihre Bestellung", "de"),
+  l(PurchaseOrder, "Ihre Referenz", "de"),
   l(PurchaseOrder, "No de commande", "fr"),
   // parties
   l(BillTo, "Bill To", "en"),
@@ -133,11 +173,21 @@ pub(crate) const LABELS: &[Label] = &[
   l(BillTo, "Facturé à", "fr"),
   l(BillTo, "Client", "fr"),
   l(BillTo, "Cliente", "es"),
+  l(BillTo, "Señores", "es"),
+  l(BillTo, "Sres.", "es"),
+  l(BillTo, "Facturar a", "es"),
+  l(BillTo, "Datos del cliente", "es"),
+  l(BillTo, "Razón social", "es"),
   l(ShipTo, "Ship To", "en"),
   l(ShipTo, "Deliver To", "en"),
   l(ShipTo, "Delivery Address", "en"),
   l(ShipTo, "Lieferadresse", "de"),
   l(ShipTo, "Livré à", "fr"),
+  l(ShipTo, "Enviar a", "es"),
+  l(ShipTo, "Entregar a", "es"),
+  l(ShipTo, "Dirección de entrega", "es"),
+  l(ShipTo, "Adresse de livraison", "fr"),
+  l(ShipTo, "Versandadresse", "de"),
   l(RemitTo, "Remit To", "en"),
   l(RemitTo, "Pay To", "en"),
   l(RemitTo, "Remittance", "en"),
@@ -160,6 +210,9 @@ pub(crate) const LABELS: &[Label] = &[
   l(SubTotal, "Montant HT", "fr"),
   l(SubTotal, "Total avant taxes", "fr"),
   l(SubTotal, "Subtotal", "es"),
+  l(SubTotal, "Base imponible", "es"),
+  l(SubTotal, "Importe neto", "es"),
+  l(SubTotal, "Total neto", "es"),
   l(Tax, "Tax", "en"),
   l(Tax, "Sales Tax", "en"),
   l(Tax, "VAT", "en"),
@@ -175,6 +228,11 @@ pub(crate) const LABELS: &[Label] = &[
   l(Tax, "USt", "de"),
   l(Tax, "Umsatzsteuer", "de"),
   l(Tax, "IVA", "es"),
+  l(Tax, "Impuesto", "es"),
+  l(Tax, "Impuestos", "es"),
+  l(Tax, "Taxe", "fr"),
+  l(Tax, "Taxes", "fr"),
+  l(Tax, "Steuer", "de"),
   l(Total, "Total", "en"),
   l(Total, "Invoice Total", "en"),
   l(Total, "Total Amount", "en"),
@@ -200,8 +258,14 @@ pub(crate) const LABELS: &[Label] = &[
   l(Total, "Montant", "fr"),
   l(Total, "Importe total", "es"),
   l(Total, "Importe", "es"),
-  l(Total, "Totale", "es"),
+  l(Total, "Totale", "it"),
   l(Total, "Valor total", "es"),
+  l(Total, "Total factura", "es"),
+  l(Total, "Total presupuesto", "es"),
+  l(Total, "Total general", "es"),
+  l(Total, "Monto total", "es"),
+  l(Total, "Total devis", "fr"),
+  l(Total, "Endbetrag", "de"),
   l(AmountDue, "Amount Due", "en"),
   l(AmountDue, "Balance Due", "en"),
   l(AmountDue, "Balance", "en"),
@@ -211,6 +275,13 @@ pub(crate) const LABELS: &[Label] = &[
   l(AmountDue, "Zu zahlen", "de"),
   l(AmountDue, "Zahlbetrag", "de"),
   l(AmountDue, "Montant dû", "fr"),
+  l(AmountDue, "Total a pagar", "es"),
+  l(AmountDue, "Importe a pagar", "es"),
+  l(AmountDue, "Monto a pagar", "es"),
+  l(AmountDue, "Saldo", "es"),
+  l(AmountDue, "Saldo pendiente", "es"),
+  l(AmountDue, "Reste à payer", "fr"),
+  l(AmountDue, "Offener Betrag", "de"),
   l(AmountDue, "Net à payer", "fr"),
   // stop words
   l(Terms, "Terms", "en"),
@@ -218,6 +289,12 @@ pub(crate) const LABELS: &[Label] = &[
   l(Terms, "Net 30", "en"),
   l(Terms, "Net 60", "en"),
   l(Terms, "Zahlungsbedingungen", "de"),
+  l(Terms, "Zahlungsziel", "de"),
+  l(Terms, "Condiciones de pago", "es"),
+  l(Terms, "Forma de pago", "es"),
+  l(Terms, "Términos de pago", "es"),
+  l(Terms, "Conditions de paiement", "fr"),
+  l(Terms, "Modalités de paiement", "fr"),
   // work orders
   l(WorkOrder, "Work Order", "en"),
   l(WorkOrder, "Work Order No", "en"),
@@ -243,6 +320,11 @@ pub(crate) const LABELS: &[Label] = &[
   l(WorkOrder, "Cust RO", "en"),
   l(WorkOrder, "Cust RO #", "en"),
   l(WorkOrder, "Auftragsnummer", "de"),
+  l(WorkOrder, "Orden de trabajo", "es"),
+  l(WorkOrder, "Orden de trabajo No.", "es"),
+  l(WorkOrder, "O.T.", "es"),
+  l(WorkOrder, "Ordre de travail", "fr"),
+  l(WorkOrder, "Bon de travail", "fr"),
   // aircraft
   l(Registration, "Tail", "en"),
   l(Registration, "Tail No.", "en"),
@@ -256,6 +338,10 @@ pub(crate) const LABELS: &[Label] = &[
   l(Registration, "A/C Reg.", "en"),
   l(Registration, "Aircraft Reg", "en"),
   l(Registration, "Immatriculation", "fr"),
+  l(Registration, "Matrícula", "es"),
+  l(Registration, "Siglas", "es"),
+  l(Registration, "Kennzeichen", "de"),
+  l(Registration, "Luftfahrzeugkennzeichen", "de"),
   l(Serial, "Serial No.", "en"),
   l(Serial, "Serial Number", "en"),
   l(Serial, "Serial #", "en"),
@@ -270,12 +356,21 @@ pub(crate) const LABELS: &[Label] = &[
   l(Serial, "Airframe", "en"),
   l(Serial, "Seriennummer", "de"),
   l(Serial, "Numéro de série", "fr"),
+  l(Serial, "Serial", "es"),
+  l(Serial, "Serial No", "es"),
+  l(Serial, "Número de serie", "es"),
+  l(Serial, "No. de serie", "es"),
   l(EngineSerial, "ESN", "en"),
   l(EngineSerial, "Engine Serial", "en"),
   l(EngineSerial, "Engine S/N", "en"),
   l(EngineSerial, "Engine SN", "en"),
   l(EngineSerial, "Engine Serial #", "en"),
   l(EngineSerial, "Engine Serial Number", "en"),
+  l(EngineSerial, "Serial motor", "es"),
+  l(EngineSerial, "Serial del motor", "es"),
+  l(EngineSerial, "No. de serie del motor", "es"),
+  l(EngineSerial, "Numéro de série moteur", "fr"),
+  l(EngineSerial, "Triebwerksseriennummer", "de"),
   // credit titles
   l(CreditTitle, "Credit Memo", "en"),
   l(CreditTitle, "Credit Note", "en"),
@@ -330,6 +425,14 @@ pub(crate) const LABELS: &[Label] = &[
   l(Other, "Fecha de entrega", "es"),
   l(Other, "Fecha de pedido", "es"),
   l(Other, "Fecha de envío", "es"),
+  l(Other, "Aeronave tipo", "es"),
+  l(Other, "Tipo de aeronave", "es"),
+  l(Other, "Motor tipo", "es"),
+  l(Other, "Tipo de motor", "es"),
+  l(Other, "Horas totales", "es"),
+  l(Other, "Horas", "es"),
+  l(Other, "Type d'aéronef", "fr"),
+  l(Other, "Luftfahrzeugtyp", "de"),
   l(DocumentTitle, "Invoice", "en"),
   l(DocumentTitle, "Tax Invoice", "en"),
   l(DocumentTitle, "Commercial Invoice", "en"),
@@ -350,6 +453,15 @@ pub(crate) const LABELS: &[Label] = &[
   l(DocumentTitle, "Gutschrift", "de"),
   l(DocumentTitle, "Facture", "fr"),
   l(DocumentTitle, "Factura", "es"),
+  l(DocumentTitle, "Presupuesto", "es"),
+  l(DocumentTitle, "Cotización", "es"),
+  l(DocumentTitle, "Recibo", "es"),
+  l(DocumentTitle, "Orden de compra", "es"),
+  l(DocumentTitle, "Albarán", "es"),
+  l(DocumentTitle, "Remito", "es"),
+  l(DocumentTitle, "Devis", "fr"),
+  l(DocumentTitle, "Angebot", "de"),
+  l(DocumentTitle, "Lieferschein", "de"),
 ];
 
 /// Lower-case, OCR confusables folded, punctuation and whitespace dropped. `#` survives, so
@@ -357,12 +469,18 @@ pub(crate) const LABELS: &[Label] = &[
 pub(crate) fn normalize(text: &str) -> String {
   let mut out = String::with_capacity(text.len());
   for c in text.chars() {
-    let folded = match c {
+    // Case first, confusables second: `L` and `l` must fold alike (`TOTAL` is `Total`).
+    let lower = if c.is_alphanumeric() {
+      c.to_lowercase().next().unwrap_or(c)
+    } else {
+      c
+    };
+    let folded = match lower {
       '0' | 'ο' | 'о' => 'o',
-      '1' | 'l' | '|' | 'I' | 'í' | 'ì' | 'ı' => 'i',
+      '1' | 'l' | '|' | 'i' | 'í' | 'ì' | 'ı' => 'i',
       '5' => 's',
       '#' => '#',
-      c if c.is_alphanumeric() => c.to_lowercase().next().unwrap_or(c),
+      c if c.is_alphanumeric() => c,
       _ => continue,
     };
     out.push(folded);
@@ -717,6 +835,21 @@ mod tests {
   fn normalisation_folds_case_punctuation_and_ocr_confusables() {
     assert_eq!(normalize("lnvoice Nο."), normalize("Invoice No."));
     assert_eq!(normalize("P.O. Number:"), normalize("po number"));
+    assert_eq!(
+      normalize("TOTAL"),
+      normalize("Total"),
+      "case folds before confusables"
+    );
+    assert_eq!(normalize("BILL TO:"), normalize("Bill To"));
+    assert_eq!(normalize("CLIENTE:"), normalize("Cliente"));
+    assert_eq!(
+      find_labels(&["BILL", "TO:", "Skyline"], Some(Field::BillTo))[0].score,
+      1.0
+    );
+    assert_eq!(
+      find_labels(&["TOTAL", "$93.50"], Some(Field::Total))[0].score,
+      1.0
+    );
   }
 
   #[test]
@@ -843,6 +976,8 @@ mod tests {
     assert!(is_document_title(&["INVOICE"]));
     assert!(is_document_title(&["Maintenance", "Reimbursement", "Form"]));
     assert!(is_document_title(&["FACTURE", "/", "INVOICE"]));
+    assert!(is_document_title(&["PRESUPUESTO"]));
+    assert!(is_document_title(&["Devis"]));
     assert!(!is_document_title(&["ACME", "AVIATION", "SERVICES"]));
   }
 }

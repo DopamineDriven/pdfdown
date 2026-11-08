@@ -40,6 +40,13 @@ pub(crate) fn symbol_code(symbol: &str) -> Option<&'static str> {
     "C$" | "CA$" => "CAD",
     "A$" | "AU$" => "AUD",
     "NZ$" => "NZD",
+    "US$" => "USD",
+    "R$" => "BRL",
+    "S$" => "SGD",
+    "HK$" => "HKD",
+    "MX$" => "MXN",
+    "NT$" => "TWD",
+    "RD$" => "DOP",
     "₹" => "INR",
     "₽" => "RUB",
     "₩" => "KRW",
@@ -55,8 +62,8 @@ pub(crate) fn symbol_code(symbol: &str) -> Option<&'static str> {
 }
 
 const SYMBOLS: &[&str] = &[
-  "CA$", "AU$", "NZ$", "C$", "A$", "$", "€", "£", "¥", "₹", "₽", "₩", "₪", "₺", "฿", "₫", "₦", "₴",
-  "₱", "¢",
+  "CA$", "AU$", "NZ$", "US$", "HK$", "MX$", "NT$", "RD$", "C$", "A$", "R$", "S$", "$", "€", "£",
+  "¥", "₹", "₽", "₩", "₪", "₺", "฿", "₫", "₦", "₴", "₱", "¢",
 ];
 
 /// Strip a currency code or glyph from either end of the token.
@@ -358,7 +365,12 @@ mod tests {
     assert_eq!(symbol_code("€"), Some("EUR"));
     assert_eq!(symbol_code("£"), Some("GBP"));
     assert_eq!(symbol_code("C$"), Some("CAD"));
+    assert_eq!(symbol_code("US$"), Some("USD"));
+    assert_eq!(symbol_code("R$"), Some("BRL"));
     assert_eq!(symbol_code("$"), None);
+    let latin = parse_amount("US$ 400.00", Separator::Point).unwrap();
+    assert_eq!(latin.value, 400.0);
+    assert_eq!(latin.symbol.as_deref(), Some("US$"));
     assert_eq!(symbol_code("¥"), None);
     assert!(CODES.contains(&"USD") && CODES.contains(&"CHF") && CODES.contains(&"AED"));
   }
