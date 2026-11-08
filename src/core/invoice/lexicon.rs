@@ -234,6 +234,9 @@ pub(crate) const LABELS: &[Label] = &[
   l(Tax, "Taxes", "fr"),
   l(Tax, "Steuer", "de"),
   l(Total, "Total", "en"),
+  l(Total, "Total", "es"),
+  l(Total, "Total", "fr"),
+  l(Total, "Total", "pt"),
   l(Total, "Invoice Total", "en"),
   l(Total, "Total Amount", "en"),
   l(Total, "Grand Total", "en"),
@@ -803,6 +806,69 @@ pub(crate) fn has_terms_at_start(hits: &[Hit]) -> bool {
     .any(|h| h.start == 0 && h.label.field == Terms && h.score >= 0.8)
 }
 
+/// Whether a label's text belongs to one language only: `Total`, `Date` and `Serial No` are rows
+/// of several languages and say nothing about the document's language; `Fecha` or `Rechnung` do.
+pub(crate) fn language_specific(label: &Label) -> bool {
+  static SHARED: std::sync::OnceLock<std::collections::HashSet<String>> =
+    std::sync::OnceLock::new();
+  let shared = SHARED.get_or_init(|| {
+    let mut langs: std::collections::HashMap<String, std::collections::HashSet<&str>> =
+      std::collections::HashMap::new();
+    for l in LABELS {
+      langs.entry(normalize(l.text)).or_default().insert(l.lang);
+    }
+    langs
+      .into_iter()
+      .filter(|(_, ls)| ls.len() > 1)
+      .map(|(text, _)| text)
+      .collect()
+  });
+  !shared.contains(&normalize(label.text))
+}
+
+/// What a page declares itself to be in its top band. Our own purchase order, a packing slip or
+/// delivery note, and a remittance advice travel with invoices but are not the invoice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PageRole {
+  Invoice,
+  PurchaseOrder,
+  Delivery,
+  Remittance,
+}
+
+const ROLE_TITLES: &[(PageRole, &str)] = &[
+  (PageRole::PurchaseOrder, "Purchase Order"),
+  (PageRole::PurchaseOrder, "Orden de compra"),
+  (PageRole::PurchaseOrder, "Bon de commande"),
+  (PageRole::PurchaseOrder, "Bestellung"),
+  (PageRole::Delivery, "Packing Slip"),
+  (PageRole::Delivery, "Packing List"),
+  (PageRole::Delivery, "Delivery Note"),
+  (PageRole::Delivery, "Lieferschein"),
+  (PageRole::Delivery, "Albarán"),
+  (PageRole::Delivery, "Remito"),
+  (PageRole::Delivery, "Bon de livraison"),
+  (PageRole::Remittance, "Remittance Advice"),
+  (PageRole::Remittance, "Remittance"),
+];
+
+/// The role a title segment declares: a role title alone on its segment (`PURCHASE ORDER`, not
+/// `Purchase Order: 249604`, which is a label with a value), any other document title is the
+/// invoice's own, anything else is no title.
+pub(crate) fn role_of_title(words: &[&str]) -> Option<PageRole> {
+  let whole = normalize(&words.join(" "));
+  if whole.is_empty() {
+    return None;
+  }
+  if let Some((role, _)) = ROLE_TITLES.iter().find(|(_, t)| normalize(t) == whole) {
+    return Some(*role);
+  }
+  LABELS
+    .iter()
+    .any(|l| l.field == DocumentTitle && normalize(l.text) == whole)
+    .then_some(PageRole::Invoice)
+}
+
 /// Whether a segment is the document's title rather than a name: every word is a title word, or
 /// the whole segment is a title row, or the segment ends with a title word (`… Form`).
 pub(crate) fn is_document_title(words: &[&str]) -> bool {
@@ -969,6 +1035,27 @@ mod tests {
       bilingual.iter().any(|h| h.remainder == "F-2209"),
       "a second label of the same field survives"
     );
+  }
+
+  #[test]
+  fn page_roles_come_from_a_bare_title() {
+    assert_eq!(
+      role_of_title(&["PURCHASE", "ORDER"]),
+      Some(PageRole::PurchaseOrder)
+    );
+    assert_eq!(
+      role_of_title(&["Packing", "Slip"]),
+      Some(PageRole::Delivery)
+    );
+    assert_eq!(role_of_title(&["Lieferschein"]), Some(PageRole::Delivery));
+    assert_eq!(role_of_title(&["INVOICE"]), Some(PageRole::Invoice));
+    assert_eq!(role_of_title(&["FACTURA"]), Some(PageRole::Invoice));
+    assert_eq!(
+      role_of_title(&["Purchase", "Order:", "249604"]),
+      None,
+      "a label with a value is not a title"
+    );
+    assert_eq!(role_of_title(&["ACME", "AVIATION"]), None);
   }
 
   #[test]

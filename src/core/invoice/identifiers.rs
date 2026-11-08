@@ -34,11 +34,32 @@ pub(crate) fn parse_identifier(text: &str) -> Option<String> {
   {
     return None;
   }
-  // A date is never an identifier, whatever the label beside it says.
-  if super::dates::parse_date(&collapsed, super::dates::Order::Mdy).is_some() {
+  // A date is never an identifier, whatever the label beside it says; nor is anything shaped
+  // like one (`08/07/7014` is a misread date, not a number).
+  if super::dates::parse_date(&collapsed, super::dates::Order::Mdy).is_some()
+    || is_date_shaped(&collapsed)
+  {
     return None;
   }
   Some(collapsed)
+}
+
+/// Three all-digit groups split by `/`, `.` or `-` in a day-month-year or year-month-day
+/// arrangement of lengths, whatever the digits say.
+fn is_date_shaped(text: &str) -> bool {
+  let groups: Vec<&str> = text.split(['/', '.', '-']).collect();
+  if groups.len() != 3
+    || !groups
+      .iter()
+      .all(|g| !g.is_empty() && g.chars().all(|c| c.is_ascii_digit()))
+  {
+    return false;
+  }
+  let lens: Vec<usize> = groups.iter().map(|g| g.len()).collect();
+  let short = |n: usize| (1..=2).contains(&n);
+  let year = |n: usize| n == 2 || n == 4;
+  (short(lens[0]) && short(lens[1]) && year(lens[2]))
+    || (lens[0] == 4 && short(lens[1]) && short(lens[2]))
 }
 
 /// An aircraft registration: a US N-number, or a country prefix, a hyphen and three to five
@@ -124,6 +145,22 @@ mod tests {
 
   #[test]
   fn a_date_shape_is_not_an_identifier() {
+    assert!(
+      parse_identifier("08/07/7014").is_none(),
+      "a misread date is still date-shaped"
+    );
+    assert!(parse_identifier("31.02.2019").is_none());
+    assert!(parse_identifier("2014-13-40").is_none());
+    assert_eq!(
+      parse_identifier("2015-0831").as_deref(),
+      Some("2015-0831"),
+      "two groups are an id"
+    );
+    assert_eq!(
+      parse_identifier("12-345-6789").as_deref(),
+      Some("12-345-6789"),
+      "a three-digit middle group is not a date"
+    );
     assert_eq!(parse_identifier("03/14/2024"), None);
     assert_eq!(parse_identifier("31.08.2015"), None);
     assert_eq!(parse_identifier("2022-09-15"), None);

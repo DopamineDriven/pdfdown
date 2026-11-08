@@ -142,6 +142,21 @@ fn block_under<'a>(
   lines
 }
 
+/// The nearest segment to the right of `s` on its baseline that opens with no label.
+fn right_neighbour(segments: &[Segment], hits: &[Vec<Hit>], s: &Segment) -> Option<usize> {
+  (0..segments.len())
+    .filter(|&j| {
+      let t = &segments[j];
+      t.page_index == s.page_index
+        && t.line == s.line
+        && t.x0 > s.x1
+        && !hits[j]
+          .iter()
+          .any(|h| h.start == 0 && h.score >= 0.8 && h.label.field != Field::DocumentTitle)
+    })
+    .min_by(|&a, &b| segments[a].x0.total_cmp(&segments[b].x0))
+}
+
 /// A party from a name line (or none) and the lines under it.
 fn party_from(name: Option<&Segment>, lines: &[&Segment], confidence: f64) -> Party {
   let mut address: Vec<&Segment> = Vec::new();
@@ -250,6 +265,15 @@ pub(crate) fn party_block(segments: &[Segment], hits: &[Vec<Hit>], field: Field)
     let s = &segments[i];
     let lines = block_under(segments, hits, s);
     let mut id = None;
+    // A label alone in its column (`CLIENTE: | J.S.S.I.`) names the party in the next column:
+    // the nearest unlabelled segment to its right on the same baseline, with the block under it.
+    if hit.remainder.is_empty()
+      && let Some(j) = right_neighbour(segments, hits, s)
+      && name_shape(&segments[j].text)
+    {
+      let under = block_under(segments, hits, &segments[j]);
+      return Some(party_from(Some(&segments[j]), &under, 0.85));
+    }
     if !hit.remainder.is_empty() {
       if name_shape(&hit.remainder) {
         let name = Segment {
@@ -326,6 +350,24 @@ mod tests {
     ]);
     let bare_segs = segments_at(&bare);
     assert!(vendor(&bare_segs, &label_hits(&bare_segs), bare.height).is_none());
+  }
+
+  #[test]
+  fn a_label_alone_in_its_column_names_the_party_in_the_next_column() {
+    let p = page(&[
+      (380.0, 730.0, 10.0, false, "CLIENTE:"),
+      (520.0, 730.0, 10.0, false, "Skyline Charter LLC"),
+      (520.0, 716.0, 10.0, false, "88 Terminal Drive"),
+      (380.0, 716.0, 10.0, false, "FECHA:"),
+      (520.0, 702.0, 10.0, false, "Denver, CO 80249"),
+    ]);
+    let segs = segments_at(&p);
+    let c = party_block(&segs, &label_hits(&segs), Field::BillTo).unwrap();
+    assert_eq!(c.name.unwrap().value, "Skyline Charter LLC");
+    assert_eq!(
+      c.address.unwrap().lines,
+      vec!["88 Terminal Drive", "Denver, CO 80249"]
+    );
   }
 
   #[test]

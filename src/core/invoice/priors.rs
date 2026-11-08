@@ -4,7 +4,7 @@
 
 use super::amounts::{CODES, Separator, infer_separator, parse_amount, symbol_code};
 use super::dates::{Order, infer_order, parse_date};
-use super::lexicon::{Field, Hit};
+use super::lexicon::{Field, Hit, language_specific};
 use super::segments::Segment;
 use crate::types::{CurrencySource, DateOrder, InvoiceOptions};
 
@@ -19,6 +19,30 @@ pub(crate) struct Priors {
 fn is_code(token: &str) -> Option<&'static str> {
   let t = token.trim_matches(|c: char| !c.is_ascii_alphabetic());
   CODES.iter().copied().find(|c| *c == t)
+}
+
+/// The day/month order the page's label language implies, when no option and no unambiguous
+/// date decides: labels in Spanish, French, German, Italian, Portuguese or Dutch vote day-first,
+/// English labels month-first; a tie or no labels falls to month-first. Only labels whose text
+/// belongs to one language vote (`Total` and `Date` do not), and each field votes once per
+/// language, so ten `TOTAL …` lines are not ten votes.
+fn label_language_order(hits: &[Vec<Hit>]) -> Order {
+  let mut voters: std::collections::HashSet<(&str, Field)> = std::collections::HashSet::new();
+  for h in hits.iter().flatten() {
+    if h.start == 0 && h.score >= 0.8 && language_specific(h.label) {
+      voters.insert((h.label.lang, h.label.field));
+    }
+  }
+  let day_first = voters
+    .iter()
+    .filter(|(lang, _)| matches!(*lang, "es" | "fr" | "de" | "it" | "pt" | "nl"))
+    .count();
+  let month_first = voters.iter().filter(|(lang, _)| *lang == "en").count();
+  if day_first > month_first {
+    Order::Dmy
+  } else {
+    Order::Mdy
+  }
 }
 
 /// A currency the page states: an ISO code beside an amount, in parentheses, on a totals label
@@ -96,7 +120,8 @@ pub(crate) fn infer(
   let separator = infer_separator(&tokens, sep_fallback);
   let order_fallback = match opts.and_then(|o| o.date_order) {
     Some(DateOrder::DMY) => Order::Dmy,
-    _ => Order::Mdy,
+    Some(_) => Order::Mdy,
+    None => label_language_order(hits),
   };
   let date_tokens: Vec<&str> = tokens
     .iter()
@@ -174,6 +199,35 @@ mod tests {
 
   #[test]
   fn separator_and_order_come_from_unambiguous_tokens() {
+    let es = segments_at(&page(&[
+      (400.0, 700.0, 10.0, false, "FECHA: 08/07/2014"),
+      (400.0, 686.0, 10.0, false, "CLIENTE: Skyline Charter"),
+      (400.0, 300.0, 10.0, false, "TOTAL: 400.00"),
+    ]));
+    let p = infer(&es, &label_hits(&es), None);
+    assert_eq!(
+      p.order,
+      Order::Dmy,
+      "Spanish labels read an ambiguous date day-first"
+    );
+    let shared = segments_at(&page(&[
+      (400.0, 700.0, 10.0, false, "FECHA: 08/07/2014"),
+      (400.0, 686.0, 10.0, false, "CLIENTE: Skyline Charter"),
+      (400.0, 400.0, 10.0, false, "TOTAL MANO DE OBRA 400.00"),
+      (400.0, 386.0, 10.0, false, "TOTAL HORAS 0.00"),
+      (400.0, 372.0, 10.0, false, "TOTAL OTROS 0.00"),
+      (400.0, 358.0, 10.0, false, "TOTAL 400.00"),
+    ]));
+    assert_eq!(
+      infer(&shared, &label_hits(&shared), None).order,
+      Order::Dmy,
+      "`Total` is the same word in several languages and does not vote"
+    );
+    let en = segments_at(&page(&[
+      (400.0, 700.0, 10.0, false, "Date: 08/07/2014"),
+      (400.0, 686.0, 10.0, false, "Bill To: Skyline Charter"),
+    ]));
+    assert_eq!(infer(&en, &label_hits(&en), None).order, Order::Mdy);
     let de = segments_at(&page(&[
       (400.0, 700.0, 10.0, false, "Zwischensumme 1.234,56"),
       (400.0, 686.0, 10.0, false, "MwSt. 234,57"),

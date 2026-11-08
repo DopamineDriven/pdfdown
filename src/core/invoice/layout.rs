@@ -6,8 +6,8 @@ use super::amounts::{Separator, parse_amount};
 use super::anchors::{Candidate, MAX_VALUE_TOKENS, candidates, score};
 use super::dates::parse_date;
 use super::identifiers::{parse_identifier, parse_registration, parse_serial};
-use super::lexicon::Field;
 use super::lexicon::Hit;
+use super::lexicon::{Field, PageRole, role_of_title};
 use super::parties::{Party, party_block, vendor};
 use super::priors::{Priors, infer};
 use super::segments::{Segment, label_hits, segments, span_of};
@@ -269,6 +269,42 @@ fn has_decimals(token: &str) -> bool {
     && digits[digits.len() - 2..].iter().all(char::is_ascii_digit)
 }
 
+/// The role a page's top band declares; a page without words has none, a page without a title is
+/// the invoice's own. A title must look like one: set larger than the page's median text or
+/// bold, which keeps a boxed form's `PURCHASE ORDER` header cell from naming the page. An invoice
+/// title on the page wins over any other title.
+fn page_role(page: &PageLayout, index: usize) -> Option<PageRole> {
+  if page.words.is_empty() {
+    return None;
+  }
+  let segs = segments(page, index);
+  let mut sizes: Vec<f64> = segs.iter().map(|s| s.font_size).collect();
+  sizes.sort_by(f64::total_cmp);
+  let median = sizes.get(sizes.len() / 2).copied().unwrap_or(0.0);
+  let mut role = PageRole::Invoice;
+  for s in segs
+    .iter()
+    .filter(|s| s.y1 >= 0.75 * page.height && (s.bold || s.font_size >= 1.2 * median))
+  {
+    let words: Vec<&str> = s.tokens.iter().map(String::as_str).collect();
+    match role_of_title(&words) {
+      Some(PageRole::Invoice) => return Some(PageRole::Invoice),
+      Some(other) => role = other,
+      None => {}
+    }
+  }
+  Some(role)
+}
+
+fn role_name(role: PageRole) -> &'static str {
+  match role {
+    PageRole::Invoice => "invoice",
+    PageRole::PurchaseOrder => "purchase order",
+    PageRole::Delivery => "delivery note",
+    PageRole::Remittance => "remittance advice",
+  }
+}
+
 /// Header fields from pages.
 pub(crate) fn extract_from_pages(
   pages: &[PageLayout],
@@ -276,7 +312,36 @@ pub(crate) fn extract_from_pages(
 ) -> InvoiceResult {
   let source = source_of(pages);
   let mut warnings = Vec::new();
-  let Some(first_page) = pages.iter().find(|p| !p.words.is_empty()) else {
+  // Pages play roles: the invoice's own pages carry the fields; our own purchase order, a
+  // delivery note or a remittance advice appended to them do not, and are read only for the
+  // order number. Roles only ever set pages aside when an invoice page remains: a document
+  // that is nothing but such pages is read as it stands, with a warning.
+  let roles: Vec<Option<PageRole>> = pages
+    .iter()
+    .enumerate()
+    .map(|(i, p)| page_role(p, i))
+    .collect();
+  let invoice_pages: Vec<usize> = roles
+    .iter()
+    .enumerate()
+    .filter(|(_, r)| matches!(r, Some(PageRole::Invoice)))
+    .map(|(i, _)| i)
+    .collect();
+  let other_pages: Vec<(usize, PageRole)> = roles
+    .iter()
+    .enumerate()
+    .filter_map(|(i, r)| match r {
+      Some(PageRole::Invoice) | None => None,
+      Some(role) => Some((i, *role)),
+    })
+    .collect();
+  let only_other_pages = invoice_pages.is_empty() && !other_pages.is_empty();
+  let readable: Vec<usize> = if invoice_pages.is_empty() {
+    (0..pages.len()).filter(|&i| roles[i].is_some()).collect()
+  } else {
+    invoice_pages
+  };
+  let Some(&first_index) = readable.first() else {
     warnings.push(NO_WORDS_WARNING.to_string());
     return InvoiceResult {
       source,
@@ -289,8 +354,23 @@ pub(crate) fn extract_from_pages(
       credit_signals: Vec::new(),
     };
   };
+  let first_page = &pages[first_index];
   if pages.first().is_some_and(|p| p.words.is_empty()) {
     warnings.push(NO_WORDS_WARNING.to_string());
+  }
+  if only_other_pages {
+    warnings.push(format!(
+      "every readable page is titled as a {}; it was read as the invoice regardless",
+      role_name(other_pages[0].1)
+    ));
+  } else {
+    for (i, role) in &other_pages {
+      warnings.push(format!(
+        "page {} is a {} and was not read as the invoice",
+        pages[*i].page,
+        role_name(*role)
+      ));
+    }
   }
   {
     let mut numbers: Vec<u32> = pages.iter().map(|p| p.page).collect();
@@ -302,14 +382,10 @@ pub(crate) fn extract_from_pages(
       );
     }
   }
-  let first_index = pages.iter().position(|p| !p.words.is_empty()).unwrap_or(0);
   let first = segments(first_page, first_index);
   let hits = label_hits(&first);
   let priors = infer(&first, &hits, opts);
-  let last_index = pages
-    .iter()
-    .rposition(|p| !p.words.is_empty())
-    .filter(|&i| i != first_index);
+  let last_index = readable.last().copied().filter(|&i| i != first_index);
   let last = last_index
     .map(|i| segments(&pages[i], i))
     .unwrap_or_default();
@@ -329,7 +405,32 @@ pub(crate) fn extract_from_pages(
   let invoice_id = reader.string_field(Field::InvoiceId, &parse_identifier);
   let invoice_date = reader.date_field(Field::InvoiceDate);
   let due_date = reader.date_field(Field::DueDate);
-  let purchase_order = reader.string_field(Field::PurchaseOrder, &parse_identifier);
+  let mut purchase_order = reader.string_field(Field::PurchaseOrder, &parse_identifier);
+  // An appended purchase order is the most authoritative source of its own number.
+  if purchase_order.is_none() && !only_other_pages {
+    for &(i, role) in &other_pages {
+      if role != PageRole::PurchaseOrder {
+        continue;
+      }
+      let segs = segments(&pages[i], i);
+      let po_hits = label_hits(&segs);
+      let mut po_reader = Reader {
+        pages,
+        first: segs,
+        hits: po_hits,
+        last: Vec::new(),
+        last_hits: Vec::new(),
+        priors: reader.priors.clone(),
+        opts,
+        warnings: Vec::new(),
+        withheld: 0,
+      };
+      purchase_order = po_reader.string_field(Field::PurchaseOrder, &parse_identifier);
+      if purchase_order.is_some() {
+        break;
+      }
+    }
+  }
   let work_order = reader.string_field(Field::WorkOrder, &parse_identifier);
   let registration = reader.string_field(Field::Registration, &parse_registration);
   let serial = reader.string_field(Field::Serial, &parse_serial);
@@ -652,6 +753,114 @@ mod tests {
       f.aircraft[0].serial_number.is_none(),
       "`Serial` inside `Serial Motor` is not the aircraft serial: {:?}",
       f.aircraft[0].serial_number
+    );
+  }
+
+  fn purchase_order_page() -> PageLayout {
+    use super::super::testing::page;
+    let mut p = page(&[
+      (50.0, 760.0, 14.0, true, "PURCHASE ORDER"),
+      (380.0, 730.0, 10.0, false, "P.O. Number: PO-990011"),
+      (380.0, 716.0, 10.0, false, "Date: 05/01/2024"),
+      (50.0, 690.0, 10.0, false, "Ship To:"),
+      (50.0, 676.0, 10.0, false, "Skyline Charter LLC"),
+      (400.0, 300.0, 10.0, false, "Total"),
+      (500.0, 300.0, 10.0, false, "$99.00"),
+    ]);
+    p.page = 2;
+    p
+  }
+
+  #[test]
+  fn an_appended_purchase_order_page_is_not_the_invoice() {
+    use super::super::testing::{acme_page, page};
+    let alone = extract_from_pages(&[acme_page()], None);
+    let with_po = extract_from_pages(&[acme_page(), purchase_order_page()], None);
+    let f = &with_po.fields;
+    assert_eq!(f.invoice_id.as_ref().unwrap().value, "A-10045");
+    assert_eq!(f.invoice_date.as_ref().unwrap().value, "2024-03-14");
+    assert_eq!(
+      f.invoice_total.as_ref().unwrap().value,
+      alone.fields.invoice_total.as_ref().unwrap().value,
+      "the invoice's total, not the purchase order's"
+    );
+    assert_eq!(
+      f.purchase_order.as_ref().unwrap().value,
+      "PO-778812",
+      "the invoice's own PO line outranks the appended order"
+    );
+    assert!(
+      with_po
+        .warnings
+        .iter()
+        .any(|w| w.contains("page 2 is a purchase order")),
+      "{:?}",
+      with_po.warnings
+    );
+
+    // Without a PO line on the invoice, the appended order supplies its number.
+    let mut bare = page(&[
+      (450.0, 760.0, 12.0, true, "INVOICE"),
+      (380.0, 730.0, 10.0, false, "Invoice No: A-10046"),
+      (380.0, 716.0, 10.0, false, "Invoice Date: 03/14/2024"),
+      (400.0, 300.0, 10.0, false, "Total Due"),
+      (500.0, 300.0, 10.0, false, "$50.00"),
+    ]);
+    bare.page = 1;
+    let r = extract_from_pages(&[bare, purchase_order_page()], None);
+    assert_eq!(r.fields.invoice_id.as_ref().unwrap().value, "A-10046");
+    assert_eq!(r.fields.purchase_order.as_ref().unwrap().value, "PO-990011");
+    assert_eq!(
+      r.fields
+        .purchase_order
+        .as_ref()
+        .unwrap()
+        .span
+        .as_ref()
+        .unwrap()
+        .page,
+      2
+    );
+    assert_eq!(r.fields.invoice_total.as_ref().unwrap().value, 50.0);
+  }
+
+  #[test]
+  fn a_purchase_order_alone_is_read_as_it_stands_with_a_warning() {
+    let r = extract_from_pages(&[purchase_order_page()], None);
+    assert_eq!(r.fields.purchase_order.as_ref().unwrap().value, "PO-990011");
+    assert_eq!(r.fields.invoice_total.as_ref().unwrap().value, 99.0);
+    assert!(
+      r.warnings
+        .iter()
+        .any(|w| w.contains("titled as a purchase order")),
+      "{:?}",
+      r.warnings
+    );
+  }
+
+  #[test]
+  fn a_boxed_form_header_cell_is_not_a_page_title() {
+    use super::super::testing::page;
+    // A one-page invoice whose boxed header row has a `PURCHASE ORDER` cell in body-sized text.
+    let p = page(&[
+      (50.0, 760.0, 14.0, true, "ACME AVIATION SERVICES"),
+      (50.0, 700.0, 10.0, false, "PURCHASE ORDER"),
+      (200.0, 700.0, 10.0, false, "DATE"),
+      (350.0, 700.0, 10.0, false, "TERMS"),
+      (50.0, 686.0, 10.0, false, "PO-778812"),
+      (200.0, 686.0, 10.0, false, "03/14/2024"),
+      (350.0, 686.0, 10.0, false, "Net 30"),
+      (380.0, 640.0, 10.0, false, "Invoice No: A-10045"),
+      (400.0, 300.0, 10.0, false, "Total Due"),
+      (500.0, 300.0, 10.0, false, "$50.00"),
+    ]);
+    let r = extract_from_pages(&[p], None);
+    assert_eq!(r.fields.invoice_id.as_ref().unwrap().value, "A-10045");
+    assert_eq!(r.fields.invoice_total.as_ref().unwrap().value, 50.0);
+    assert!(
+      !r.warnings.iter().any(|w| w.contains("purchase order")),
+      "{:?}",
+      r.warnings
     );
   }
 
