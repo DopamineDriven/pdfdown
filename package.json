@@ -35,6 +35,7 @@
     "build:ocr": "node scripts/build.mjs --ocr",
     "corpus:profile": "tsx scripts/corpus-profile.ts",
     "invoice:eval": "tsx scripts/invoice-eval.ts",
+    "invoice:from-azure": "tsx scripts/invoice-from-azure.ts",
     "create-npm-dirs:ocr": "napi create-npm-dirs --package-json-path ocr/package.json --npm-dir ocr/npm",
     "format": "run-p format:oxfmt format:rs format:toml",
     "format:oxfmt": "oxfmt",
