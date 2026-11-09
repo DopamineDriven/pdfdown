@@ -2,7 +2,6 @@
 const config = {
   files: ["ocr/__test__/**/*.spec.ts"],
   extensions: ["ts"],
-  timeout: "60m",
   workerThreads: false,
   environmentVariables: {
     OXC_TSCONFIG_PATH: "./ocr/tsconfig.json"
