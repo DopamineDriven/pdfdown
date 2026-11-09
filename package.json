@@ -45,6 +45,7 @@
     "lint:rs": "cargo fmt -- --check && cargo clippy --all-features -- -D warnings",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
+    "test:scripts": "ava --config scripts/ava.config.mjs",
     "test:ocr": "ava --config ocr/ava.config.mjs",
     "preversion": "napi build --platform --no-const-enum && git add .",
     "version": "napi version",
@@ -121,8 +122,7 @@
       "ts"
     ],
     "files": [
-      "__test__/**/*.spec.ts",
-      "scripts/__test__/*.spec.ts"
+      "__test__/**/*.spec.ts"
     ],
     "nodeArguments": [
       "--import",
