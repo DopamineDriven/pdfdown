@@ -2,8 +2,8 @@
 
 Shared test corpus for the invoice work (design: `notes/2026-11-01.md` §7, §9). Tracked in git
 so the same files are available on every machine. Only publicly published vendor samples go
-here; real invoices from work are never committed (point `PDFDOWN_INVOICE_CORPUS` at a local
-directory for those).
+here; real invoices from work are never committed (they live under the gitignored
+`ocr/__test__/fixtures/private`).
 
 | File                                           | Producer                 | Pages | Text   | Notes                                                                                                                                                       |
 | ---------------------------------------------- | ------------------------ | ----- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |

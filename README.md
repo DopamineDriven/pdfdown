@@ -959,11 +959,11 @@ Limits, enforced while reading: input at most 64 MiB compressed, at most 10,000 
 
 ## Measuring on your own corpus
 
-Two scripts run against any local directory of PDFs and `.xlsx` workbooks and print aggregates only; nothing from the corpus is committed, and nothing from it is printed unless you ask. The directory comes from `PDFDOWN_INVOICE_CORPUS` (default: `ocr/__test__/fixtures/private`, which is gitignored) and may be grouped one folder deep. A file's basename is its `id` (the corpus these were built on names files by a six-digit invoice id), and every per-document row in both outputs carries it.
+Two scripts run against the PDFs and `.xlsx` workbooks under `ocr/__test__/fixtures/private` (gitignored; grouped one folder deep if you like) and print aggregates only; nothing from the corpus is committed, and nothing from it is printed unless you ask. A file's basename is its `id` (the corpus these were built on names files by a six-digit invoice id), and every per-document row in both outputs carries it.
 
 ```bash
-PDFDOWN_INVOICE_CORPUS=/path/to/pdfs yarn corpus:profile                    # writes <root>/profile.json
-PDFDOWN_INVOICE_CORPUS=/path/to/pdfs yarn invoice:eval --ids critical.txt   # writes <root>/eval.json
+yarn corpus:profile                    # writes <root>/profile.json
+yarn invoice:eval --ids critical.txt   # writes <root>/eval.json
 ```
 
 `corpus:profile` runs `pdfMetadata`, `layoutPerPage`, `attachments` and `extractInvoice` once per PDF and prints the headline (parse failures, native layout cost, native / scanned / mixed, pages per document, page sizes, `/Rotate`, AcroForms, attachments and embedded XML), the producer families, the template clusters (a fonts fingerprint and a header fingerprint with digits masked, and how many header clusters cover 50/80/90/95% of the documents) and the page kinds (image-only, a native stamp over a scan, no glyphs and no images, sparse native). Each workbook is opened through `spreadsheetCells` and `layoutFromXlsx` and the Workbooks table follows: how many opened, sheets, cells and merged ranges, cell types, formulas, how many distinct number-format codes appear and how many cells this release does not render, logical pages and their cost. A workbook the reader refuses is a failure row carrying its id, like a PDF.

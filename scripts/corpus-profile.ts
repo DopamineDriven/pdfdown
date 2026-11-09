@@ -1,6 +1,6 @@
 // Profile a local PDF corpus: `yarn corpus:profile [--verbose]`.
 //
-// Reads `$PDFDOWN_INVOICE_CORPUS` (default: the gitignored private fixture directory), runs every
+// Reads the gitignored private fixture directory (`ocr/__test__/fixtures/private`), runs every
 // public extractor once per PDF, writes `<root>/profile.json` next to the PDFs and prints the
 // aggregate tables of notes/2026-11-03/1037.md §2. Nothing from the corpus is printed unless
 // `--verbose` names the files whose basename is not a six-digit id or that failed to parse.

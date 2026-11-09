@@ -1,7 +1,7 @@
 // Evaluate `extractInvoice` against expected files: `yarn invoice:eval [--ids <file>] [--verbose]`.
 //
-// For every `<id>.pdf` under `$PDFDOWN_INVOICE_CORPUS` (default: the gitignored private fixture
-// directory) that has an `<id>.expected.json` beside it, written in pdfdown's own `InvoiceFields`
+// For every `<id>.pdf` under the gitignored private fixture directory
+// (`ocr/__test__/fixtures/private`) that has an `<id>.expected.json` beside it, written in pdfdown's own `InvoiceFields`
 // vocabulary, the extraction is scored field by field; documents are grouped by the header
 // fingerprint in `<root>/profile.json` when `yarn corpus:profile` has written one. Results go to
 // `<root>/eval.json`; stdout carries aggregates only. `--ids <file>` (one id per line) adds a row

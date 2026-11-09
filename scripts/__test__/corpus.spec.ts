@@ -45,15 +45,6 @@ test("corpus discovery: one level of id folders, any-case extensions, no notes, 
   }
 });
 
-test("corpus root: the environment variable wins, else the gitignored private directory", (t) => {
-  const before = process.env.PDFDOWN_INVOICE_CORPUS;
-  try {
-    delete process.env.PDFDOWN_INVOICE_CORPUS;
-    t.is(corpusRoot(), resolve(import.meta.dirname, "..", "..", "ocr", "__test__", "fixtures", "private"));
-    process.env.PDFDOWN_INVOICE_CORPUS = "/somewhere/else";
-    t.is(corpusRoot(), "/somewhere/else");
-  } finally {
-    if (before === undefined) delete process.env.PDFDOWN_INVOICE_CORPUS;
-    else process.env.PDFDOWN_INVOICE_CORPUS = before;
-  }
+test("corpus root: the gitignored private directory, as an absolute path", (t) => {
+  t.is(corpusRoot(), resolve(import.meta.dirname, "..", "..", "ocr", "__test__", "fixtures", "private"));
 });
