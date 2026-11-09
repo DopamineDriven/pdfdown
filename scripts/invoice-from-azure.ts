@@ -4,7 +4,8 @@
 // The JSON is the analyze result (or an object holding it under `analyzeResult`); its pages are
 // mapped onto pdfdown pages and `invoiceFromLayout` reads them. Prints the header fields with
 // their confidence and span page, and the warnings; `--layout` also prints each page's lines.
-import { readFileSync } from "fs";
+import { readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
 
 import { invoiceFromLayout } from "../index";
 import { azureToLayout } from "./lib/azure-layout";
@@ -16,7 +17,7 @@ if (file === undefined) {
   console.error("usage: yarn invoice:from-azure <analyze-result.json> [--layout]");
   process.exit(2);
 }
-const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
+const raw: unknown = JSON.parse(readFileSync(resolve(relative(process.cwd(), file)), "utf8"));
 const result = (
   typeof raw === "object" && raw !== null && "analyzeResult" in raw
     ? (raw as { analyzeResult: AzureReadResult }).analyzeResult

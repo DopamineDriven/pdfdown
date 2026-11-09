@@ -54,7 +54,10 @@ export function posixRelative(root: string, path: string): string {
   return relative(root, path).split(sep).join("/");
 }
 
-/** `$PDFDOWN_INVOICE_CORPUS`, else the repo's gitignored private fixture directory. */
+/**
+ * `$PDFDOWN_INVOICE_CORPUS`, else the repo's gitignored private fixture directory, as an absolute
+ * path however it was given.
+ */
 export function corpusRoot(): string {
-  return process.env.PDFDOWN_INVOICE_CORPUS ?? DEFAULT_ROOT;
+  return resolve(relative(process.cwd(), process.env.PDFDOWN_INVOICE_CORPUS ?? DEFAULT_ROOT));
 }

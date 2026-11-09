@@ -7,7 +7,7 @@
 // `<root>/eval.json`; stdout carries aggregates only. `--ids <file>` (one id per line) adds a row
 // for that slice; `--verbose` names the ids whose expected file was partly dropped or that failed.
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
+import { join, relative, resolve } from "node:path";
 
 import { corpusRoot, discoverCorpus } from "./lib/corpus";
 import { evaluateCorpus, printEval, profileLookup } from "./lib/evaluate";
@@ -24,7 +24,7 @@ const ids =
   idsFile === undefined
     ? undefined
     : new Set(
-        readFileSync(idsFile, "utf8")
+        readFileSync(resolve(relative(process.cwd(), idsFile)), "utf8")
           .split(/\r?\n/)
           .map((l) => l.trim())
           .filter((l) => l !== "" && !l.startsWith("#"))
