@@ -39,7 +39,7 @@
       </ram:SellerTradeParty>
       <ram:BuyerTradeParty>
         <ram:ID>C-1001</ram:ID>
-        <ram:Name>Jet Support Services, Inc.</ram:Name>
+        <ram:Name>Skyline Charter LLC</ram:Name>
         <ram:PostalTradeAddress><ram:PostcodeCode>60606</ram:PostcodeCode><ram:LineOne>180 N Stetson Ave</ram:LineOne><ram:CityName>Chicago</ram:CityName><ram:CountryID>US</ram:CountryID></ram:PostalTradeAddress>
       </ram:BuyerTradeParty>
       <ram:BuyerOrderReferencedDocument><ram:IssuerAssignedID>PO-7788</ram:IssuerAssignedID></ram:BuyerOrderReferencedDocument>

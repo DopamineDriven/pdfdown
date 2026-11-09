@@ -981,7 +981,7 @@ Expected files use pdfdown's own `InvoiceFields` names, values only. A key you l
   "purchaseOrder": "PO-7788",
   "documentType": "Invoice",
   "vendorName": "Acme Aviation Parts GmbH",
-  "customerName": "Jet Support Services, Inc.",
+  "customerName": "Skyline Charter LLC",
   "shippingAddress": { "lines": ["1 Hangar Road", "Anytown"] },
   "items": [
     {

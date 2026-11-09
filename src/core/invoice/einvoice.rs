@@ -770,7 +770,7 @@ mod tests {
     );
     assert_eq!(
       f.customer_name.as_ref().unwrap().value,
-      "Jet Support Services, Inc."
+      "Skyline Charter LLC"
     );
     assert_eq!(f.customer_id.as_ref().unwrap().value, "C-1001");
     assert_eq!(f.purchase_order.as_ref().unwrap().value, "PO-7788");
@@ -841,8 +841,8 @@ mod tests {
       "ar@slicedaero.example"
     );
     assert_eq!(f.vendor_phone.as_ref().unwrap().value, "+1 316 555 0100");
-    assert_eq!(f.customer_name.as_ref().unwrap().value, "JSSI");
-    assert_eq!(f.customer_id.as_ref().unwrap().value, "JSSI-01");
+    assert_eq!(f.customer_name.as_ref().unwrap().value, "Skyline Charter");
+    assert_eq!(f.customer_id.as_ref().unwrap().value, "SKY-01");
     assert_eq!(
       f.payment_details[0].iban.as_ref().unwrap().value,
       "US64SVBKUS6S3300958879"

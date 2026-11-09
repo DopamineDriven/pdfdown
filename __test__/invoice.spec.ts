@@ -90,7 +90,7 @@ test("extractInvoice: Factur-X CII maps header, parties, totals, taxes, payment 
   t.deepEqual(f.vendorAddress?.lines, ["Flughafenstrasse 20", "80333 Muenchen", "DE"]);
   t.is(f.vendorTaxId?.value, "DE123456789");
   t.is(f.vendorEmail?.value, "billing@acme-aviation.example");
-  t.is(f.customerName?.value, "Jet Support Services, Inc.");
+  t.is(f.customerName?.value, "Skyline Charter LLC");
   t.is(f.customerId?.value, "C-1001");
   t.is(f.purchaseOrder?.value, "PO-7788");
   t.is(f.paymentTerm?.value, "Net 30");
@@ -138,8 +138,8 @@ test("extractInvoice: UBL behind a /Kids name tree, XRechnung by customization i
   t.is(f.purchaseOrder?.value, "PO-9");
   t.is(f.vendorName?.value, "Sliced Aero LLC");
   t.is(f.vendorPhone?.value, "+1 316 555 0100");
-  t.is(f.customerName?.value, "JSSI");
-  t.is(f.customerId?.value, "JSSI-01");
+  t.is(f.customerName?.value, "Skyline Charter");
+  t.is(f.customerId?.value, "SKY-01");
   t.is(f.paymentDetails[0].iban?.value, "US64SVBKUS6S3300958879");
   t.is(f.paymentDetails[0].bankName?.value, "Sliced Aero Operating");
   t.is(f.totalTax?.value, 8);
