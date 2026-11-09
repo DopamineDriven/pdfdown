@@ -120,6 +120,7 @@ dist
 Cargo.lock
 
 *.node
+*.wasm
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -131,3 +132,9 @@ Cargo.lock
 /ocr/npm
 
 notes.md
+
+.superpowers/
+
+ocr/__test__/fixtures/private/*
+
+.npmrc

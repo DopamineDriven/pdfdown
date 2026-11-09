@@ -1,4 +1,5 @@
-use crate::types::{BoxType, PageBox, PdfMeta};
+use crate::core::forms::extract_forms;
+use crate::types::{BoxType, FormInfo, PageBox, PdfMeta};
 use lopdf::{Document, Object, ObjectId};
 use std::collections::{BTreeMap, HashMap};
 
@@ -82,7 +83,11 @@ fn parse_page_box(obj: &Object) -> Option<[f64; 4]> {
 
 /// Walk the page tree to find an inheritable page box (e.g., /MediaBox, /CropBox).
 /// Resolves indirect references — some PDFs store the box array via `Object::Reference`.
-fn get_inherited_page_box(doc: &Document, page_id: ObjectId, key: &[u8]) -> Option<[f64; 4]> {
+pub(crate) fn get_inherited_page_box(
+  doc: &Document,
+  page_id: ObjectId,
+  key: &[u8],
+) -> Option<[f64; 4]> {
   let mut current_id = Some(page_id);
   while let Some(id) = current_id {
     let dict = doc.get_dictionary(id).ok()?;
@@ -217,7 +222,13 @@ pub(crate) fn extract_page_boxes(doc: &Document, pages: &BTreeMap<u32, ObjectId>
     .collect()
 }
 
+/// Document metadata including AcroForm facts (runs the form scan).
 pub(crate) fn extract_metadata(doc: &Document) -> PdfMeta {
+  extract_metadata_with_form(doc, extract_forms(doc).info)
+}
+
+/// Document metadata with a form scan result the caller already has (avoids scanning twice).
+pub(crate) fn extract_metadata_with_form(doc: &Document, form: Option<FormInfo>) -> PdfMeta {
   let pages = doc.get_pages();
   let page_count = pages.len() as u32;
   let version = doc.version.clone();
@@ -249,6 +260,7 @@ pub(crate) fn extract_metadata(doc: &Document) -> PdfMeta {
     creation_date,
     modification_date,
     page_boxes,
+    form,
   }
 }
 

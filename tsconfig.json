@@ -3,10 +3,12 @@
     "target": "ESNext",
     "strict": true,
     "moduleResolution": "bundler",
-    "module": "CommonJS",
+    "module": "preserve",
     "noUnusedLocals": true,
+    "paths": {
+      "@/*": ["./*"]
+    },
     "noUnusedParameters": true,
-    "ignoreDeprecations": "6.0",
     "types": ["*"],
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true

@@ -94,8 +94,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-android-arm64')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-android-arm64/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -110,8 +110,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-android-arm-eabi')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-android-arm-eabi/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -131,8 +131,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-win32-x64-gnu')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-win32-x64-gnu/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -147,8 +147,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-win32-x64-msvc')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-win32-x64-msvc/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -164,8 +164,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-win32-ia32-msvc')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-win32-ia32-msvc/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -180,8 +180,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-win32-arm64-msvc')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-win32-arm64-msvc/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -199,8 +199,8 @@ function requireNative() {
     try {
       const binding = require('@d0paminedriven/pdfdown-darwin-universal')
       const bindingPackageVersion = require('@d0paminedriven/pdfdown-darwin-universal/package.json').version
-      if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-        throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+      if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+        throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
       }
       return binding
     } catch (e) {
@@ -215,8 +215,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-darwin-x64')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-darwin-x64/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -231,8 +231,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-darwin-arm64')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-darwin-arm64/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -251,8 +251,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-freebsd-x64')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-freebsd-x64/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -267,8 +267,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-freebsd-arm64')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-freebsd-arm64/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -283,8 +283,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-freebsd-ppc64')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-freebsd-ppc64/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -304,8 +304,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-linux-x64-musl')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-x64-musl/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -320,8 +320,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-linux-x64-gnu')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-x64-gnu/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -338,8 +338,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-linux-arm64-musl')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-arm64-musl/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -354,8 +354,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-linux-arm64-gnu')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-arm64-gnu/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -372,8 +372,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-linux-arm-musleabihf')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-arm-musleabihf/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -388,8 +388,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-linux-arm-gnueabihf')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-arm-gnueabihf/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -406,8 +406,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-linux-loong64-musl')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-loong64-musl/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -422,8 +422,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-linux-loong64-gnu')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-loong64-gnu/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -440,8 +440,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-linux-riscv64-musl')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-riscv64-musl/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -456,8 +456,8 @@ function requireNative() {
         try {
           const binding = require('@d0paminedriven/pdfdown-linux-riscv64-gnu')
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-riscv64-gnu/package.json').version
-          if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-            throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+            throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
           return binding
         } catch (e) {
@@ -473,8 +473,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-linux-ppc64-gnu')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-ppc64-gnu/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -489,8 +489,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-linux-s390x-gnu')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-linux-s390x-gnu/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -509,8 +509,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-openharmony-arm64')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-openharmony-arm64/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -525,8 +525,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-openharmony-x64')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-openharmony-x64/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -541,8 +541,8 @@ function requireNative() {
       try {
         const binding = require('@d0paminedriven/pdfdown-openharmony-arm')
         const bindingPackageVersion = require('@d0paminedriven/pdfdown-openharmony-arm/package.json').version
-        if (bindingPackageVersion !== '0.9.9' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+        if (bindingPackageVersion !== '0.10.0' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
+          throw new Error(`Native binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
         }
         return binding
       } catch (e) {
@@ -683,8 +683,8 @@ if (!nativeBinding || forceWasi) {
       if (!candidateFailed) {
         if (process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
           const bindingPackageVersion = require('@d0paminedriven/pdfdown-wasm32-wasi/package.json').version
-          if (bindingPackageVersion !== '0.9.9') {
-            throw new Error(`WASI binding package version mismatch, expected 0.9.9 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
+          if (bindingPackageVersion !== '0.10.0') {
+            throw new Error(`WASI binding package version mismatch, expected 0.10.0 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
           }
         }
         wasiBinding = require('@d0paminedriven/pdfdown-wasm32-wasi')
@@ -836,19 +836,43 @@ function __napiStampBindingTarget(exportsObject, target) {
 module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __napiLoadedBindingTarget)
 module.exports = nativeBinding
 module.exports.PdfDown = nativeBinding.PdfDown
+module.exports.attachments = nativeBinding.attachments
+module.exports.attachmentsAsync = nativeBinding.attachmentsAsync
 module.exports.BoxType = nativeBinding.BoxType
 module.exports.capabilities = nativeBinding.capabilities
+module.exports.CurrencySource = nativeBinding.CurrencySource
+module.exports.DateOrder = nativeBinding.DateOrder
+module.exports.detectFormat = nativeBinding.detectFormat
+module.exports.detectFormatAsync = nativeBinding.detectFormatAsync
+module.exports.DocumentFormat = nativeBinding.DocumentFormat
+module.exports.EInvoiceStandard = nativeBinding.EInvoiceStandard
 module.exports.extractAnnotationsPerPage = nativeBinding.extractAnnotationsPerPage
 module.exports.extractAnnotationsPerPageAsync = nativeBinding.extractAnnotationsPerPageAsync
+module.exports.extractFormFieldsPerPage = nativeBinding.extractFormFieldsPerPage
+module.exports.extractFormFieldsPerPageAsync = nativeBinding.extractFormFieldsPerPageAsync
 module.exports.extractImagesPerPage = nativeBinding.extractImagesPerPage
 module.exports.extractImagesPerPageAsync = nativeBinding.extractImagesPerPageAsync
+module.exports.extractInvoice = nativeBinding.extractInvoice
+module.exports.extractInvoiceAsync = nativeBinding.extractInvoiceAsync
 module.exports.extractStructuredTextPerPage = nativeBinding.extractStructuredTextPerPage
 module.exports.extractStructuredTextPerPageAsync = nativeBinding.extractStructuredTextPerPageAsync
 module.exports.extractTextPerPage = nativeBinding.extractTextPerPage
 module.exports.extractTextPerPageAsync = nativeBinding.extractTextPerPageAsync
+module.exports.InvoiceDocumentType = nativeBinding.InvoiceDocumentType
+module.exports.invoiceFromLayout = nativeBinding.invoiceFromLayout
+module.exports.invoiceFromLayoutAsync = nativeBinding.invoiceFromLayoutAsync
+module.exports.InvoiceSource = nativeBinding.InvoiceSource
+module.exports.layoutFromXlsx = nativeBinding.layoutFromXlsx
+module.exports.layoutFromXlsxAsync = nativeBinding.layoutFromXlsxAsync
+module.exports.layoutPerPage = nativeBinding.layoutPerPage
+module.exports.layoutPerPageAsync = nativeBinding.layoutPerPageAsync
+module.exports.NumberSubtype = nativeBinding.NumberSubtype
 module.exports.pdfDocument = nativeBinding.pdfDocument
 module.exports.pdfDocumentAsync = nativeBinding.pdfDocumentAsync
 module.exports.pdfMetadata = nativeBinding.pdfMetadata
 module.exports.pdfMetadataAsync = nativeBinding.pdfMetadataAsync
 module.exports.RenderMode = nativeBinding.RenderMode
 module.exports.renderPagesAsync = nativeBinding.renderPagesAsync
+module.exports.spreadsheetCells = nativeBinding.spreadsheetCells
+module.exports.spreadsheetCellsAsync = nativeBinding.spreadsheetCellsAsync
+module.exports.TextSource = nativeBinding.TextSource

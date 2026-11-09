@@ -1,0 +1,183 @@
+import { existsSync, readFileSync } from "fs";
+import { createRequire } from "module";
+import { relative } from "path";
+
+import type { CorpusFile } from "./corpus";
+import { expectedPathFor, parseExpected, toExpected } from "./expected";
+import type { TextClass } from "./fingerprint";
+import { HEADER_FIELDS, aggregate, reconciles, scoreDocument } from "./metrics";
+import type { DocScore, Row, Table } from "./metrics";
+
+/** What the harness takes from `profile.json` for a document, when the profile exists. */
+export interface ProfileLookup {
+  cluster: string | null;
+  textClass: TextClass | null;
+}
+
+export interface EvalFailure {
+  id: string;
+  file: string;
+  error: string;
+}
+
+export interface EvalReport {
+  generatedAt: string;
+  /** PDFs in the corpus. */
+  documents: number;
+  /** PDFs with an expected file that were scored. */
+  scored: number;
+  /** PDFs without an `<id>.expected.json`. */
+  skipped: number;
+  failures: Array<EvalFailure>;
+  /** Expected files whose contents were partly dropped, by id. */
+  expectedWarnings: Array<{ id: string; warnings: Array<string> }>;
+  scores: Array<DocScore>;
+  table: Table;
+}
+
+export interface EvaluateOptions {
+  /** Ids to report as a slice of their own (`--ids`); the harness never knows why they were chosen. */
+  ids?: ReadonlySet<string>;
+  lookup?: ReadonlyMap<string, ProfileLookup>;
+}
+
+/**
+ * A row's amount total is printed only when it sums at least this many documents: with fewer, the
+ * figure is one invoice's total, which never reaches stdout by default.
+ */
+export const MIN_DOCUMENTS_FOR_AMOUNT = 3;
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isTextClass = (v: unknown): v is TextClass => v === "native" || v === "scanned" || v === "mixed";
+
+/** Cluster and text class per id from a parsed `profile.json`; entries it cannot read are skipped. */
+/** Which build scores the corpus: the base package, or the OCR package with `PDFDOWN_EVAL_BUILD=ocr`. */
+export const EVAL_BUILD: "base" | "ocr" = process.env.PDFDOWN_EVAL_BUILD === "ocr" ? "ocr" : "base";
+const { extractInvoice }: Pick<typeof import("../../index"), "extractInvoice"> = createRequire(import.meta.url)(
+  EVAL_BUILD === "ocr" ? "../../ocr/index.js" : "../../index.js"
+);
+
+export function profileLookup(profileJson: unknown): Map<string, ProfileLookup> {
+  const lookup = new Map<string, ProfileLookup>();
+  if (!isRecord(profileJson) || !Array.isArray(profileJson.entries)) return lookup;
+  for (const entry of profileJson.entries) {
+    if (!isRecord(entry) || typeof entry.id !== "string") continue;
+    lookup.set(entry.id, {
+      cluster: typeof entry.fingerprintHeader === "string" ? entry.fingerprintHeader : null,
+      textClass: isTextClass(entry.textClass) ? entry.textClass : null
+    });
+  }
+  return lookup;
+}
+
+/** Score every PDF that has an expected file beside it; skip and count the rest. */
+export function evaluateCorpus(files: ReadonlyArray<CorpusFile>, root: string, options: EvaluateOptions): EvalReport {
+  const pdfs = files.filter((f) => f.kind === "pdf");
+  const scores: Array<DocScore> = [];
+  const failures: Array<EvalFailure> = [];
+  const expectedWarnings: Array<{ id: string; warnings: Array<string> }> = [];
+  let skipped = 0;
+  for (const file of pdfs) {
+    const expectedPath = expectedPathFor(file.path);
+    if (!existsSync(expectedPath)) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      const { expected, warnings } = parseExpected(JSON.parse(readFileSync(expectedPath, "utf8")));
+      if (warnings.length > 0) expectedWarnings.push({ id: file.id, warnings });
+      const result = extractInvoice(readFileSync(file.path));
+      const meta = options.lookup?.get(file.id);
+      scores.push({
+        id: file.id,
+        source: result.source,
+        cluster: meta?.cluster ?? null,
+        textClass: meta?.textClass ?? null,
+        reconciled: reconciles(result),
+        ...scoreDocument(toExpected(result), expected)
+      });
+    } catch (error) {
+      failures.push({
+        id: file.id,
+        file: relative(root, file.path),
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    documents: pdfs.length,
+    scored: scores.length,
+    skipped,
+    failures,
+    expectedWarnings,
+    scores,
+    table: aggregate(scores, { ids: options.ids })
+  };
+}
+
+const pct = (x: number | null): string => (x === null ? "-" : `${(x * 100).toFixed(1)}%`);
+const money = (x: number): string => x.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+const table = (rows: ReadonlyArray<ReadonlyArray<string>>): string => {
+  const widths = rows[0]?.map((_, i) => Math.max(...rows.map((r) => (r[i] ?? "").length))) ?? [];
+  return rows
+    .map((r) =>
+      r
+        .map((cell, i) => cell.padEnd(widths[i] ?? 0))
+        .join("  ")
+        .trimEnd()
+    )
+    .join("\n");
+};
+
+/** One row as a printed block: the header line, then a field table with both weightings. */
+function renderRow(r: Row, out: Array<string>): void {
+  const amount = r.documents >= MIN_DOCUMENTS_FOR_AMOUNT ? `, amount total ${money(r.amountTotal)}` : "";
+  out.push(`${r.label}: ${r.documents} documents, ${r.missingAmounts} without an expected total${amount}`);
+  out.push(
+    table([
+      ["field", "scored", "document-weighted", "amount-weighted"],
+      ...HEADER_FIELDS.map((f) => [
+        f,
+        String(r.fields[f].scored),
+        pct(r.fields[f].documentWeighted),
+        pct(r.fields[f].amountWeighted)
+      ]),
+      ["items (P / R)", String(r.items.documents), pct(r.items.precision), pct(r.items.recall)],
+      ["aircraft (P / R)", String(r.aircraft.documents), pct(r.aircraft.precision), pct(r.aircraft.recall)],
+      ["totals reconcile", String(r.reconciled.documents), pct(r.reconciled.rate), ""]
+    ])
+  );
+  out.push("");
+}
+
+/** The report as printed lines, aggregates only: clusters are named by their fingerprint, never by a vendor or file. */
+export function renderEval(report: EvalReport, maxClusters = 10): Array<string> {
+  const out: Array<string> = [];
+  out.push(
+    `${report.documents} PDFs; ${report.scored} scored against an expected file, ${report.skipped} without one, ${report.failures.length} failed`
+  );
+  if (report.expectedWarnings.length > 0) {
+    out.push(`${report.expectedWarnings.length} expected file(s) had keys or values this harness dropped`);
+  }
+  if (report.scored === 0) {
+    out.push("nothing to score: add <id>.expected.json files beside the PDFs (InvoiceFields vocabulary)");
+    return out;
+  }
+  out.push("");
+  renderRow(report.table.all, out);
+  for (const r of report.table.textClasses) renderRow(r, out);
+  for (const r of report.table.clusters.slice(0, maxClusters)) renderRow(r, out);
+  if (report.table.clusters.length > maxClusters) {
+    out.push(`… ${report.table.clusters.length - maxClusters} smaller clusters in eval.json`, "");
+  }
+  if (report.table.slice !== null) renderRow(report.table.slice, out);
+  while (out.length > 0 && out[out.length - 1] === "") out.pop();
+  return out;
+}
+
+export function printEval(report: EvalReport, maxClusters = 10): void {
+  console.log(`build: ${EVAL_BUILD}`);
+  console.log(renderEval(report, maxClusters).join("\n"));
+}

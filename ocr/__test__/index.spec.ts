@@ -8,8 +8,12 @@ import {
   extractTextWithOcrPerPageAsync,
   extractTextPerPage,
   extractImagesPerPage,
+  extractFormFieldsPerPage,
+  attachments,
+  extractInvoice,
+  pdfDocumentOcr,
   PdfDown,
-  capabilities,
+  capabilities
 } from "../index";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -25,18 +29,14 @@ const multipageOcr = readFileSync(join(FIXTURES, "multipage-ocr.pdf"));
 // Single-page scan whose only image XObject is declared with a filter chain,
 // /Filter [ /ASCII85Decode /DCTDecode ] (ReportLab output). Regression fixture for the
 // DCT/JPX fast path handing ASCII85 text to the JPEG decoder and silently dropping the image.
-const ascii85DctScan = readFileSync(
-  join(import.meta.dirname, "../../__test__/fixtures/ascii85-dct-scan.pdf"),
-);
+const ascii85DctScan = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/ascii85-dct-scan.pdf"));
 
 // One of the existing test PDFs (has native text)
-const PDF_URL =
-  "https://assets.aicoalesce.com/upload/nrr6h4r4480f6kviycyo1zhf/1767766786190-Lollaclaudplooza-Pt-I.pdf";
+const PDF_URL = "https://assets.aicoalesce.com/upload/nrr6h4r4480f6kviycyo1zhf/1767766786190-Lollaclaudplooza-Pt-I.pdf";
 
 const fetcher = async (target: string) => await fetch(target);
 const nativeRes = await fetcher(PDF_URL);
-if (!nativeRes.ok)
-  throw new Error(`Failed to fetch PDF: ${nativeRes.status} ${nativeRes.statusText}`);
+if (!nativeRes.ok) throw new Error(`Failed to fetch PDF: ${nativeRes.status} ${nativeRes.statusText}`);
 const nativePdf = Buffer.from(await nativeRes.arrayBuffer());
 
 // ── OCR on image-only PDFs ───────────────────────────────────────────────────
@@ -94,11 +94,7 @@ test("extractImagesPerPage — enumerates a DCT image declared behind an ASCII85
   t.is(images[0].bitsPerComponent, 8);
   t.is(images[0].width, 1240);
   t.is(images[0].height, 1754);
-  t.deepEqual(
-    [...images[0].data.subarray(0, 4)],
-    [0x89, 0x50, 0x4e, 0x47],
-    "decoded payload is re-encoded as PNG",
-  );
+  t.deepEqual([...images[0].data.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], "decoded payload is re-encoded as PNG");
 });
 
 test("extractTextWithOcrPerPage — OCRs a DCT image declared behind an ASCII85 filter chain", (t) => {
@@ -109,10 +105,7 @@ test("extractTextWithOcrPerPage — OCRs a DCT image declared behind an ASCII85 
 
   const normalized = pages[0].text.toLowerCase().replace(/\s+/g, "");
   t.true(normalized.length > 500, `expected > 500 non-whitespace chars, got ${normalized.length}`);
-  t.true(
-    normalized.includes("scanneddocumentsample"),
-    `got: "${pages[0].text.trim().slice(0, 80)}"`,
-  );
+  t.true(normalized.includes("scanneddocumentsample"), `got: "${pages[0].text.trim().slice(0, 80)}"`);
   t.log(`OCR result (first 80 chars): "${pages[0].text.trim().slice(0, 80)}"`);
 });
 
@@ -143,6 +136,17 @@ test("extractTextWithOcrPerPageAsync — native text PDF matches sync", async (t
   }
 });
 
+// ── Hybrid pages ─────────────────────────────────────────────────────────────
+
+test("extractTextWithOcrPerPage — a stamped scan keeps the native stamp in front of the OCR text", (t) => {
+  const stamped = readFileSync(join(FIXTURES, "stamped-scan.pdf"));
+  const [p1] = extractTextWithOcrPerPage(stamped, { render: "Never" });
+  t.is(p1.source, "Ocr");
+  t.true(p1.text.includes("4711"), p1.text);
+  t.true(p1.text.toLowerCase().includes("hello"), p1.text);
+  t.true(p1.text.indexOf("4711") < p1.text.toLowerCase().indexOf("hello"), "stamp first");
+});
+
 // ── OcrOptions: minTextLength forcing OCR fallback ───────────────────────────
 
 test("extractTextWithOcrPerPage — high minTextLength forces OCR on native pages", (t) => {
@@ -155,7 +159,7 @@ test("extractTextWithOcrPerPage — high minTextLength forces OCR on native page
 
   const renderedPages = pages.filter((p) => p.source === "Rendered");
   t.log(
-    `With minTextLength=999999: OCR=${ocrPages.length}, Native=${nativePages.length}, Rendered=${renderedPages.length}`,
+    `With minTextLength=999999: OCR=${ocrPages.length}, Native=${nativePages.length}, Rendered=${renderedPages.length}`
   );
 
   for (const p of pages) {
@@ -163,7 +167,7 @@ test("extractTextWithOcrPerPage — high minTextLength forces OCR on native page
     t.is(typeof p.text, "string", "text should be a string");
     t.true(
       p.source === "Native" || p.source === "Ocr" || p.source === "Rendered",
-      `source should be a valid TextSource, got: ${p.source}`,
+      `source should be a valid TextSource, got: ${p.source}`
     );
   }
 });
@@ -241,6 +245,15 @@ test("base API: PdfDown class methods work through OCR package", (t) => {
   t.is(text.length, meta.pageCount);
 });
 
+test("base API: attachments and extractInvoice work through OCR package", (t) => {
+  const facturx = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/einvoice/facturx-minimal.pdf"));
+  t.is(attachments(facturx).length, 1);
+  const r = extractInvoice(facturx);
+  t.is(r.source, "EmbeddedXml");
+  t.is(r.fields.invoiceId?.value, "INV-2026-0042");
+  t.is(new PdfDown(facturx).invoice().fields.invoiceTotal?.value, 833);
+});
+
 // ── Render + Three-tier cascade tests ────────────────────────────────────────
 
 const chemPdf = readFileSync(join(FIXTURES, "advanced_organic_chem_presentation_autumn_2014.pdf"));
@@ -270,7 +283,7 @@ if (caps.render) {
       pdf.renderPagesAsync({ mode: "Auto", dpi: 300 }),
       pdf.textWithOcrPerPageAsync({ render: "Auto" }),
       pdf.textWithOcrPerPageAsync({ render: "Never" }),
-      pdf.textWithOcrPerPageAsync({ render: "Always" }),
+      pdf.textWithOcrPerPageAsync({ render: "Always" })
     ]);
 
     // renderPagesAsync: all pages (Always mode)
@@ -307,3 +320,12 @@ if (caps.render) {
     t.pass();
   });
 }
+
+test("base API: extractFormFieldsPerPage and documentOcr form aggregates work through OCR package", (t) => {
+  const basic = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/forms/acroform-basic.pdf"));
+  t.is(extractFormFieldsPerPage(basic).length, 11);
+  const doc = pdfDocumentOcr(basic);
+  t.is(doc.totalFormFields, 11);
+  t.deepEqual(doc.formFieldPages, [1]);
+  t.is(doc.form?.fieldCount, 9);
+});

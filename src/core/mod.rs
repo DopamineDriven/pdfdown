@@ -1,6 +1,11 @@
+pub(crate) mod attachments;
 pub(crate) mod document;
+pub(crate) mod forms;
 pub(crate) mod images;
+pub(crate) mod invoice;
+pub(crate) mod layout;
 pub(crate) mod meta;
+pub(crate) mod spreadsheet;
 pub(crate) mod text;
 
 #[cfg(feature = "ocr")]

@@ -1,6 +1,6 @@
 {
   "name": "@d0paminedriven/pdfdown",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Rust powered PDF extraction for Node",
   "keywords": [
     "N-API",
@@ -30,12 +30,15 @@
     "artifacts": "napi artifacts",
     "artifacts:ocr": "napi artifacts --package-json-path ocr/package.json --npm-dir ocr/npm",
     "bench": "node --import @oxc-node/core/register benchmark/bench.ts",
-    "build": "napi build --platform --release --no-const-enum --features render",
-    "build:debug": "napi build --platform --no-const-enum --features render",
-    "build:ocr": "napi build --platform --release --no-const-enum --features ocr,render --package-json-path ocr/package.json --output-dir ocr",
+    "build": "node scripts/build.mjs",
+    "build:debug": "node scripts/build.mjs --debug",
+    "build:ocr": "node scripts/build.mjs --ocr",
+    "corpus:profile": "tsx scripts/corpus-profile.ts",
+    "invoice:eval": "tsx scripts/invoice-eval.ts",
+    "invoice:from-azure": "tsx scripts/invoice-from-azure.ts",
     "create-npm-dirs:ocr": "napi create-npm-dirs --package-json-path ocr/package.json --npm-dir ocr/npm",
-    "format": "run-p format:prettier format:rs format:toml",
-    "format:prettier": "prettier . -w",
+    "format": "run-p format:oxfmt format:rs format:toml",
+    "format:oxfmt": "oxfmt",
     "format:toml": "taplo format",
     "format:rs": "cargo fmt",
     "lint": "oxlint .",
@@ -45,45 +48,54 @@
     "test:ocr": "ava --config ocr/ava.config.mjs",
     "preversion": "napi build --platform --no-const-enum && git add .",
     "version": "napi version",
-    "prepare": "husky"
+    "prepare": "husky",
+    "typecheck": "tsgo --noEmit --strict --ignoreConfig --module esnext --moduleResolution bundler --types node scripts/*.ts scripts/lib/*.ts scripts/__test__/*.spec.ts __test__/spreadsheet.types.ts __test__/forms.types.ts __test__/invoice.types.ts __test__/layout.types.ts ocr/__test__/forms.types.ts ocr/__test__/invoice.types.ts ocr/__test__/layout.types.ts ocr/__test__/spreadsheet.types.ts"
   },
   "devDependencies": {
+    "@ava/typescript": "^7.0.0",
+    "@azure-rest/ai-document-intelligence": "^1.1.0",
+    "@d0paminedriven/fs": "^11.0.0",
     "@emnapi/core": "2.0.0-alpha.5",
     "@emnapi/runtime": "2.0.0-alpha.5",
-    "@napi-rs/cli": "^3.10.9",
-    "@napi-rs/wasm-runtime": "^1.2.6",
+    "@napi-rs/cli": "^3.10.12",
+    "@napi-rs/wasm-runtime": "^1.2.7",
     "@oxc-node/core": "^1.0.1",
     "@oxc-node/core-wasm32-wasi": "^1.0.1",
     "@taplo/cli": "^0.7.0",
     "@tybys/wasm-util": "^0.10.4",
     "@types/node": "^26.6.6",
-    "ava": "^8.2.0",
+    "@typescript/native-preview": "^7.0.0-dev.20260707.2",
+    "ava": "^8.3.0",
     "chalk": "^6.0.1",
+    "dotenv": "^18.0.9",
     "emnapi": "2.0.0-alpha.5",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
     "npm-run-all2": "^9.0.4",
-    "oxfmt": "^0.73.0",
-    "oxlint": "^1.90.0",
-    "prettier": "^3.9.10",
-    "tinybench": "^6.2.2",
-    "tslib": "^2.8.1",
+    "oxfmt": "^0.76.0",
+    "oxlint": "^1.91.0",
+    "tinybench": "^6.2.3",
+    "tslib": "^2.9.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
   "resolutions": {
-    "@napi-rs/wasm-runtime": "1.2.5"
+    "@napi-rs/wasm-runtime": "1.2.7"
   },
   "lint-staged": {
     "*.@(js|ts|tsx)": [
       "oxlint --fix"
     ],
-    "*.@(js|ts|tsx|yml|yaml|md|json|toml)": [
+    "*.@(js|ts|tsx|yml|yaml|md|json)": [
       "oxfmt --write"
+    ],
+    "*.toml": [
+      "taplo format"
     ]
   },
   "napi": {
     "binaryName": "pdfdown",
+    "dtsHeaderFile": "types/dts-header.ts",
     "targets": [
       "x86_64-pc-windows-msvc",
       "x86_64-apple-darwin",
@@ -101,13 +113,6 @@
       "wasm32-wasip1-threads"
     ]
   },
-  "prettier": {
-    "arrowParens": "always",
-    "printWidth": 120,
-    "semi": false,
-    "singleQuote": true,
-    "trailingComma": "all"
-  },
   "ava": {
     "environmentVariables": {
       "OXC_TSCONFIG_PATH": "./__test__/tsconfig.json"
@@ -116,13 +121,14 @@
       "ts"
     ],
     "files": [
-      "__test__/**/*.spec.ts"
+      "__test__/**/*.spec.ts",
+      "scripts/__test__/*.spec.ts"
     ],
     "nodeArguments": [
       "--import",
       "@oxc-node/core/register"
     ],
-    "timeout": "2m",
+    "timeout": "10m",
     "workerThreads": false
   },
   "engines": {
