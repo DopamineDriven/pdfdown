@@ -128,7 +128,7 @@
       "--import",
       "@oxc-node/core/register"
     ],
-    "timeout": "1h",
+    "timeout": "60m",
     "workerThreads": false
   },
   "engines": {
