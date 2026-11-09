@@ -44,9 +44,6 @@ render  = ["pdfium-render"]
 
 [build-dependencies]
 napi-build = "2.6.0"
-# 0.2.16–0.2.17 broke the OpenSSL fallback path (missing Tlsv13 arm) on older
-# system OpenSSL; fixed in 0.2.18.
-native-tls = "0.2.18"
 
 [profile.release]
 lto   = true
