@@ -161,7 +161,7 @@ fn parse_number(digits: &str, sep: Separator) -> Option<f64> {
       } else if count == 1 && after != 3 {
         Some(c)
       } else if count == 1 {
-        Some(c).filter(|_| c == doc_decimal)
+        (c == doc_decimal).then_some(c)
       } else {
         None
       }
