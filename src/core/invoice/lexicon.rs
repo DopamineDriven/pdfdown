@@ -340,6 +340,12 @@ pub(crate) const LABELS: &[Label] = &[
   l(Registration, "Reg.", "en"),
   l(Registration, "A/C Reg.", "en"),
   l(Registration, "Aircraft Reg", "en"),
+  l(Registration, "Aircraft Number", "en"),
+  l(Registration, "Aircraft No.", "en"),
+  l(Registration, "A/C Number", "en"),
+  l(Registration, "A/C No.", "en"),
+  l(Registration, "A/C Reg", "en"),
+  l(Registration, "Aircraft Reg.", "en"),
   l(Registration, "Immatriculation", "fr"),
   l(Registration, "Matrícula", "es"),
   l(Registration, "Siglas", "es"),
@@ -1064,6 +1070,11 @@ mod tests {
     assert!(is_document_title(&["Maintenance", "Reimbursement", "Form"]));
     assert!(is_document_title(&["FACTURE", "/", "INVOICE"]));
     assert!(is_document_title(&["PRESUPUESTO"]));
+    let reg = find_labels(&["Aircraft", "Number:", "N92"], Some(Field::Registration));
+    assert_eq!(
+      reg[0].remainder, "N92",
+      "a fleet-style label still names the registration"
+    );
     assert!(is_document_title(&["Devis"]));
     assert!(!is_document_title(&["ACME", "AVIATION", "SERVICES"]));
   }
