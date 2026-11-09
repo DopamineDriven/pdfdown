@@ -68,43 +68,43 @@ jobs:
         settings:
           - host: macos-latest
             target: x86_64-apple-darwin
-            build: yarn build --target x86_64-apple-darwin
+            build: yarn napi build --platform --release --no-const-enum --features render --target x86_64-apple-darwin
           - host: windows-latest
-            build: yarn build --target x86_64-pc-windows-msvc
+            build: yarn napi build --platform --release --no-const-enum --features render --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
           - host: windows-latest
-            build: yarn build --target i686-pc-windows-msvc
+            build: yarn napi build --platform --release --no-const-enum --features render --target i686-pc-windows-msvc
             target: i686-pc-windows-msvc
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            build: yarn build --target x86_64-unknown-linux-gnu --use-napi-cross
+            build: yarn napi build --platform --release --no-const-enum --features render --target x86_64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            build: yarn build --target x86_64-unknown-linux-musl -x
+            build: yarn napi build --platform --release --no-const-enum --features render --target x86_64-unknown-linux-musl -x
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: yarn build --target aarch64-apple-darwin
+            build: yarn napi build --platform --release --no-const-enum --features render --target aarch64-apple-darwin
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            build: yarn build --target aarch64-unknown-linux-gnu --use-napi-cross
+            build: yarn napi build --platform --release --no-const-enum --features render --target aarch64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
-            build: yarn build --target armv7-unknown-linux-gnueabihf --use-napi-cross
+            build: yarn napi build --platform --release --no-const-enum --features render --target armv7-unknown-linux-gnueabihf --use-napi-cross
           - host: ubuntu-latest
             target: aarch64-linux-android
-            build: yarn build --target aarch64-linux-android
+            build: yarn napi build --platform --release --no-const-enum --features render --target aarch64-linux-android
           - host: ubuntu-latest
             target: armv7-linux-androideabi
-            build: yarn build --target armv7-linux-androideabi
+            build: yarn napi build --platform --release --no-const-enum --features render --target armv7-linux-androideabi
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            build: yarn build --target aarch64-unknown-linux-musl -x
+            build: yarn napi build --platform --release --no-const-enum --features render --target aarch64-unknown-linux-musl -x
           - host: windows-latest
             target: aarch64-pc-windows-msvc
-            build: yarn build --target aarch64-pc-windows-msvc
+            build: yarn napi build --platform --release --no-const-enum --features render --target aarch64-pc-windows-msvc
           - host: ubuntu-latest
             target: wasm32-wasip1-threads
-            build: yarn build --target wasm32-wasip1-threads
+            build: yarn napi build --platform --release --no-const-enum --features render --target wasm32-wasip1-threads
     name: stable - ${{ matrix.settings.target }} - node@26
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -186,13 +186,13 @@ jobs:
         settings:
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: yarn build:ocr --target aarch64-apple-darwin
+            build: yarn napi build --platform --release --no-const-enum --features ocr,render --package-json-path ocr/package.json --output-dir ocr --js pdfdown_ocr.napi.js --target aarch64-apple-darwin
           - host: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            build: yarn build:ocr --target x86_64-unknown-linux-gnu
+            build: yarn napi build --platform --release --no-const-enum --features ocr,render --package-json-path ocr/package.json --output-dir ocr --js pdfdown_ocr.napi.js --target x86_64-unknown-linux-gnu
           - host: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
-            build: yarn build:ocr --target aarch64-unknown-linux-gnu
+            build: yarn napi build --platform --release --no-const-enum --features ocr,render --package-json-path ocr/package.json --output-dir ocr --js pdfdown_ocr.napi.js --target aarch64-unknown-linux-gnu
     name: OCR - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -329,7 +329,7 @@ jobs:
             env
             freebsd-version
             yarn install
-            yarn build
+            yarn napi build --platform --release --no-const-enum --features render
             rm -rf node_modules
             rm -rf target
             rm -rf .yarn/cache
