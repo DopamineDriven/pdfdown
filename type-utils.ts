@@ -104,4 +104,8 @@ export type FlexiRepeater<
 > = RO extends true
   ? RepeatRO<T, Exclude<NumUnion<Max> | Max, NumUnion<Min>>>
   : Repeat<T, Exclude<NumUnion<Max> | Max, NumUnion<Min>>>;
-  
+
+
+export type DX<Y> = {
+  [P in keyof Y]: Y[P];
+};
