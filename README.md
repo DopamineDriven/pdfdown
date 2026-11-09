@@ -5,7 +5,7 @@
 Rust-powered PDF extraction for Node.js via [napi-rs](https://napi.rs). Extracts per-page text, images (as PNG), annotations (links, destinations), structured text (with header/footer detection), AcroForm fields (read-only, one entry per widget placement), and metadata from PDF buffers. All extraction is parallelized with [rayon](https://github.com/rayon-rs/rayon) for multi-core performance.
 
 An OCR variant is available as [`@d0paminedriven/pdfdown-ocr`](https://www.npmjs.com/package/@d0paminedriven/pdfdown-ocr) for image-only PDF pages (scanned documents, embedded screenshots). It includes all of the APIs below plus Tesseract-based OCR fallback.
-
+ 
 ## Install
 
 ```bash
