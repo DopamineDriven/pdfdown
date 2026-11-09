@@ -128,8 +128,10 @@ fn code_of(bytes: &[u8]) -> Option<(u8, u32)> {
 /// Destination bytes are UTF-16BE: one or more code units, surrogate pairs allowed.
 fn units_of(bytes: &[u8]) -> Vec<u16> {
   bytes
-    .chunks_exact(2)
-    .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+    .as_chunks::<2>()
+    .0
+    .iter()
+    .map(|pair| u16::from_be_bytes(*pair))
     .collect()
 }
 
