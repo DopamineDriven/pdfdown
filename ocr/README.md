@@ -33,7 +33,7 @@ Verify with `tesseract --version` -- you should see 5.x.
 
 The package automatically detects the tessdata directory at runtime by parsing the output of `tesseract --list-langs`. The detected path is cached for the lifetime of the process using a `OnceLock<Option<String>>` -- no global environment mutation, fully thread-safe.
 
-**Resolution order:**
+**Resolution order:** 
 
 1. `TESSDATA_PREFIX` environment variable (if set, used as-is -- no auto-detection runs)
 2. Auto-detection via `tesseract --list-langs` (parses the path from `List of available languages in "/path/to/tessdata/"`)
