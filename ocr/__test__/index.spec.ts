@@ -42,6 +42,7 @@ const nativePdf = Buffer.from(await nativeRes.arrayBuffer());
 // ── OCR on image-only PDFs ───────────────────────────────────────────────────
 
 test("extractTextWithOcrPerPage (sync) — extracts text from single-page image-only PDF", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const pages = extractTextWithOcrPerPage(helloOcr);
 
   t.is(pages.length, 1, "should have exactly 1 page");
@@ -57,6 +58,7 @@ test("extractTextWithOcrPerPage (sync) — extracts text from single-page image-
 });
 
 test("extractTextWithOcrPerPageAsync — matches sync for image-only PDF", async (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const sync = extractTextWithOcrPerPage(helloOcr);
   const async_ = await extractTextWithOcrPerPageAsync(helloOcr);
 
@@ -66,6 +68,7 @@ test("extractTextWithOcrPerPageAsync — matches sync for image-only PDF", async
 });
 
 test("extractTextWithOcrPerPage — multi-page image-only PDF returns 3 pages", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const pages = extractTextWithOcrPerPage(multipageOcr);
 
   t.is(pages.length, 3, "should have 3 pages");
@@ -98,6 +101,7 @@ test("extractImagesPerPage — enumerates a DCT image declared behind an ASCII85
 });
 
 test("extractTextWithOcrPerPage — OCRs a DCT image declared behind an ASCII85 filter chain", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const pages = extractTextWithOcrPerPage(ascii85DctScan);
 
   t.is(pages.length, 1);
@@ -112,6 +116,7 @@ test("extractTextWithOcrPerPage — OCRs a DCT image declared behind an ASCII85 
 // ── OCR with native text PDF (should use Native source) ──────────────────────
 
 test("extractTextWithOcrPerPage — native text PDF uses Native source", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const pages = extractTextWithOcrPerPage(nativePdf);
 
   t.true(pages.length > 0, "should have pages");
@@ -125,6 +130,7 @@ test("extractTextWithOcrPerPage — native text PDF uses Native source", (t) => 
 });
 
 test("extractTextWithOcrPerPageAsync — native text PDF matches sync", async (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const sync = extractTextWithOcrPerPage(nativePdf);
   const async_ = await extractTextWithOcrPerPageAsync(nativePdf);
 
@@ -139,6 +145,7 @@ test("extractTextWithOcrPerPageAsync — native text PDF matches sync", async (t
 // ── Hybrid pages ─────────────────────────────────────────────────────────────
 
 test("extractTextWithOcrPerPage — a stamped scan keeps the native stamp in front of the OCR text", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const stamped = readFileSync(join(FIXTURES, "stamped-scan.pdf"));
   const [p1] = extractTextWithOcrPerPage(stamped, { render: "Never" });
   t.is(p1.source, "Ocr");
@@ -150,6 +157,7 @@ test("extractTextWithOcrPerPage — a stamped scan keeps the native stamp in fro
 // ── OcrOptions: minTextLength forcing OCR fallback ───────────────────────────
 
 test("extractTextWithOcrPerPage — high minTextLength forces OCR on native pages", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   // Set absurdly high threshold so even pages with native text fall back to OCR
   const pages = extractTextWithOcrPerPage(nativePdf, { render: "Auto", minTextLength: 999999 });
 
@@ -175,6 +183,7 @@ test("extractTextWithOcrPerPage — high minTextLength forces OCR on native page
 // ── OcrOptions: maxThreads ───────────────────────────────────────────────────
 
 test("extractTextWithOcrPerPage — maxThreads=1 produces same results", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const defaultResult = extractTextWithOcrPerPage(helloOcr);
   const singleThread = extractTextWithOcrPerPage(helloOcr, { maxThreads: 1 });
 
@@ -186,6 +195,7 @@ test("extractTextWithOcrPerPage — maxThreads=1 produces same results", (t) => 
 // ── PdfDown class OCR methods ────────────────────────────────────────────────
 
 test("PdfDown.textWithOcrPerPage (sync) — image-only PDF", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const pdf = new PdfDown(helloOcr);
   const standalone = extractTextWithOcrPerPage(helloOcr);
   const classResult = pdf.textWithOcrPerPage();
@@ -196,6 +206,7 @@ test("PdfDown.textWithOcrPerPage (sync) — image-only PDF", (t) => {
 });
 
 test("PdfDown.textWithOcrPerPageAsync — image-only PDF", async (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const pdf = new PdfDown(helloOcr);
   const standalone = extractTextWithOcrPerPage(helloOcr);
   const classResult = await pdf.textWithOcrPerPageAsync();
@@ -208,6 +219,7 @@ test("PdfDown.textWithOcrPerPageAsync — image-only PDF", async (t) => {
 // ── Superset: base APIs still work through OCR package ───────────────────────
 
 test("base API: extractTextPerPage works through OCR package", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const pages = extractTextPerPage(nativePdf);
 
   t.true(Array.isArray(pages), "should return an array");
@@ -220,6 +232,7 @@ test("base API: extractTextPerPage works through OCR package", (t) => {
 });
 
 test("base API: extractImagesPerPage works through OCR package", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const images = extractImagesPerPage(nativePdf);
 
   t.true(Array.isArray(images), "should return an array");
@@ -235,6 +248,7 @@ test("base API: extractImagesPerPage works through OCR package", (t) => {
 });
 
 test("base API: PdfDown class methods work through OCR package", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const pdf = new PdfDown(nativePdf);
 
   const meta = pdf.metadata();
@@ -246,6 +260,7 @@ test("base API: PdfDown class methods work through OCR package", (t) => {
 });
 
 test("base API: attachments and extractInvoice work through OCR package", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const facturx = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/einvoice/facturx-minimal.pdf"));
   t.is(attachments(facturx).length, 1);
   const r = extractInvoice(facturx);
@@ -322,6 +337,7 @@ if (caps.render) {
 }
 
 test("base API: extractFormFieldsPerPage and documentOcr form aggregates work through OCR package", (t) => {
+  t.timeout(10 * 60 * 1000, "OCR runs for seconds per page on a CI runner");
   const basic = readFileSync(join(import.meta.dirname, "../../__test__/fixtures/forms/acroform-basic.pdf"));
   t.is(extractFormFieldsPerPage(basic).length, 11);
   const doc = pdfDocumentOcr(basic);
