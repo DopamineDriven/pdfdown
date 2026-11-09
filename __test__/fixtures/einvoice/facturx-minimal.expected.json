@@ -6,7 +6,7 @@
   "purchaseOrder": "PO-7788",
   "documentType": "Invoice",
   "vendorName": "Acme Aviation Parts GmbH",
-  "customerName": "Jet Support Services, Inc.",
+  "customerName": "Skyline Charter LLC",
   "items": [
     {
       "productCode": "HPS-220",

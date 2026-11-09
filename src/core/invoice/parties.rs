@@ -265,7 +265,7 @@ pub(crate) fn party_block(segments: &[Segment], hits: &[Vec<Hit>], field: Field)
     let s = &segments[i];
     let lines = block_under(segments, hits, s);
     let mut id = None;
-    // A label alone in its column (`CLIENTE: | J.S.S.I.`) names the party in the next column:
+    // A label alone in its column (`CLIENTE: | Skyline Charter`) names the party in the next column:
     // the nearest unlabelled segment to its right on the same baseline, with the block under it.
     if hit.remainder.is_empty()
       && let Some(j) = right_neighbour(segments, hits, s)
