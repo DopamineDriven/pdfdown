@@ -46,6 +46,14 @@ export function discoverCorpus(root: string): Array<CorpusFile> {
   return files.sort(byId);
 }
 
+/**
+ * `path` relative to `root` with `/` separators on every platform: output rows carry file paths
+ * as identifiers, and an identifier must not change between Linux and Windows.
+ */
+export function posixRelative(root: string, path: string): string {
+  return relative(root, path).split(sep).join("/");
+}
+
 /** `$PDFDOWN_INVOICE_CORPUS`, else the repo's gitignored private fixture directory. */
 export function corpusRoot(): string {
   return process.env.PDFDOWN_INVOICE_CORPUS ?? DEFAULT_ROOT;

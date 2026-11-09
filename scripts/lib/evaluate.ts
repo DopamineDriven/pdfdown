@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
-import { relative } from "path";
 
+import { posixRelative } from "./corpus";
 import type { CorpusFile } from "./corpus";
 import { expectedPathFor, parseExpected, toExpected } from "./expected";
 import type { TextClass } from "./fingerprint";
@@ -99,7 +99,7 @@ export function evaluateCorpus(files: ReadonlyArray<CorpusFile>, root: string, o
     } catch (error) {
       failures.push({
         id: file.id,
-        file: relative(root, file.path),
+        file: posixRelative(root, file.path),
         error: error instanceof Error ? error.message : String(error)
       });
     }

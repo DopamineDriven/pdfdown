@@ -1,8 +1,8 @@
 import { readFileSync } from "fs";
-import { relative } from "path";
 
 import { attachments, extractInvoice, layoutPerPage, pdfMetadata } from "../../index";
 import type { EInvoiceStandard, InvoiceSource } from "../../index";
+import { posixRelative } from "./corpus";
 import type { CorpusFile } from "./corpus";
 import { fingerprintFonts, fingerprintHeader, producerFamily, sizeClass, textClass } from "./fingerprint";
 import type { SizeClass, TextClass } from "./fingerprint";
@@ -160,7 +160,7 @@ const clusterSizes = (entries: ReadonlyArray<ProfileEntry>, key: (e: ProfileEntr
 
 function profileFile(file: CorpusFile, root: string): ProfileEntry | ProfileFailure {
   const buf = readFileSync(file.path);
-  const base = { id: file.id, file: relative(root, file.path), bytes: buf.length };
+  const base = { id: file.id, file: posixRelative(root, file.path), bytes: buf.length };
   try {
     const meta = pdfMetadata(buf);
     const started = performance.now();
