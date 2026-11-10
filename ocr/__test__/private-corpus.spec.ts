@@ -4,7 +4,7 @@
 // package's private-corpus spec covers the native ones. Results go to
 // report-ocr.json next to the PDFs.
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { join, relative } from "path";
 import {Fs} from "@d0paminedriven/fs";
 
@@ -13,8 +13,8 @@ import test from "ava";
 import { detectFormat, extractLayoutWithOcrPerPage, layoutPerPage } from "@/ocr/index";
 import type { PageLayout, TextSource, TextWord } from "@/ocr/index";
 import { discoverCorpus } from "@/scripts/lib/corpus";
-import type { FlexiRepeater } from "@/type-utils";
-type Box = FlexiRepeater<number, false, 4, 4>;
+import type { Repeater } from "@d0paminedriven/type-utils";
+type Box = Repeater<number, false, 4, 4>;
 const within = (w: TextWord, b: Box) => w.x0 >= b[0] - 1 && w.x1 <= b[2] + 1 && w.y0 >= b[1] - 1 && w.y1 <= b[3] + 1;
 const fs = new Fs(process.cwd());
 /**
@@ -68,8 +68,8 @@ const scanned = fs.exists(dirPath)
     })
   : [];
 
-const xlsxFiles=Array.of<string>();
-const pdfFiles=Array.of<string>();
+// const xlsxFiles=Array.of<string>();
+// const pdfFiles=Array.of<string>();
 
 
 

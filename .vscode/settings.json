@@ -1,8 +1,11 @@
 {
   "editor.bracketPairColorization.enabled": false,
   "prettier.arrowParens": "always",
+  "[rust]": {"editor.defaultFormatter": "rust-lang.rust-analyzer"},
   "prettier.jsxSingleQuote": true,
   "prettier.bracketSameLine": true,
   "prettier.trailingComma": "none",
-  "js/ts.tsdk.path": "node_modules/@typescript/native-preview"
+  "js/ts.tsdk.path": "node_modules/@typescript/native-preview",
+  "js/ts.hover.maximumLength": 1000,
+  "js/ts.tsdk.promptToUseWorkspaceVersion": true
 }
