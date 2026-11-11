@@ -1,16 +1,9 @@
 // Type-level assertions over the generated layout declarations. Not an ava spec:
 // checked by `yarn typecheck`. Flip a literal to see it fail.
 
-import type {
-  IsExact,
-  OnlyOptional,
-  OnlyRequired,
-  PageLayout,
-  PlacedImage,
-  TextLine,
-  TextSource,
-  TextWord
-} from "../index";
+import type { IsExact, OnlyOptional, OnlyRequired } from "@d0paminedriven/type-utils";
+
+import type { PageLayout, PlacedImage, TextLine, TextSource, TextWord } from "../index";
 import type { layoutPerPage } from "../index";
 
 // `TextSource` is one union in every build; `Rendered` only ever appears at runtime with PDFium,

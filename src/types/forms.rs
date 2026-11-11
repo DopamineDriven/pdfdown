@@ -25,7 +25,7 @@ pub struct UnplacedFormField {
   pub field_object_id: String,
   pub name: String,
   pub partial_name: String,
-  #[napi(js_name = "type", ts_type = "FormFieldType")]
+  #[napi(js_name = "type", ts_type = "PageFormField[\"type\"]")]
   pub kind: String,
   pub value: Option<String>,
   /// Multi-select list boxes.

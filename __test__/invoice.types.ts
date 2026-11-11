@@ -1,3 +1,5 @@
+import type { IsExact } from "@d0paminedriven/type-utils";
+
 import type {
   AircraftReference,
   Attachment,
@@ -7,7 +9,6 @@ import type {
   InvoiceOptions,
   InvoiceResult,
   InvoiceSource,
-  IsExact,
   MoneyField,
   PageLayout,
   StringField

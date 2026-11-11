@@ -1,6 +1,6 @@
 {
   "name": "@d0paminedriven/pdfdown-ocr",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Rust powered PDF extraction for Node with OCR fallback (requires system tesseract).",
   "license": "MIT",
   "repository": {
@@ -21,9 +21,6 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
-  },
-  "dependencies": {
-    "@d0paminedriven/type-utils": "^1.3.0"
   },
   "napi": {
     "binaryName": "pdfdown_ocr",

@@ -293,7 +293,7 @@ export interface UnplacedFormField {
   fieldObjectId: string;
   name: string;
   partialName: string;
-  type: FormFieldType;
+  type: PageFormField["type"];
   value?: string;
   values?: Array<string>;
   defaultValue?: string;
@@ -319,12 +319,15 @@ Buttons keep the spec's two representations apart: `onState` is the appearance s
 
 ### Utility types
 
-Every `index.d.ts` starts with a small set of type utilities (`Rm`, `XOR`, `CTR`, `RTC`, `UTR`, `IsExact`, `Equal`, …) and three aliases derived from the generated declarations:
+The declarations are self-contained: they import nothing and export only what the binding produces. The keyed views of the form-field union are a line each with `@d0paminedriven/type-utils` (or any equivalent helper):
 
 ```typescript
-export type FormFieldType = PageFormField["type"]; // "Text" | "Checkbox" | …
-export type FormFieldByType = UTR<PageFormField, "type", true>; // { Text: {…}, Checkbox: {…}, … } without the discriminant
-export type FormFieldPayload<T extends keyof FormFieldByType = keyof FormFieldByType> = {
+import type { PageFormField } from "@d0paminedriven/pdfdown";
+import type { UTR } from "@d0paminedriven/type-utils";
+
+type FormFieldType = PageFormField["type"]; // "Text" | "Checkbox" | …
+type FormFieldByType = UTR<PageFormField, "type", true>; // { Text: {…}, Checkbox: {…}, … } without the discriminant
+type FormFieldPayload<T extends keyof FormFieldByType = keyof FormFieldByType> = {
   [P in T]: FormFieldByType[P];
 }[T]; // one or more variants' payloads, by key
 

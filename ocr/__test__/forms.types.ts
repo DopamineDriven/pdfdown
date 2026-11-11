@@ -1,14 +1,14 @@
-import type {
-  Equal,
-  FormFieldByType,
-  FormFieldPayload,
-  FormFieldType,
-  IsExact,
-  PageFormField,
-  Rm,
-  UnplacedFormField
-} from "../index";
+import type { Equal, IsExact, Rm, UTR } from "@d0paminedriven/type-utils";
+
+import type { PageFormField, UnplacedFormField } from "../index";
 import type { extractFormFieldsPerPage } from "../index";
+
+// The generated declarations carry no helper aliases; these are what a consumer derives from them.
+type FormFieldType = PageFormField["type"];
+type FormFieldByType = UTR<PageFormField, "type", true>;
+type FormFieldPayload<T extends keyof FormFieldByType = keyof FormFieldByType> = {
+  [P in T]: FormFieldByType[P];
+}[T];
 
 // shape
 true satisfies IsExact<

@@ -191,3 +191,19 @@ vendor name or private filename appears in this file (that rule is absolute for 
 - Memory (Claude's): `~/.claude/projects/-home-dopaminedriven-rust-napi-rs/memory/` —
   `pdfdown-forms-invoice-design.md`, `ci-and-test-policy.md`, `stay-on-dev.md` (now "main"),
   `invoice-architecture-decisions.md`, `sample-not-universe.md`, and the index `MEMORY.md`.
+
+## Update, later on 2026-11-10 (supersedes the build-script lines above)
+
+- The typings header machinery is gone: `dtsHeaderFile`, `scripts/post-build.ts`, the `modify:*` steps. The
+  generated `index.d.ts` referenced exactly one name nothing generated, `FormFieldType`, because
+  `src/types/forms.rs` said `ts_type = "FormFieldType"`; it now says `ts_type = "PageFormField[\"type\"]"` and every
+  generated typings file (`index.d.ts`, `ocr/index.d.ts`, `pdfdown.wasi.d.cts`) is self-contained.
+  `@d0paminedriven/type-utils` is a devDependency again. Consumers who want the discriminated map write
+  `UTR<PageFormField, "type", true>` themselves.
+- Scripts: `build` = `build:base && format:base`; `build:ocr` = `build:superset && format:superset`;
+  `build:wasm` = `build:wasm32 && format:base` (`build:wasm32` = `build:base`'s flags + `--target wasm32-wasip1-threads`).
+- The root `pdfdown.wasi.d.cts` is committed but never published (root `files` is three entries); the WASI typings
+  that ship are the CI runner's copy inside `@d0paminedriven/pdfdown-wasm32-wasi`.
+- Test migration finished (commits e2fc299, 64818a0, 8a124f9); `ocr.rs`'s six named modules live in
+  `src/core/ocr/<name>.rs`. A demo script lives at `ocr/__test__/fixtures/private/demo.ts` (ignored directory).
+- Standing rule added to memory: flag counterintuitive conventions proactively ("by the way, …").

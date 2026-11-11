@@ -1,93 +1,78 @@
 import { Fs } from "@d0paminedriven/fs";
+
+export type TargetUnion = "base" | "superset" | "wasm32-wasi";
+
 export class PostBuildService extends Fs {
   constructor() {
     super(process.cwd());
   }
 
-  private toPrepend(content: string) {
-    return `import type {
-  AtLeastOne,
-  Repeater,
-  Rm,
-  Include,
-  Without,
-  XOR,
-  CTR,
-  RTC,
-  IsExact,
-  Equal,
-  UTR,
-  OnlyOptional,
-  OnlyRequired,
-  IsOptional,
-  Unenumerate
-} from "@d0paminedriven/type-utils";
-export type {
-  AtLeastOne,
-  Repeater,
-  Rm,
-  Include,
-  Without,
-  XOR,
-  CTR,
-  RTC,
-  IsExact,
-  Equal,
-  UTR,
-  OnlyOptional,
-  OnlyRequired,
-  IsOptional,
-  Unenumerate
-};
-// ── Derived aliases over the generated declarations below (TypeScript hoists type aliases) ──
-
-export type FormFieldType = PageFormField["type"];
-export type FormFieldByType = UTR<PageFormField, "type", true>;
-
-/**
- * Payload of one or more variants, selected by discriminant. Pass a single key
- * for that variant's fields, or a union of keys for the union of their payloads.
- *
- * @example
- * type Sig = FormFieldPayload<"Signature">;              // { signed: boolean; page: number; ... }
- * type Buttons = FormFieldPayload<"Checkbox" | "Radio">; // either payload
- */
-export type FormFieldPayload<T extends keyof FormFieldByType = keyof FormFieldByType> = {
-  [P in T]: FormFieldByType[P];
-}[T];
-
-${content}
-`;
+  private get wasiPath() {
+    return "pdfdown.wasi.d.cts" as const;
   }
 
-  private reader(target: "base" | "superset") {
-    const path = target === "base" ? "index.d.ts" : target === "superset" ? "ocr/index.d.ts" : undefined;
-    if (path && this.exists(path)) {
-      return this.toPrepend(this.fileToBuffer(path).toString("utf-8"));
-    } else console.warn("index.d.ts does not exist for types to be prepended");
+  private get basePath() {
+    return "index.d.ts" as const;
   }
-  public exe(target: "base" | "superset") {
+
+  private get supersetPath() {
+    return "ocr/index.d.ts" as const;
+  }
+
+  private tPath(target: TargetUnion) {
+    const path =
+      target === "base"
+        ? this.basePath
+        : target === "superset"
+          ? this.supersetPath
+          : target === "wasm32-wasi"
+            ? this.wasiPath
+            : undefined;
+    if (!path) {
+      throw new Error(`incorrect target ${target} provided to post-build.ts`);
+    } else {
+      return path;
+    }
+  }
+
+  public exe(target: TargetUnion) {
     let t: string;
-    const template = this.reader(target);
-
-    if (!template) return;
-    const parsed = this.parseComments(template);
+    const path = this.tPath(target);
+    let s: string | undefined;
+    if (this.exists(path)) {
+      s = this.fileToBuffer(path).toString("utf-8");
+    } else {
+      s = undefined;
+    }
+    if (!s) return;
+    const parsed = this.parseComments(s);
     const filter = parsed
       ? typeof parsed === "string"
         ? undefined
         : parsed?.filter((t) => t.includes("eslint-disable"))
       : undefined;
     if (filter && filter.length > 0) {
-      t = template.replaceAll("/* eslint-disable */", "");
+      t = s.replaceAll("/* eslint-disable */", "");
     } else {
-      t = template;
+      t = s;
     }
-    const path = target === "base" ? "index.d.ts" : target === "superset" ? "ocr/index.d.ts" : undefined;
-    if (!path) return;
     try {
       this.withWs(path, t);
     } catch (err) {
       console.warn(err);
+    } finally {
+      const content = this.fileToBuffer("index.d.ts").toString("utf-8");
+      if (path === "pdfdown.wasi.d.cts" && content.includes("eslint-disable")) {
+        const parsed = this.parseComments(content);
+        const replaceEslintDisable = parsed
+          ? typeof parsed === "string"
+            ? undefined
+            : parsed?.filter((t) => t.includes("eslint-disable"))
+          : undefined;
+        if (replaceEslintDisable && replaceEslintDisable?.length > 0) {
+          this.withWs("index.d.ts", content.replaceAll("/* eslint-disable */", ""));
+        }
+      }
     }
   }
   /**
@@ -105,7 +90,10 @@ ${content}
   }
 }
 
-if (process.argv[3] === "modify" && (process.argv[5] === "base" || process.argv[5] === "superset")) {
+if (
+  process.argv[3] === "modify" &&
+  (process.argv[5] === "base" || process.argv[5] === "superset" || process.argv[5] === "wasm32-wasi")
+) {
   const service = new PostBuildService();
   service.exe(process.argv[5]);
 }

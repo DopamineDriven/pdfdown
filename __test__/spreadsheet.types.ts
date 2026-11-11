@@ -1,13 +1,13 @@
 // Type-level assertions over the generated spreadsheet declarations. Not an ava spec:
 // checked by `yarn typecheck`. Flip a literal to see it fail.
 
+import type { IsExact, OnlyOptional } from "@d0paminedriven/type-utils";
+
 import type {
   CellBox,
   DocumentFormat,
   FormatDetection,
-  IsExact,
   NumberSubtype,
-  OnlyOptional,
   PdfDown,
   SheetCell,
   SheetCells,
