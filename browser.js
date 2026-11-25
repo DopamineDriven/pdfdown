@@ -1,1 +1,1 @@
-export * from "@d0paminedriven/pdfdown-wasm32-wasi";
+export * from '@d0paminedriven/pdfdown-wasm32-wasi'

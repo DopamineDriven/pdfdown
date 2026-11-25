@@ -24,11 +24,14 @@
   },
   "napi": {
     "binaryName": "pdfdown_ocr",
+    "packageName": "@d0paminedriven/pdfdown-ocr",
     "targets": [
       "aarch64-apple-darwin",
       "x86_64-unknown-linux-gnu",
       "aarch64-unknown-linux-gnu"
-    ]
+    ],
+    "constEnum": false,
+    "dtsHeaderFile": "./ocr/dts-header-ocr.d.ts"
   },
   "engines": {
     "node": ">= 26"

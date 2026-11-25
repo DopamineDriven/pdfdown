@@ -11,7 +11,8 @@
     "noUnusedParameters": true,
     "types": ["*"],
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "lib": ["ESNext"]
   },
   "include": ["."],
   "exclude": ["node_modules", "bench", "__test__"]
